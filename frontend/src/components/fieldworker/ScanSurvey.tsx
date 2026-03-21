@@ -1,0 +1,451 @@
+import React, { useState, useEffect } from "react";
+import { 
+  Camera, 
+  Upload, 
+  X, 
+  Sparkles, 
+  CheckCircle2, 
+  AlertCircle, 
+  MapPin, 
+  ChevronRight,
+  Database,
+  ArrowRight,
+  FileText,
+  Calendar,
+  Layers,
+  Search
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Textarea } from "@/components/ui/textarea";
+
+const ConfidenceDot = ({ level }: { level: "high" | "low" }) => (
+  <div className={cn(
+    "w-2 h-2 rounded-full",
+    level === "high" ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+  )} />
+);
+
+export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void }) => {
+  const [step, setStep] = useState<"idle" | "processing" | "success" | "submitted">( "idle");
+  const [image, setImage] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [processingSteps, setProcessingSteps] = useState([
+    { label: "Image quality check", status: "pending" },
+    { label: "Text detected", status: "pending" },
+    { label: "Structuring fields...", status: "pending" },
+    { label: "Identifying need type...", status: "pending" },
+  ]);
+
+  const [formData, setFormData] = useState({
+    needType: "Food Insecurity",
+    severity: "High",
+    families: "34",
+    zone: "Hebbal North",
+    address: "482 Skyline Blvd, Building C-4, Level 2 Industrial District, West Side",
+    pincode: "560024",
+    notes: "",
+    surveyDate: new Date().toISOString().split('T')[0]
+  });
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImage(reader.result as string);
+        startProcessing();
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const startProcessing = () => {
+    setStep("processing");
+    setProgress(0);
+    const interval = setInterval(() => {
+      setProgress(prev => {
+        if (prev >= 100) {
+          clearInterval(interval);
+          setStep("success");
+          return 100;
+        }
+        return prev + 2;
+      });
+    }, 50);
+  };
+
+  useEffect(() => {
+    if (step === "processing") {
+      if (progress > 25) setProcessingSteps(s => s.map((p, i) => i === 0 ? { ...p, status: "done" } : p));
+      if (progress > 50) setProcessingSteps(s => s.map((p, i) => i === 1 ? { ...p, status: "done" } : p));
+      if (progress > 75) setProcessingSteps(s => s.map((p, i) => i === 2 ? { ...p, status: "active" } : p));
+      if (progress > 90) setProcessingSteps(s => s.map((p, i) => i === 3 ? { ...p, status: "active" } : p));
+    }
+  }, [progress, step]);
+
+  const handleSubmit = () => {
+    setStep("submitted");
+  };
+
+  if (step === "submitted") {
+    return (
+      <div className="flex-1 flex items-center justify-center p-10 bg-white rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[600px] relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-emerald-400 to-[#5A57FF]" />
+        <div className="max-w-md w-full text-center space-y-8 animate-in fade-in zoom-in duration-500">
+           <div className="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <CheckCircle2 className="w-12 h-12 text-emerald-500 animate-bounce" />
+           </div>
+           <div className="space-y-2">
+              <h2 className="text-3xl font-bold text-[#1A1A3D]">Report submitted!</h2>
+              <p className="text-slate-500 font-medium">Your field data has been successfully digitized.</p>
+           </div>
+           
+           <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-left">
+              <Database className="w-5 h-5 text-emerald-600" />
+              <div>
+                 <p className="text-sm font-bold text-emerald-900">Syncing to Nexus...</p>
+                 <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Transaction ID: #NX-90122</p>
+              </div>
+           </div>
+
+           <div className="space-y-3 pt-6">
+              <Button 
+                onClick={() => { setStep("idle"); setImage(null); }}
+                className="w-full h-14 bg-[#5A57FF] hover:bg-[#4845E0] rounded-2xl font-bold flex gap-2 group"
+              >
+                Submit another <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                onClick={onGoToDashboard}
+                className="w-full h-14 text-slate-500 font-bold hover:bg-slate-50 rounded-2xl"
+              >
+                Go to dashboard →
+              </Button>
+           </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col lg:flex-row gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      
+      {/* LEFT COLUMN - CAPTURE AREA */}
+      <div className="lg:w-[55%] space-y-8">
+        <div 
+          className={cn(
+            "relative w-full h-[480px] rounded-[2.5rem] border-4 border-dashed transition-all flex flex-col items-center justify-center overflow-hidden bg-white group",
+            image ? "border-transparent" : "border-slate-200 hover:border-[#5A57FF]/40 hover:bg-indigo-50/30"
+          )}
+        >
+          {image ? (
+            <>
+              <img src={image} className="w-full h-full object-cover" alt="Survey preview" />
+              
+              {/* Corner Guides Overlay */}
+              <div className="absolute inset-8 pointer-events-none">
+                <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-white/60 rounded-tl-xl" />
+                <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-white/60 rounded-tr-xl" />
+                <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-white/60 rounded-bl-xl" />
+                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-white/60 rounded-br-xl" />
+              </div>
+
+              {step === "processing" && (
+                <div className="absolute inset-0 bg-indigo-900/40 backdrop-blur-[2px] flex flex-col items-center justify-center text-white p-10">
+                   <div className="relative mb-8">
+                      <Sparkles className="w-16 h-16 text-indigo-400 animate-pulse" />
+                      <div className="absolute inset-0 animate-ping opacity-20">
+                         <Sparkles className="w-16 h-16 text-white" />
+                      </div>
+                   </div>
+                   
+                   <div className="w-full max-w-xs space-y-4">
+                      <div className="flex justify-between text-sm font-bold">
+                         <span>Extracting data...</span>
+                         <span>{progress}%</span>
+                      </div>
+                      <Progress value={progress} className="h-2 bg-white/20" indicatorClassName="bg-white shadow-[0_0_15px_rgba(255,255,255,0.5)]" />
+                   </div>
+
+                   <div className="grid grid-cols-1 gap-3 mt-10 w-full max-w-sm">
+                      {processingSteps.map((s, i) => (
+                        <div key={i} className={cn(
+                          "flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all duration-300",
+                          s.status === "done" ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-50" : 
+                          s.status === "active" ? "bg-white/10 border-white/20 text-white animate-pulse" : 
+                          "bg-black/10 border-transparent text-white/40"
+                        )}>
+                           {s.status === "done" ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : 
+                            s.status === "active" ? <Sparkles className="w-4 h-4 animate-spin" /> : 
+                            <div className="w-4 h-4 rounded-full border border-white/20" />}
+                           <span className="text-xs font-bold">{s.status === "active" ? "⏳ " : ""}{s.label}</span>
+                        </div>
+                      ))}
+                   </div>
+                </div>
+              )}
+
+              {step === "success" && (
+                <div className="absolute top-6 left-6 right-6">
+                   <div className="bg-emerald-500 text-white px-6 py-3 rounded-2xl flex items-center justify-between shadow-xl animate-in slide-in-from-top-4">
+                      <div className="flex items-center gap-3">
+                         <div className="bg-white/20 p-1.5 rounded-lg">
+                            <CheckCircle2 className="w-5 h-5" />
+                         </div>
+                         <span className="font-bold text-sm">Extraction complete</span>
+                      </div>
+                      <Badge className="bg-white/20 text-white border-none font-bold">98% Accuracy</Badge>
+                   </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-center p-10 cursor-pointer" onClick={() => document.getElementById('survey-upload')?.click()}>
+              <div className="w-24 h-24 bg-[#F3F2FF] rounded-[2rem] flex items-center justify-center text-[#5A57FF] mx-auto mb-6 group-hover:scale-110 transition-transform shadow-sm">
+                <Upload className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-bold text-[#1A1A3D] mb-2">Drop survey image here</h3>
+              <p className="text-slate-500 font-medium">PNG, JPEG or PDF supported up to 10MB</p>
+              <button className="mt-6 text-[#5A57FF] font-bold text-sm underline-offset-4 hover:underline transition-all">or use camera</button>
+            </div>
+          )}
+          <input type="file" id="survey-upload" className="hidden" accept="image/*" onChange={handleFileChange} />
+        </div>
+
+        <div className="flex items-center justify-between px-2">
+           <div className="flex gap-4">
+              <Button 
+                variant="outline" 
+                className="h-12 px-6 rounded-2xl border-slate-200 font-bold text-slate-600 gap-2 hover:bg-slate-50 transition-all"
+                onClick={() => document.getElementById('survey-upload')?.click()}
+              >
+                 <Upload className="w-4 h-4" /> Upload Image
+              </Button>
+              <Button 
+                className="h-12 px-6 rounded-2xl bg-[#5A57FF] hover:bg-[#4845E0] font-bold gap-2 shadow-lg shadow-indigo-100 transition-all"
+                onClick={startProcessing}
+              >
+                 <Camera className="w-4 h-4" /> Use Camera
+              </Button>
+           </div>
+           <button 
+             className="text-slate-400 font-bold text-sm hover:text-red-500 transition-colors"
+             onClick={() => { setImage(null); setStep("idle"); setProgress(0); }}
+           >
+             Clear
+           </button>
+        </div>
+
+        {/* Confidence Banner */}
+        {step === "success" && (
+           <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex items-center gap-4 animate-in fade-in slide-in-from-left-4">
+              <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center text-amber-600 shrink-0">
+                 <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                 <p className="text-sm font-bold text-amber-900">2 fields need your review before submitting</p>
+                 <p className="text-[11px] text-amber-700 font-medium italic">Gemini flagged "Affected Families" & "Pincode" for verification.</p>
+              </div>
+           </div>
+        )}
+      </div>
+
+      {/* RIGHT COLUMN - EXTRACTED DATA */}
+      <div className="lg:w-[45%] bg-white rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col overflow-hidden">
+        <div className="p-8 border-b border-slate-50 flex items-center justify-between shrink-0">
+           <div>
+              <h3 className="text-xl font-bold text-[#1A1A3D]">Extracted Information</h3>
+              <p className="text-xs text-slate-400 font-medium mt-0.5">Automated extraction by Nexus OCR</p>
+           </div>
+           <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100 px-3 py-1 font-bold text-xs flex gap-1.5 items-center">
+              <ConfidenceDot level="high" /> 94% confidence
+           </Badge>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-none">
+           <section className="space-y-5">
+              <div className="flex items-center gap-2">
+                 <div className="w-6 h-6 bg-indigo-50 rounded flex items-center justify-center">
+                    <FileText className="w-3.5 h-3.5 text-[#5A57FF]" />
+                 </div>
+                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Need Information</h4>
+              </div>
+              
+              <div className="grid grid-cols-1 gap-5">
+                 <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                       <Label className="text-xs font-bold text-slate-500">Need Type</Label>
+                       <ConfidenceDot level="high" />
+                    </div>
+                    <Select defaultValue={formData.needType}>
+                       <SelectTrigger className="h-12 rounded-xl bg-slate-50 border-transparent focus:ring-[#5A57FF] group">
+                          <SelectValue />
+                       </SelectTrigger>
+                       <SelectContent>
+                          <SelectItem value="Food Insecurity">Food Insecurity</SelectItem>
+                          <SelectItem value="Sanitation">Sanitation</SelectItem>
+                          <SelectItem value="Medical Aid">Medical Aid</SelectItem>
+                          <SelectItem value="Housing">Housing</SelectItem>
+                       </SelectContent>
+                    </Select>
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-5">
+                    <div className="space-y-3">
+                       <div className="flex items-center justify-between">
+                          <Label className="text-xs font-bold text-slate-500">Severity Level</Label>
+                          <ConfidenceDot level="high" />
+                       </div>
+                       <RadioGroup defaultValue={formData.severity} className="flex flex-col gap-2">
+                          {["Low", "Medium", "High", "Critical"].map((v) => (
+                             <div key={v} className="flex items-center space-x-2">
+                                <RadioGroupItem value={v} id={`severity-${v}`} className="text-[#5A57FF]" />
+                                <Label htmlFor={`severity-${v}`} className="text-xs font-bold text-[#1A1A3D]">{v}</Label>
+                             </div>
+                          ))}
+                       </RadioGroup>
+                    </div>
+                    <div className="space-y-2">
+                       <div className="flex items-center justify-between">
+                          <Label className="text-xs font-bold text-slate-500">Affected Families</Label>
+                          <ConfidenceDot level="low" />
+                       </div>
+                       <Input 
+                         type="number" 
+                         defaultValue={formData.families} 
+                         className="h-12 rounded-xl bg-amber-50/50 border-amber-200 focus:ring-amber-500 text-[#1A1A3D] font-bold"
+                       />
+                    </div>
+                 </div>
+              </div>
+           </section>
+
+           <section className="space-y-5">
+              <div className="flex items-center gap-2">
+                 <div className="w-6 h-6 bg-indigo-50 rounded flex items-center justify-center">
+                    <MapPin className="w-3.5 h-3.5 text-[#5A57FF]" />
+                 </div>
+                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Location Details</h4>
+              </div>
+
+              <div className="grid grid-cols-1 gap-5">
+                 <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                       <Label className="text-xs font-bold text-slate-500">Zone / Sector</Label>
+                       <ConfidenceDot level="high" />
+                    </div>
+                    <Select defaultValue={formData.zone}>
+                       <SelectTrigger className="h-12 rounded-xl bg-slate-50 border-transparent">
+                          <SelectValue />
+                       </SelectTrigger>
+                       <SelectContent>
+                          <SelectItem value="Hebbal North">Hebbal North</SelectItem>
+                          <SelectItem value="Bengaluru East">Bengaluru East</SelectItem>
+                          <SelectItem value="Whitefield">Whitefield</SelectItem>
+                       </SelectContent>
+                    </Select>
+                 </div>
+
+                 <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                       <Label className="text-xs font-bold text-slate-500">Address/Landmark</Label>
+                       <ConfidenceDot level="high" />
+                    </div>
+                    <Input defaultValue={formData.address} className="h-12 rounded-xl bg-slate-50 border-transparent text-[#1A1A3D] font-medium" />
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-5 items-start">
+                    <div className="space-y-2">
+                       <div className="flex items-center justify-between">
+                          <Label className="text-xs font-bold text-slate-500">Pincode</Label>
+                          <ConfidenceDot level="low" />
+                       </div>
+                       <Input defaultValue={formData.pincode} className="h-12 rounded-xl bg-amber-50/50 border-amber-200 text-[#1A1A3D] font-bold" />
+                    </div>
+                    <div className="relative rounded-2xl overflow-hidden h-32 border border-slate-100 group shadow-inner">
+                       <img src="https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?auto=format&fit=crop&q=80&w=400" className="w-full h-full object-cover opacity-80" />
+                       <div className="absolute inset-0 bg-indigo-500/10" />
+                       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                          <MapPin className="w-6 h-6 text-red-500 fill-current" />
+                       </div>
+                       <div className="absolute bottom-2 inset-x-2 bg-white/90 backdrop-blur-sm px-2 py-1.5 rounded-lg text-[9px] font-bold text-slate-500 flex items-center justify-center shadow-sm">
+                          Drag pin to exact location
+                       </div>
+                    </div>
+                 </div>
+              </div>
+           </section>
+
+           <section className="space-y-5">
+              <div className="flex items-center gap-2">
+                 <div className="w-6 h-6 bg-indigo-50 rounded flex items-center justify-center">
+                    <Layers className="w-3.5 h-3.5 text-[#5A57FF]" />
+                 </div>
+                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Context & Source</h4>
+              </div>
+
+              <div className="space-y-5">
+                 <div className="space-y-2">
+                    <Label className="text-xs font-bold text-slate-500">Additional Field Notes</Label>
+                    <Textarea 
+                      placeholder="Any additional context from field worker..." 
+                      className="rounded-xl bg-slate-50 border-transparent min-h-[100px] text-sm resize-none" 
+                    />
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-5">
+                    <div className="space-y-2">
+                       <Label className="text-xs font-bold text-slate-500">Data Source</Label>
+                       <div className="flex items-center gap-2 bg-[#F3F2FF] px-4 h-12 rounded-xl border border-indigo-100">
+                          <Badge className="bg-[#5A57FF] text-white border-none py-1 h-6">Paper Survey</Badge>
+                          <span className="text-[10px] font-bold text-[#5A57FF] uppercase tracking-widest">Auto-detected</span>
+                       </div>
+                    </div>
+                    <div className="space-y-2">
+                       <Label className="text-xs font-bold text-slate-500">Survey Date</Label>
+                       <div className="relative">
+                          <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                          <Input type="date" value={formData.surveyDate} className="h-12 pl-12 rounded-xl bg-slate-50 border-transparent text-sm font-bold" />
+                       </div>
+                    </div>
+                 </div>
+              </div>
+           </section>
+        </div>
+
+        <div className="p-8 bg-slate-50/50 border-t border-slate-100 space-y-4 shrink-0">
+           <Button 
+             onClick={handleSubmit}
+             className="w-full h-14 bg-gradient-to-r from-[#5A57FF] to-purple-600 hover:opacity-90 rounded-2xl font-bold flex gap-2 shadow-xl shadow-indigo-100"
+             disabled={step === "processing"}
+           >
+              Submit Report <ChevronRight className="w-4 h-4" />
+           </Button>
+           <div className="flex items-center justify-between px-2">
+              <button className="text-sm font-bold text-slate-400 hover:text-[#5A57FF] transition-colors">Save as Draft</button>
+              <button 
+                className="text-sm font-bold text-[#5A57FF] flex items-center gap-1.5"
+                onClick={() => { setStep("idle"); setImage(null); }}
+              >
+                <Search className="w-3.5 h-3.5" /> Re-scan
+              </button>
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+};

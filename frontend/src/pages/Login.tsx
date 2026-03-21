@@ -1,0 +1,144 @@
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { Hexagon, Building2, ClipboardList, Heart, Eye, EyeOff } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NeedTerrainMap } from "@/components/coordinator/NeedTerrainMap";
+import { cn } from "@/lib/utils";
+
+const roles = [
+  { id: "coordinator", label: "NGO Coordinator", icon: Building2, desc: "Manage operations" },
+  { id: "fieldworker", label: "Field Worker", icon: ClipboardList, desc: "Collect field data" },
+  { id: "volunteer", label: "Volunteer", icon: Heart, desc: "Execute missions" },
+] as const;
+
+export default function Login() {
+  const [selectedRole, setSelectedRole] = useState<string>("coordinator");
+  const [showPassword, setShowPassword] = useState(false);
+  const navigate = useNavigate();
+
+  const handleLogin = () => {
+    switch (selectedRole) {
+      case "coordinator":
+        navigate("/dashboard");
+        break;
+      case "volunteer":
+        navigate("/volunteer");
+        break;
+      case "fieldworker":
+        navigate("/fieldworker");
+        break;
+      default:
+        navigate("/dashboard");
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen">
+      {/* Left dark panel */}
+      <div className="relative hidden lg:flex lg:w-[45%] flex-col justify-between bg-sidebar p-10 text-sidebar-foreground overflow-hidden">
+        <div>
+          <Link to="/" className="flex items-center gap-2">
+            <img src="/logo.png" alt="NEXUS Logo" className="h-7 w-7 rounded-sm" />
+            <span className="text-xl font-bold">NEXUS</span>
+          </Link>
+          <h1 className="mt-16 text-3xl font-bold leading-tight">Welcome back to<br />the community brain.</h1>
+          <p className="mt-4 text-sm leading-relaxed" style={{ color: "hsl(233 70% 78%)" }}>Log in to your Nexus workspace and start coordinating.</p>
+        </div>
+
+        {/* Decorative floating card */}
+        <div className="relative mt-8 flex-1 flex items-center justify-center">
+          <div className="w-[280px] rounded-card border border-sidebar-border bg-sidebar-muted/20 p-3 shadow-elevated backdrop-blur-sm">
+            <div className="flex items-center gap-2 text-xs font-medium mb-2">
+              <span className="h-2 w-2 rounded-full bg-success animate-pulse" />
+              Need Terrain — Live
+            </div>
+            <NeedTerrainMap className="h-[140px] rounded-lg" showLegend={false} />
+          </div>
+        </div>
+
+        <p className="text-sm" style={{ color: "hsl(233 70% 78%)" }}>
+          Don't have an account?{" "}
+          <Link to="/signup" className="font-semibold text-white hover:underline">Start free →</Link>
+        </p>
+      </div>
+
+      {/* Right form panel */}
+      <div className="flex flex-1 flex-col items-center justify-center bg-surface px-6 py-10">
+        <div className="absolute right-6 top-6 text-sm">
+          <span className="text-muted-foreground">New to Nexus? </span>
+          <Link to="/signup" className="font-semibold text-primary hover:underline">Sign up</Link>
+        </div>
+
+        <div className="w-full max-w-[400px]">
+          {/* Mobile logo */}
+          <div className="mb-8 flex items-center gap-2 lg:hidden">
+            <Hexagon className="h-6 w-6 text-primary" />
+            <span className="text-lg font-bold text-foreground">NEXUS</span>
+          </div>
+
+          <h2 className="text-xl font-bold text-foreground">Sign in to your account</h2>
+
+          {/* Role selector */}
+          <p className="mt-6 text-sm font-medium text-foreground">Select your role</p>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            {roles.map(r => (
+              <button
+                key={r.id}
+                onClick={() => setSelectedRole(r.id)}
+                className={cn(
+                  "flex flex-col items-center gap-1.5 rounded-card border p-3 text-center transition-all",
+                  selectedRole === r.id
+                    ? "border-primary bg-primary-light shadow-card"
+                    : "border-border bg-card hover:border-primary/30"
+                )}
+              >
+                <r.icon className={cn("h-5 w-5", selectedRole === r.id ? "text-primary" : "text-muted-foreground")} />
+                <span className="text-xs font-semibold text-foreground">{r.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Form */}
+          <div className="mt-6 space-y-4">
+            <div>
+              <Label>Email</Label>
+              <Input type="email" placeholder="you@ngo.org" className="mt-1 rounded-button" />
+            </div>
+            <div>
+              <div className="flex items-center justify-between">
+                <Label>Password</Label>
+                <Link to="/forgot-password" className="text-xs font-medium text-primary hover:underline">Forgot password?</Link>
+              </div>
+              <div className="relative mt-1">
+                <Input type={showPassword ? "text" : "password"} placeholder="••••••••" className="rounded-button pr-10" />
+                <button onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" type="button">
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+            <Button variant="gradient" className="w-full" size="lg" onClick={handleLogin}>Sign in →</Button>
+          </div>
+
+          {/* Divider */}
+          <div className="my-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">or continue with</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          {/* Google SSO */}
+          <Button variant="outline" className="w-full gap-2" size="lg">
+            <svg className="h-4 w-4" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+            Continue with Google
+          </Button>
+
+          <p className="mt-6 text-center text-[11px] text-muted-foreground leading-relaxed">
+            By signing in, you agree to our Terms of Service and Privacy Policy.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
