@@ -6,16 +6,69 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { X, Grid3X3, List, AlertTriangle } from "lucide-react";
+import { X, Grid3X3, List, AlertTriangle, Sparkles, TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const volunteers = [
-  { name: "Priya Ramanathan", initials: "PR", org: "Hope Foundation", matchPercent: 97, distance: "2.1 km", skills: ["Food dist.", "Kannada", "Mental health"], burnout: "low" as const, missions: 12, successRate: 89, color: "bg-primary" },
-  { name: "Arjun Menon", initials: "AM", org: "Care India", matchPercent: 91, distance: "3.4 km", skills: ["Health", "Hindi", "First aid"], burnout: "low" as const, missions: 8, successRate: 92, color: "bg-success" },
-  { name: "Deepa Sharma", initials: "DS", org: "Seva Trust", matchPercent: 85, distance: "4.2 km", skills: ["Education", "English"], burnout: "medium" as const, missions: 15, successRate: 87, color: "bg-warning" },
-  { name: "Karthik B.", initials: "KB", org: "Aid Alliance", matchPercent: 78, distance: "5.1 km", skills: ["Shelter", "Telugu"], burnout: "low" as const, missions: 6, successRate: 83, color: "bg-primary-glow" },
-  { name: "Meera J.", initials: "MJ", org: "Hope Foundation", matchPercent: 94, distance: "1.8 km", skills: ["Food dist.", "Counseling"], burnout: "high" as const, missions: 22, successRate: 91, color: "bg-destructive" },
-  { name: "Rahul P.", initials: "RP", org: "Care India", matchPercent: 82, distance: "6.0 km", skills: ["Health", "Kannada"], burnout: "low" as const, missions: 4, successRate: 100, color: "bg-success" },
+  { 
+    name: "Priya Ramanathan", initials: "PR", org: "Hope Foundation", matchPercent: 97, distance: "2.1 km", skills: ["Food dist.", "Kannada", "Mental health"], burnout: "low" as const, missions: 12, successRate: 89, color: "bg-primary",
+    aiBreakdown: {
+      dimensions: { skillMatch: 95, proximity: 98, languageMatch: 100, pastSuccess: 89, emotionalCapacity: 82, zoneFamiliarity: 91, availability: 88, burnoutRisk: 96 },
+      reasoning: "Priya has completed 8 food missions in this exact zone with 89% success rate and speaks Kannada."
+    },
+    decisionLog: [
+      { date: "Mar 14", missionType: "Food Distribution", score: 94, outcome: "Mission successful", status: "success" },
+      { date: "Mar 8", missionType: "Education Outreach", score: 87, outcome: "Completed", status: "success" },
+      { date: "Feb 22", missionType: "Mental Health", score: 71, outcome: "Partial", status: "warning" }
+    ]
+  },
+  { 
+    name: "Arjun Menon", initials: "AM", org: "Care India", matchPercent: 91, distance: "3.4 km", skills: ["Health", "Hindi", "First aid"], burnout: "low" as const, missions: 8, successRate: 92, color: "bg-success",
+    aiBreakdown: {
+      dimensions: { skillMatch: 92, proximity: 85, languageMatch: 100, pastSuccess: 92, emotionalCapacity: 88, zoneFamiliarity: 75, availability: 100, burnoutRisk: 92 },
+      reasoning: "High specialization in health and first aid combined with perfect language match for this mission."
+    },
+    decisionLog: [
+      { date: "Mar 10", missionType: "Health Camp", score: 89, outcome: "Completed", status: "success" },
+      { date: "Feb 25", missionType: "First Aid Training", score: 92, outcome: "Awarded", status: "success" }
+    ]
+  },
+  { 
+    name: "Deepa Sharma", initials: "DS", org: "Seva Trust", matchPercent: 85, distance: "4.2 km", skills: ["Education", "English"], burnout: "medium" as const, missions: 15, successRate: 87, color: "bg-warning",
+    aiBreakdown: {
+      dimensions: { skillMatch: 88, proximity: 72, languageMatch: 95, pastSuccess: 87, emotionalCapacity: 80, zoneFamiliarity: 60, availability: 90, burnoutRisk: 75 },
+      reasoning: "Experienced in education but limited familiarity with this specific zone."
+    },
+    decisionLog: [
+      { date: "Mar 5", missionType: "Classroom Support", score: 85, outcome: "Completed", status: "success" }
+    ]
+  },
+  { 
+    name: "Karthik B.", initials: "KB", org: "Aid Alliance", matchPercent: 78, distance: "5.1 km", skills: ["Shelter", "Telugu"], burnout: "low" as const, missions: 6, successRate: 83, color: "bg-primary-glow",
+    aiBreakdown: {
+      dimensions: { skillMatch: 82, proximity: 65, languageMatch: 100, pastSuccess: 83, emotionalCapacity: 75, zoneFamiliarity: 50, availability: 100, burnoutRisk: 90 },
+      reasoning: "Strong language skills but less experience in high-pressure shelter missions."
+    },
+    decisionLog: []
+  },
+  { 
+    name: "Meera J.", initials: "MJ", org: "Hope Foundation", matchPercent: 94, distance: "1.8 km", skills: ["Food dist.", "Counseling"], burnout: "high" as const, missions: 22, successRate: 91, color: "bg-destructive",
+    aiBreakdown: {
+      dimensions: { skillMatch: 96, proximity: 100, languageMatch: 90, pastSuccess: 91, emotionalCapacity: 95, zoneFamiliarity: 98, availability: 70, burnoutRisk: 40 },
+      reasoning: "Top choice for proximity and skills, however burnout risk is critically high."
+    },
+    decisionLog: [
+      { date: "Mar 12", missionType: "Grief Counseling", score: 96, outcome: "Heroic success", status: "success" }
+    ]
+  },
+  { 
+    name: "Rahul P.", initials: "RP", org: "Care India", matchPercent: 82, distance: "6.0 km", skills: ["Health", "Kannada"], burnout: "low" as const, missions: 4, successRate: 100, color: "bg-success",
+    aiBreakdown: {
+      dimensions: { skillMatch: 80, proximity: 55, languageMatch: 100, pastSuccess: 100, emotionalCapacity: 85, zoneFamiliarity: 40, availability: 100, burnoutRisk: 95 },
+      reasoning: "Promising new volunteer with perfect success rate and Kannada fluency."
+    },
+    decisionLog: []
+  },
 ];
 
 export default function Volunteers() {
@@ -120,9 +173,11 @@ export default function Volunteers() {
                 <button onClick={() => setSelectedVolunteer(null)} className="rounded-lg p-1.5 hover:bg-muted"><X className="h-4 w-4" /></button>
               </div>
 
-              <div className="flex gap-1 border-b mb-4">
-                {["overview", "history", "skills", "dna"].map(t => (
-                  <button key={t} onClick={() => setProfileTab(t)} className={cn("px-3 py-2 text-xs font-medium capitalize border-b-2 transition-colors", profileTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{t === "dna" ? "DNA Profile" : t === "history" ? "Mission History" : t}</button>
+              <div className="flex gap-1 border-b mb-4 overflow-x-auto">
+                {["overview", "history", "skills", "dna", "log"].map(t => (
+                  <button key={t} onClick={() => setProfileTab(t)} className={cn("px-3 py-2 text-xs font-medium capitalize border-b-2 transition-colors whitespace-nowrap", profileTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                    {t === "dna" ? "DNA Profile" : t === "history" ? "Mission History" : t === "log" ? "AI Decision Log" : t}
+                  </button>
                 ))}
               </div>
 
@@ -170,6 +225,71 @@ export default function Volunteers() {
               {profileTab === "skills" && (
                 <div className="flex flex-wrap gap-2">
                   {selected.skills.map(s => <span key={s} className="rounded-pill bg-primary-light px-3 py-1.5 text-xs font-medium text-primary">{s}</span>)}
+                </div>
+              )}
+              {profileTab === "log" && (
+                <div className="space-y-6">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[13px] font-medium text-muted-foreground">Score trend</p>
+                      <div className="flex items-center gap-1 text-success text-xs font-bold">
+                        <TrendingUp className="w-3 h-3" />
+                        +12% improvm.
+                      </div>
+                    </div>
+                    <div className="h-20 w-full relative">
+                      <svg viewBox="0 0 100 40" className="h-full w-full overflow-visible">
+                        <path 
+                          d="M 0 35 Q 25 32, 50 15 T 100 5" 
+                          fill="none" 
+                          stroke="hsl(var(--success))" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                        />
+                        <path 
+                          d="M 0 35 Q 25 32, 50 15 T 100 5 V 40 H 0 Z" 
+                          fill="url(#gradient-log)" 
+                          opacity="0.1" 
+                        />
+                        <defs>
+                          <linearGradient id="gradient-log" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="hsl(var(--success))" />
+                            <stop offset="100%" stopColor="transparent" />
+                          </linearGradient>
+                        </defs>
+                        <circle cx="100" cy="5" r="3" fill="hsl(var(--success))" />
+                      </svg>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <p className="text-[13px] font-medium text-muted-foreground">How Gemini has scored this volunteer over time</p>
+                    <div className="space-y-3">
+                      {(selected as any).decisionLog?.map((log: any, i: number) => (
+                        <div key={i} className="flex items-center gap-4 rounded-xl border border-slate-100 p-4 transition-all hover:border-primary/20">
+                          <div className="flex flex-col items-center gap-1 shrink-0">
+                            <span className="text-[10px] font-black bg-slate-100 px-2 py-0.5 rounded-full text-slate-500 uppercase">{log.date}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-sm font-bold text-foreground truncate">{log.missionType}</h4>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-xs font-bold text-primary">{log.score}% match</span>
+                              <span className="text-[10px] text-muted-foreground opacity-50">•</span>
+                              <span className={cn(
+                                "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                                log.status === "success" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
+                              )}>{log.outcome}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {(selected as any).decisionLog?.length === 0 && (
+                        <div className="text-center py-6 border-2 border-dashed rounded-xl">
+                          <p className="text-sm text-muted-foreground">No past scoring events recorded yet.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 

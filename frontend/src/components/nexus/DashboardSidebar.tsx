@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Hexagon, LayoutDashboard, BarChart3, Map, AlertTriangle, Users, Target, Sparkles, TrendingUp, Handshake, FileText, BookOpen, Shield, Building2, Plug, UserCog, LogOut, ChevronDown } from "lucide-react";
+import { Hexagon, LayoutDashboard, BarChart3, Map, AlertTriangle, Users, Target, Sparkles, TrendingUp, Handshake, FileText, BookOpen, Shield, Building2, Plug, UserCog, LogOut, ChevronDown, Package } from "lucide-react";
 
 interface NavItem {
   label: string;
@@ -22,6 +22,7 @@ const coordinatorNav: NavSection[] = [
     { label: "Alerts Feed", icon: AlertTriangle, path: "/dashboard/alerts" },
     { label: "Volunteers", icon: Users, path: "/dashboard/volunteers" },
     { label: "Missions", icon: Target, path: "/dashboard/missions" },
+    { label: "Resources", icon: Package, path: "/dashboard/resources" },
   ]},
   { title: "INTELLIGENCE", items: [
     { label: "Gemini Insights", icon: Sparkles, path: "/dashboard/insights" },

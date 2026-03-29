@@ -4,7 +4,7 @@ import {
   LayoutDashboard, BarChart3, Map, AlertTriangle, Users, Target, Sparkles, TrendingUp, 
   Handshake, FileText, BookOpen, Shield, Building2, Plug, UserCog, LogOut, 
   Hexagon, Camera, Mic, ListTodo, Zap, Clock, User, Heart, Star, Activity, 
-  CloudUpload, Settings, HelpCircle, Phone, Footprints, MessageCircle
+  CloudUpload, Settings, HelpCircle, Phone, Footprints, MessageCircle, Package
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSidebarStore } from "@/hooks/use-sidebar-store";
@@ -40,6 +40,7 @@ const coordinatorNav: NavSection[] = [
     { id: "insights", label: "Gemini Insights", icon: Sparkles, path: "/dashboard/insights", badge: "•", badgeVariant: "indigo" },
     { id: "forecast", label: "Forecast", icon: TrendingUp, path: "/dashboard/forecast" },
     { id: "collab", label: "Collaboration Bridge", icon: Handshake, path: "/dashboard/echo" },
+    { id: "resources", label: "Resource Inventory", icon: Package, path: "/dashboard/resources" },
   ]},
   { items: [
     { id: "trust", label: "Trust Fabric", icon: Shield, path: "/dashboard/trust" },

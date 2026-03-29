@@ -3,6 +3,7 @@ import { Activity } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const navLinks = [
+  { label: "Community Voice", href: "/community-voice", internal: true },
   { label: "How it works", href: "#how-it-works" },
   { label: "Features", href: "#features" },
   { label: "For NGOs", href: "#impact" },
@@ -21,13 +22,23 @@ export function Navbar() {
 
         <div className="hidden md:flex items-center gap-8">
           {navLinks.map((link) => (
-            <a
-              key={link.label}
-              href={link.href}
-              className="text-sm font-medium text-text-secondary hover:text-primary transition-colors"
-            >
-              {link.label}
-            </a>
+            link.internal ? (
+              <Link
+                key={link.label}
+                to={link.href}
+                className="text-sm font-medium text-text-secondary hover:text-primary transition-colors"
+              >
+                {link.label}
+              </Link>
+            ) : (
+              <a
+                key={link.label}
+                href={link.href}
+                className="text-sm font-medium text-text-secondary hover:text-primary transition-colors"
+              >
+                {link.label}
+              </a>
+            )
           ))}
         </div>
 

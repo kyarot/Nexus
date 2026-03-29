@@ -60,6 +60,8 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
     surveyDate: new Date().toISOString().split('T')[0]
   });
 
+  const [isMerged, setIsMerged] = useState(true); // Mocking for demo
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -108,33 +110,62 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
            <div className="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-6">
               <CheckCircle2 className="w-12 h-12 text-emerald-500 animate-bounce" />
            </div>
+           
            <div className="space-y-2">
-              <h2 className="text-3xl font-bold text-[#1A1A3D]">Report submitted!</h2>
-              <p className="text-slate-500 font-medium">Your field data has been successfully digitized.</p>
+              <h2 className="text-3xl font-bold text-[#1A1A3D]">
+                {isMerged ? "Report added to active mission!" : "Report submitted!"}
+              </h2>
+              <p className="text-slate-500 font-medium">
+                {isMerged ? "Your field data was automatically linked to an ongoing mission." : "Your field data has been successfully digitized."}
+              </p>
            </div>
            
-           <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-left">
-              <Database className="w-5 h-5 text-emerald-600" />
-              <div>
-                 <p className="text-sm font-bold text-emerald-900">Syncing to Nexus...</p>
-                 <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Transaction ID: #NX-90122</p>
-              </div>
-           </div>
+           {isMerged ? (
+             <div className="bg-[#EEF2FF] border border-indigo-100 rounded-2xl p-6 text-left space-y-4">
+                <div className="flex gap-3">
+                  <Database className="w-5 h-5 text-[#3730A3] shrink-0 mt-0.5" />
+                  <p className="text-sm font-medium text-[#3730A3] leading-relaxed">
+                    Your report was automatically merged into <span className="font-bold">Mission M-047 — Hebbal Food Distribution</span> (currently active)
+                  </p>
+                </div>
+                <p className="text-[11px] text-[#3730A3]/70 font-bold uppercase tracking-wider pl-8">
+                  Coordinator Sarah has been notified of the update
+                </p>
+             </div>
+           ) : (
+             <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-left">
+                <Database className="w-5 h-5 text-emerald-600" />
+                <div>
+                   <p className="text-sm font-bold text-emerald-900">Syncing to Nexus...</p>
+                   <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Transaction ID: #NX-90122</p>
+                </div>
+             </div>
+           )}
 
            <div className="space-y-3 pt-6">
+              {isMerged && (
+                <Button 
+                  variant="ghost"
+                  className="w-full h-14 text-[#5A57FF] font-bold border border-indigo-100 hover:bg-indigo-50 rounded-2xl"
+                >
+                  View mission M-047 →
+                </Button>
+              )}
               <Button 
                 onClick={() => { setStep("idle"); setImage(null); }}
-                className="w-full h-14 bg-[#5A57FF] hover:bg-[#4845E0] rounded-2xl font-bold flex gap-2 group"
+                className="w-full h-14 bg-[#5A57FF] hover:bg-[#4845E0] rounded-2xl font-bold flex gap-2 group justify-center"
               >
-                Submit another <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                Submit another report <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Button>
-              <Button 
-                variant="ghost" 
-                onClick={onGoToDashboard}
-                className="w-full h-14 text-slate-500 font-bold hover:bg-slate-50 rounded-2xl"
-              >
-                Go to dashboard →
-              </Button>
+              {!isMerged && (
+                <Button 
+                  variant="ghost" 
+                  onClick={onGoToDashboard}
+                  className="w-full h-14 text-slate-500 font-bold hover:bg-slate-50 rounded-2xl"
+                >
+                  Go to dashboard →
+                </Button>
+              )}
            </div>
         </div>
       </div>

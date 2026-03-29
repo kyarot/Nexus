@@ -6,12 +6,12 @@ import {
   CheckCircle2, 
   ChevronRight,
   Info,
-  ArrowRight,
-  FileText,
   MessageSquare,
   Globe,
   Loader2,
-  Volume2
+  Volume2,
+  Database,
+  ArrowRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,7 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
   const [step, setStep] = useState<"idle" | "recording" | "processing" | "result" | "submitted">("idle");
   const [language, setLanguage] = useState("Kannada");
   const [timer, setTimer] = useState(0);
+  const [isMerged, setIsMerged] = useState(true); // Mocking for demo
   const languages = ["Kannada", "Hindi", "Telugu", "Tamil", "Bengali", "Marathi", "English"];
 
   useEffect(() => {
@@ -85,21 +86,56 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
 
   if (step === "submitted") {
     return (
-      <div className="flex-1 flex items-center justify-center p-10 bg-white rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[600px] animate-in fade-in zoom-in duration-500">
+      <div className="flex-1 flex items-center justify-center p-10 bg-white rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[600px] animate-in fade-in zoom-in duration-500 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-emerald-400 to-[#5A57FF]" />
         <div className="max-w-md w-full text-center space-y-8">
            <div className="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-6">
-              <CheckCircle2 className="w-12 h-12 text-emerald-500" />
+              <CheckCircle2 className="w-12 h-12 text-emerald-500 animate-bounce" />
            </div>
            <div className="space-y-2">
-              <h2 className="text-3xl font-bold text-[#1A1A3D]">Voice Report Submitted!</h2>
-              <p className="text-slate-500 font-medium">Your report has been transcribed and synced.</p>
+              <h2 className="text-3xl font-bold text-[#1A1A3D]">
+                {isMerged ? "Report added to active mission!" : "Voice Report Submitted!"}
+              </h2>
+              <p className="text-slate-500 font-medium">
+                {isMerged ? "Your report has been transcribed and linked to an ongoing mission." : "Your report has been transcribed and synced."}
+              </p>
            </div>
+
+           {isMerged ? (
+             <div className="bg-[#EEF2FF] border border-indigo-100 rounded-2xl p-6 text-left space-y-4">
+                <div className="flex gap-3">
+                  <Database className="w-5 h-5 text-[#3730A3] shrink-0 mt-0.5" />
+                  <p className="text-sm font-medium text-[#3730A3] leading-relaxed">
+                    Your report was automatically merged into <span className="font-bold">Mission M-045 — First Aid Supply</span> (currently active)
+                  </p>
+                </div>
+                <p className="text-[11px] text-[#3730A3]/70 font-bold uppercase tracking-wider pl-8">
+                  The mission coordinator has received this update
+                </p>
+             </div>
+           ) : (
+             <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-left">
+                <Database className="w-5 h-5 text-emerald-600" />
+                <div>
+                   <p className="text-sm font-bold text-emerald-900">Syncing to Nexus...</p>
+                   <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Voice ID: #V-8821</p>
+                </div>
+             </div>
+           )}
            
            <div className="space-y-3 pt-6">
-              <Button onClick={() => setStep("idle")} className="w-full h-14 bg-[#5A57FF] rounded-2xl font-bold flex gap-2">
-                New Recording <ArrowRight className="w-4 h-4" />
+              {isMerged && (
+                <Button 
+                  variant="ghost"
+                  className="w-full h-14 text-[#5A57FF] font-bold border border-indigo-100 hover:bg-indigo-50 rounded-2xl"
+                >
+                  View mission M-045 →
+                </Button>
+              )}
+              <Button onClick={() => setStep("idle")} className="w-full h-14 bg-[#5A57FF] rounded-2xl font-bold flex gap-2 justify-center group">
+                New Recording <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Button>
-              <Button variant="ghost" onClick={onGoToDashboard} className="w-full h-14 text-slate-500 font-bold">
+              <Button variant="ghost" onClick={onGoToDashboard} className="w-full h-14 text-slate-500 font-bold hover:bg-slate-50 rounded-2xl">
                 Go to Dashboard
               </Button>
            </div>

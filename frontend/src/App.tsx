@@ -27,6 +27,9 @@ import CommunityEcho from "./pages/coordinator/CommunityEcho";
 import OrganisationSettings from "./pages/coordinator/OrganisationSettings";
 import Integrations from "./pages/coordinator/Integrations";
 import TeamSettings from "./pages/coordinator/TeamSettings";
+import ResourceInventory from "@/pages/coordinator/ResourceInventory";
+import { CommunityVoice } from "./pages/public/CommunityVoice";
+import { CommunityVoiceTrack } from "./pages/public/CommunityVoiceTrack";
 import { DashboardLayout } from "./layouts/DashboardLayout";
 
 const queryClient = new QueryClient();
@@ -49,6 +52,7 @@ const App = () => (
             <Route path="alerts" element={<AlertsFeed />} />
             <Route path="volunteers" element={<Volunteers />} />
             <Route path="missions" element={<CoordinatorMissions />} />
+            <Route path="resources" element={<ResourceInventory />} />
             <Route path="insights" element={<GeminiInsights />} />
             <Route path="impact" element={<ImpactReports />} />
             <Route path="trust" element={<TrustFabric />} />
@@ -72,6 +76,10 @@ const App = () => (
           {/* Field worker (mobile-first, no sidebar) */}
           <Route path="/fieldworker" element={<FieldWorker />} />
           <Route path="/fieldworker/*" element={<FieldWorker />} />
+
+          {/* Public Reporting Channel */}
+          <Route path="/community-voice" element={<CommunityVoice />} />
+          <Route path="/community-voice/track" element={<CommunityVoiceTrack />} />
 
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />

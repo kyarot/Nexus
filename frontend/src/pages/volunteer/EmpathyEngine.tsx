@@ -7,6 +7,16 @@ import {
   MapPin, 
   MessageSquare, 
   ShieldCheck, 
+  Shield,
+  Clock,
+  Package,
+  Box,
+  Utensils,
+  Plus,
+  Truck,
+  Wind,
+  PlusCircle,
+  Activity,
   Mic, 
   Navigation,
   ChevronDown
@@ -86,6 +96,169 @@ export default function EmpathyEngine() {
                 ))}
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* SECTION 1 — ZONE SAFETY PROFILE */}
+        <div className="bg-white rounded-[2rem] p-8 shadow-card border border-slate-50 space-y-6">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <Shield className="w-5 h-5 text-[#14532D]" />
+              <h2 className="text-sm font-semibold text-[#1A1A3D]">Zone safety profile</h2>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1 bg-[#F0FDF4] rounded-full">
+              <div className="w-2 h-2 rounded-full bg-[#14532D]" />
+              <span className="text-xs font-medium text-[#14532D]">Safety 84/100 • Safe</span>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex justify-between items-end text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <span>Based on 23 field worker interactions this week</span>
+              <span className="text-[#14532D]">84% Secure</span>
+            </div>
+            <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-full bg-[#22C55E] rounded-full" style={{ width: '84%' }} />
+            </div>
+          </div>
+
+          <div className="space-y-4 pt-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Past Interactions Timeline</p>
+            <div className="space-y-3">
+              {[
+                { date: "Mar 12", note: "Medical delivery completed successfully", status: "success" },
+                { date: "Mar 08", note: "Minor congestion at distribution point A", status: "warning" },
+                { date: "Mar 03", note: "Night-shift patrol reported high noise levels", status: "warning" }
+              ].map((row, i) => (
+                <div key={i} className="flex items-center gap-4">
+                  <span className="text-[10px] font-bold text-slate-400 w-12">{row.date}</span>
+                  <div className="flex-1 bg-[#F8F7FF] rounded-xl p-3 flex justify-between items-center">
+                    <span className="text-xs font-medium text-[#1A1A3D]">{row.note}</span>
+                    <div className={cn(
+                      "w-2 h-2 rounded-full",
+                      row.status === "success" ? "bg-green-500" : "bg-amber-500"
+                    )} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <div className="flex items-center gap-2 px-4 py-2 bg-[#F0FDF4] rounded-xl text-[#14532D]">
+              <Clock className="w-4 h-4" />
+              <span className="text-xs font-bold">Good time to visit — area active and safe right now</span>
+            </div>
+          </div>
+
+          <div className="p-4 bg-amber-50/50 border border-amber-100 rounded-xl space-y-2">
+            <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">Specific notes for this visit</p>
+            <ul className="space-y-1.5">
+              <li className="flex items-center gap-2 text-xs text-amber-900 font-medium">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                Building 3, 2nd floor — dog at entrance
+              </li>
+              <li className="flex items-center gap-2 text-xs text-amber-900 font-medium">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                Water tank area — slippery in rain
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        {/* SECTION 2 — RESOURCES NEAR ZONE */}
+        <div className="bg-white rounded-[2rem] p-8 shadow-card border border-slate-50 space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-indigo-50 rounded-lg">
+              <Box className="w-5 h-5 text-[#4F46E5]" />
+            </div>
+            <h2 className="text-sm font-semibold text-[#1A1A3D]">Resources available near this zone</h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 overflow-x-auto pb-2">
+            {[
+              { 
+                name: "Food packets", 
+                qty: "24 food packets", 
+                loc: "Point 4–G North", 
+                contact: "ext. 402", 
+                icon: Utensils, 
+                color: "amber",
+                status: "Available"
+              },
+              { 
+                name: "First aid kit", 
+                qty: "02 trauma kits", 
+                loc: "Nexus Mobile Unit", 
+                contact: "ext. 119", 
+                icon: Activity, 
+                color: "red",
+                status: "Low stock"
+              },
+              { 
+                name: "Blankets / warm clothing", 
+                qty: "15 thermal blankets", 
+                loc: "Sector 4 Hub", 
+                contact: "ext. 004", 
+                icon: Wind, 
+                color: "blue",
+                status: "Available"
+              },
+              { 
+                name: "NGO vehicle available", 
+                qty: "01 transport van", 
+                loc: "Checkpoint 12", 
+                contact: "Radio CH 4", 
+                icon: Truck, 
+                color: "green",
+                status: "Available"
+              }
+            ].map((res, i) => (
+              <div key={i} className="min-w-[240px] bg-white border border-slate-100 rounded-[1.25rem] p-5 space-y-4 relative shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-start">
+                  <div className={cn(
+                    "w-10 h-10 rounded-full flex items-center justify-center",
+                    res.color === "amber" ? "bg-amber-100" : 
+                    res.color === "red" ? "bg-red-100" : 
+                    res.color === "blue" ? "bg-blue-100" : "bg-green-100"
+                  )}>
+                    <res.icon className={cn(
+                      "w-5 h-5",
+                      res.color === "amber" ? "text-amber-600" : 
+                      res.color === "red" ? "text-red-600" : 
+                      res.color === "blue" ? "text-blue-600" : "text-green-600"
+                    )} />
+                  </div>
+                  <Badge variant="outline" className={cn(
+                    "text-[10px] font-bold border-none px-2 py-0.5 rounded-full",
+                    res.status === "Available" ? "text-green-600 bg-green-50" : "text-amber-600 bg-amber-50"
+                  )}>
+                    {res.status}
+                  </Badge>
+                </div>
+                
+                <div>
+                  <p className="text-xs font-bold text-[#1A1A3D] mb-0.5">{res.name}</p>
+                  <p className="text-sm font-black text-[#4F46E5]">{res.qty}</p>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-slate-400">
+                    <MapPin className="w-3 h-3" />
+                    <span className="text-[10px] font-medium">{res.loc}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-slate-400">
+                    <Info className="w-3 h-3" />
+                    <span className="text-[10px] font-medium">{res.contact}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 text-slate-400 pt-2">
+            <Info className="w-4 h-4" />
+            <p className="text-[11px] font-medium tracking-tight">Coordinator pre-selected resources for this mission</p>
           </div>
         </div>
 
