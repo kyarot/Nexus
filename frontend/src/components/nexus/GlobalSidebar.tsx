@@ -29,6 +29,7 @@ interface NavSection {
 const coordinatorNav: NavSection[] = [
   { items: [
     { id: "dash", label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
+    { id: "intelligence", label: "Intelligence Hub", icon: Hexagon, path: "/dashboard/intelligence" },
   ]},
   { items: [
     { id: "terrain", label: "Need Terrain Map", icon: Map, path: "/dashboard/terrain" },
@@ -37,19 +38,15 @@ const coordinatorNav: NavSection[] = [
     { id: "missions", label: "Missions", icon: Target, path: "/dashboard/missions" },
   ]},
   { items: [
-    { id: "insights", label: "Gemini Insights", icon: Sparkles, path: "/dashboard/insights", badge: "•", badgeVariant: "indigo" },
-    { id: "forecast", label: "Forecast", icon: TrendingUp, path: "/dashboard/forecast" },
+    
+    
     { id: "collab", label: "Collaboration Bridge", icon: Handshake, path: "/dashboard/echo" },
     { id: "resources", label: "Resource Inventory", icon: Package, path: "/dashboard/resources" },
   ]},
-  { items: [
-    { id: "trust", label: "Trust Fabric", icon: Shield, path: "/dashboard/trust" },
-    { id: "constitution", label: "Living Constitution", icon: BookOpen, path: "/dashboard/constitution" },
-    { id: "impact", label: "Impact Reports", icon: BarChart3, path: "/dashboard/impact" },
-  ]},
+
   { items: [
     { id: "org", label: "Organisation", icon: Building2, path: "/dashboard/organisation" },
-    { id: "integrations", label: "Integrations", icon: Plug, path: "/dashboard/integrations" },
+    
     { id: "team", label: "Team", icon: UserCog, path: "/dashboard/team" },
   ]},
 ];

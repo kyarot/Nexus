@@ -28,6 +28,7 @@ import OrganisationSettings from "./pages/coordinator/OrganisationSettings";
 import Integrations from "./pages/coordinator/Integrations";
 import TeamSettings from "./pages/coordinator/TeamSettings";
 import ResourceInventory from "@/pages/coordinator/ResourceInventory";
+import IntelligenceHub from "./pages/coordinator/IntelligenceHub";
 import { CommunityVoice } from "./pages/public/CommunityVoice";
 import { CommunityVoiceTrack } from "./pages/public/CommunityVoiceTrack";
 import { DashboardLayout } from "./layouts/DashboardLayout";
@@ -48,6 +49,7 @@ const App = () => (
           {/* Coordinator dashboard */}
           <Route path="/dashboard" element={<DashboardLayout role="coordinator" />}>
             <Route index element={<Dashboard />} />
+            <Route path="intelligence" element={<IntelligenceHub />} />
             <Route path="terrain" element={<NeedTerrainMapPage />} />
             <Route path="alerts" element={<AlertsFeed />} />
             <Route path="volunteers" element={<Volunteers />} />
