@@ -1,2 +1,24 @@
 node_modules
 .DS_Store
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Secret and credential files
+secrets/
+**/secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.service-account.json
+firebase-service-account.json
+gcp-service-account.json
+
+# Local runtime artifacts
+*.db
+*.sqlite
+*.sqlite3

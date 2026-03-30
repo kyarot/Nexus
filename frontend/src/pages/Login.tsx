@@ -16,21 +16,41 @@ const roles = [
 export default function Login() {
   const [selectedRole, setSelectedRole] = useState<string>("coordinator");
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const navigate = useNavigate();
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
-  const handleLogin = () => {
-    switch (selectedRole) {
-      case "coordinator":
-        navigate("/dashboard");
-        break;
-      case "volunteer":
-        navigate("/volunteer");
-        break;
-      case "fieldworker":
-        navigate("/fieldworker");
-        break;
-      default:
-        navigate("/dashboard");
+  const handleLogin = async () => {
+    setErrorMessage("");
+    setIsSubmitting(true);
+    console.log("[Auth] Signin started", { selectedRole, email });
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/auth/signin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, role: selectedRole }),
+      });
+
+      const payload = await response.json();
+      console.log("[Auth] Signin response", { status: response.status, payload });
+
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Sign in failed");
+      }
+
+      localStorage.setItem("nexus_access_token", payload.accessToken);
+      localStorage.setItem("nexus_user", JSON.stringify(payload.user));
+      navigate(payload.redirectPath || "/dashboard");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unexpected sign-in error";
+      console.error("[Auth] Signin failed", error);
+      setErrorMessage(message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -104,7 +124,13 @@ export default function Login() {
           <div className="mt-6 space-y-4">
             <div>
               <Label>Email</Label>
-              <Input type="email" placeholder="you@ngo.org" className="mt-1 rounded-button" />
+              <Input
+                type="email"
+                placeholder="you@ngo.org"
+                className="mt-1 rounded-button"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </div>
             <div>
               <div className="flex items-center justify-between">
@@ -112,13 +138,22 @@ export default function Login() {
                 <Link to="/forgot-password" className="text-xs font-medium text-primary hover:underline">Forgot password?</Link>
               </div>
               <div className="relative mt-1">
-                <Input type={showPassword ? "text" : "password"} placeholder="••••••••" className="rounded-button pr-10" />
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  className="rounded-button pr-10"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
                 <button onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" type="button">
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
-            <Button variant="gradient" className="w-full" size="lg" onClick={handleLogin}>Sign in →</Button>
+            {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
+            <Button variant="gradient" className="w-full" size="lg" onClick={handleLogin} disabled={isSubmitting}>
+              {isSubmitting ? "Signing in..." : "Sign in →"}
+            </Button>
           </div>
 
           {/* Divider */}

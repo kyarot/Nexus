@@ -1,2 +1,8 @@
 fastapi
-uvicorn
+uvicorn[standard]
+pydantic-settings
+python-dotenv
+firebase-admin
+google-generativeai
+google-cloud-storage
+python-jose[cryptography]
