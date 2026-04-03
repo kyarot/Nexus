@@ -19,6 +19,13 @@ const forecastData = [
 export default function Forecast() {
   const [threshold, setThreshold] = useState([75]);
 
+  // Split data for solid vs dashed line effect
+  const chartData = forecastData.map((d, i) => ({
+    ...d,
+    historical: i <= 3 ? d.score : null,
+    forecast: i >= 3 ? d.score : null,
+  }));
+
   return (
     <div className="flex flex-col h-full bg-[#F8F9FE]">
       <DashboardTopBar breadcrumb="Community Forecast" />
@@ -61,7 +68,7 @@ export default function Forecast() {
                 Pre-position Resources
               </div>
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={forecastData}>
+                <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#5A57FF" stopOpacity={0.1} />
@@ -79,16 +86,40 @@ export default function Forecast() {
                   <YAxis hide domain={[0, 100]} />
                   <Tooltip 
                     cursor={{ stroke: '#5A57FF', strokeWidth: 1, strokeDasharray: '4 4' }}
-                    contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-white p-4 rounded-xl shadow-xl border border-slate-50 min-w-[120px]">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">{data.week} Intensity</p>
+                            <div className="flex items-baseline gap-1">
+                              <p className="text-2xl font-bold text-[#1A1A3D]">{data.score}</p>
+                              <p className="text-[10px] font-bold text-[#5A57FF]">Pts</p>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
                   />
                   <Area 
                     type="monotone" 
-                    dataKey="score" 
+                    dataKey="historical" 
                     stroke="#5A57FF" 
                     strokeWidth={3} 
                     fillOpacity={1} 
                     fill="url(#colorScore)" 
-                    strokeDasharray={(props: any) => props.index > 3 ? "6 6" : "0"}
+                    activeDot={{ r: 6, strokeWidth: 0, fill: '#5A57FF' }}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="forecast" 
+                    stroke="#5A57FF" 
+                    strokeWidth={3} 
+                    strokeDasharray="6 6"
+                    fillOpacity={1} 
+                    fill="url(#colorScore)" 
+                    activeDot={{ r: 6, strokeWidth: 0, fill: '#5A57FF' }}
                   />
                 </AreaChart>
               </ResponsiveContainer>

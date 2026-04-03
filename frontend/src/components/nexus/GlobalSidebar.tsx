@@ -38,15 +38,12 @@ const coordinatorNav: NavSection[] = [
     { id: "missions", label: "Missions", icon: Target, path: "/dashboard/missions" },
   ]},
   { items: [
-    
-    
     { id: "collab", label: "Collaboration Bridge", icon: Handshake, path: "/dashboard/echo" },
     { id: "resources", label: "Resource Inventory", icon: Package, path: "/dashboard/resources" },
   ]},
 
   { items: [
     { id: "org", label: "Organisation", icon: Building2, path: "/dashboard/organisation" },
-    
     { id: "team", label: "Team", icon: UserCog, path: "/dashboard/team" },
   ]},
 ];
@@ -60,11 +57,9 @@ const fieldworkerNav = [
   ]},
   { items: [
     { id: "active", label: "Active Mission", icon: Zap, path: "/fieldworker/active", badge: "!", badgeVariant: "amber" },
-    
   ]},
   { items: [
     { id: "profile", label: "My Profile", icon: User, path: "/fieldworker/profile" },
-    
   ]},
 ];
 
@@ -141,6 +136,30 @@ export function GlobalSidebar({
   const location = useLocation();
   const navigate = useNavigate();
   const [hideTimeout, setHideTimeout] = useState<NodeJS.Timeout | null>(null);
+  
+  // Dynamic User State
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    // Initial Load
+    const storedUser = localStorage.getItem("nexus_user");
+    if (storedUser) setUser(JSON.parse(storedUser));
+
+    // Listen for storage changes across components
+    const handleSync = () => {
+      const updated = localStorage.getItem("nexus_user");
+      if (updated) setUser(JSON.parse(updated));
+    };
+
+    window.addEventListener('storage', handleSync);
+    // Custom trigger for same-window updates
+    window.addEventListener('userUpdate', handleSync);
+    
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('userUpdate', handleSync);
+    };
+  }, []);
 
   const sections = role === "coordinator" ? coordinatorNav : role === "fieldworker" ? fieldworkerNav : volunteerNav;
   
@@ -162,9 +181,13 @@ export function GlobalSidebar({
     setHideTimeout(timeout);
   };
 
+  const getUserInitials = () => {
+    if (!user?.name) return "NX";
+    return user.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
+  };
+
   return (
     <>
-      {/* Edge Trigger Zone */}
       <div 
         className="fixed left-0 top-0 bottom-0 w-[20px] z-[51]"
         onMouseEnter={handleMouseEnter}
@@ -178,7 +201,6 @@ export function GlobalSidebar({
         transition={{ type: "tween", duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
         className="fixed left-0 top-0 bottom-0 w-16 bg-gradient-to-b from-[#1E1B4B] to-[#16133A] border-r border-white/10 z-50 flex flex-col py-5 scrollbar-thin scrollbar-thumb-[#4F46E5]/50 overflow-y-auto"
       >
-        {/* Logo */}
         <div className="flex justify-center mb-3">
           <Tooltip delayDuration={0}>
             <TooltipTrigger asChild>
@@ -201,22 +223,29 @@ export function GlobalSidebar({
 
         <div className="w-8 h-[1px] bg-white/10 mx-auto my-3" />
 
-        {/* User Avatar */}
+        {/* Dynamic User Avatar */}
         <div className="flex justify-center mb-6">
           <Tooltip delayDuration={0}>
             <TooltipTrigger asChild>
-              <div className="relative group cursor-pointer">
+              <div 
+                className="relative group cursor-pointer" 
+                onClick={() => role === "fieldworker" ? (onTabChange ? onTabChange("Profile") : navigate("/fieldworker/profile")) : navigate("/team")}
+              >
                 <div className={cn(
-                  "w-10 h-10 rounded-[10px] flex items-center justify-center text-sm font-bold text-white shadow-lg transition-transform hover:scale-110",
+                  "w-10 h-10 rounded-[10px] overflow-hidden flex items-center justify-center text-sm font-bold text-white shadow-lg transition-transform hover:scale-110",
                   avatarColors[role]
                 )}>
-                  RK
+                  {user?.photoUrl ? (
+                    <img src={user.photoUrl} className="w-full h-full object-cover" alt={user.name} />
+                  ) : (
+                    getUserInitials()
+                  )}
                 </div>
               </div>
             </TooltipTrigger>
             <TooltipContent side="right" sideOffset={14} className="bg-white text-[#1E1B4B] border-none shadow-[0_4px_16px_rgba(0,0,0,0.15)] rounded-2xl px-4 py-2.5 font-medium z-[100]">
               <div className="text-left py-0.5">
-                <div className="font-bold text-[14px]">Ravi Kumar</div>
+                <div className="font-bold text-[14px]">{user?.name || "Nexus User"}</div>
                 <div className="text-[11px] opacity-60 uppercase tracking-wider font-extrabold mt-0.5">
                   {role === "coordinator" ? "NGO Coordinator" : role === "fieldworker" ? "Field Worker" : "Volunteer"}
                 </div>
@@ -225,13 +254,10 @@ export function GlobalSidebar({
           </Tooltip>
         </div>
 
-        {/* Nav Sections */}
         <div className="flex-1 space-y-3 px-3">
           {sections.map((section, sIdx) => (
             <div key={sIdx} className="space-y-1">
               {section.items.map((item) => {
-                // Map path to tab ID for fieldworker to stay in the same URL without routing issues
-                const isFieldworkerPath = item.path.startsWith("/fieldworker/");
                 const tabIdMatch = item.path.split("/").pop();
                 const matchedTab = item.path === "/fieldworker" ? "Dashboard" : 
                                   tabIdMatch === "scan" ? "Scan" : 
@@ -267,70 +293,49 @@ export function GlobalSidebar({
           ))}
         </div>
 
-        {/* Bottom Actions */}
         <div className="mt-auto px-3 border-t border-white/10 pt-4 space-y-2">
           {role === "fieldworker" && (
             <NavIconButton 
-              item={{ 
-                id: "sync", 
-                label: "All synced ✓", 
-                icon: CloudUpload, 
-                path: "#",
-                badgeVariant: "indigo" 
-              }} 
+              item={{ id: "sync", label: "All synced ✓", icon: CloudUpload, path: "#", badgeVariant: "indigo" }} 
               isActive={false} 
             />
           )}
-          <NavIconButton 
-            item={{ id: "help", label: "Help & Documentation", icon: HelpCircle, path: "/help" }} 
-            isActive={false} 
-          />
+          <NavIconButton item={{ id: "help", label: "Help & Documentation", icon: HelpCircle, path: "/help" }} isActive={false} />
           <NavIconButton 
             item={{ id: "logout", label: "Sign out", icon: LogOut, path: "/" }} 
             isActive={false}
-            onClick={() => navigate("/")}
+            onClick={() => {
+              localStorage.removeItem("nexus_access_token");
+              localStorage.removeItem("nexus_user");
+              navigate("/");
+            }}
           />
         </div>
       </motion.aside>
 
-      {/* Mobile Bottom Tab Bar */}
       <nav className="fixed bottom-0 left-0 right-0 h-16 bg-[#1E1B4B] border-t border-white/10 flex lg:hidden items-center justify-around z-50 px-2 shadow-2xl">
         <MobileTabItem 
-          icon={LayoutDashboard} 
-          label="Home" 
-          path={role === "coordinator" ? "/dashboard" : role === "fieldworker" ? "/fieldworker" : "/volunteer"} 
-          active={
-            role === "fieldworker" && activeTab 
-              ? activeTab === "Dashboard" 
-              : (location.pathname.endsWith("dashboard") || location.pathname === "/volunteer" || location.pathname === "/fieldworker")
-          }
+          icon={LayoutDashboard} label="Home" path={role === "coordinator" ? "/dashboard" : "/fieldworker"} 
+          active={role === "fieldworker" && activeTab ? activeTab === "Dashboard" : undefined}
           onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Dashboard") : undefined}
         />
         <MobileTabItem 
-          icon={Target} 
-          label="Missions" 
-          path={role === "coordinator" ? "/dashboard/missions" : role === "fieldworker" ? "/fieldworker/active" : "/volunteer/missions"} 
+          icon={Target} label="Missions" path={role === "coordinator" ? "/dashboard/missions" : "/fieldworker/active"} 
           active={role === "fieldworker" && activeTab ? activeTab === "Active" : undefined}
           onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Active") : undefined}
         />
         <MobileTabItem 
-          icon={Sparkles} 
-          label="Nexus" 
-          path={role === "coordinator" ? "/dashboard/insights" : role === "fieldworker" ? "/fieldworker/scan" : "/volunteer/empathy"} 
+          icon={Sparkles} label="Nexus" path={role === "coordinator" ? "/dashboard/insights" : "/fieldworker/scan"} 
           active={role === "fieldworker" && activeTab ? activeTab === "Scan" : undefined}
           onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Scan") : undefined}
         />
         <MobileTabItem 
-          icon={BarChart3} 
-          label="Impact" 
-          path={role === "coordinator" ? "/dashboard/impact" : "/fieldworker/reports"} 
+          icon={BarChart3} label="Impact" path="/fieldworker/reports" 
           active={role === "fieldworker" && activeTab ? activeTab === "Reports" : undefined}
           onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Reports") : undefined}
         />
         <MobileTabItem 
-          icon={UserCog} 
-          label="Profile" 
-          path={role === "coordinator" ? "/dashboard/team" : role === "fieldworker" ? "/fieldworker/profile" : "/volunteer/profile"} 
+          icon={UserCog} label="Profile" path="/fieldworker/profile" 
           active={role === "fieldworker" && activeTab ? activeTab === "Profile" : undefined}
           onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Profile") : undefined}
         />

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   MapPin, 
   CheckCircle2, 
@@ -47,8 +47,116 @@ const UpdateRow = ({ time, status, text, type }: { time: string, status: string,
 );
 
 export const ActiveMission = () => {
-  const [status, setStatus] = useState<"Arrival" | "Distribution" | "Assessment" | "Done">("Arrival");
-  const [missionDone, setMissionDone] = useState(false);
+  const [activeMission, setActiveMission] = useState<any>(null);
+  const [updates, setUpdates] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<string>("en_route");
+  const [completionNotes, setCompletionNotes] = useState("");
+  const [familiesHelped, setFamiliesHelped] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const token = localStorage.getItem("nexus_access_token");
+
+  const fetchActiveMission = async () => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/fieldworker/mission/active`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const data = await response.json();
+      setActiveMission(data.mission);
+      setUpdates(data.updates || []);
+      if (data.mission) setStatus(data.mission.status);
+    } catch (err) {
+      console.error("Failed to fetch active mission", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchActiveMission();
+    // Poll every 10s for updates
+    const interval = setInterval(fetchActiveMission, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleStatusUpdate = async (newStatus: string) => {
+    if (!activeMission) return;
+    setIsSubmitting(true);
+    
+    // Attempt to get location
+    const getLocation = () => {
+      return new Promise((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          () => resolve({ lat: 12.9716, lng: 77.5946 }) // Default to Bangalore
+        );
+      });
+    };
+
+    const location = await getLocation();
+    
+    try {
+      const response = await fetch(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/status`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: newStatus, location })
+      });
+      
+      if (response.ok) {
+        setStatus(newStatus);
+        fetchActiveMission(); // Refresh timeline
+      }
+    } catch (err) {
+      console.error("Failed to update status", err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCompleteMission = async (outcome: 'success' | 'failure') => {
+    if (!activeMission) return;
+    setIsSubmitting(true);
+    
+    try {
+      const response = await fetch(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/complete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          outcome,
+          familiesHelped,
+          notes: completionNotes
+        })
+      });
+      
+      if (response.ok) {
+        setActiveMission(null);
+      }
+    } catch (err) {
+      console.error("Failed to complete mission", err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-64"><Sparkles className="animate-spin text-[#5A57FF]" /></div>;
+  
+  if (!activeMission) return (
+    <div className="bg-white rounded-[2.5rem] p-16 text-center border border-slate-100 shadow-sm animate-in fade-in zoom-in duration-500">
+       <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
+          <Clock className="w-10 h-10 text-slate-300" />
+       </div>
+       <h3 className="text-2xl font-bold text-[#1A1A3D]">No assignments yet</h3>
+       <p className="text-slate-500 mt-2 max-w-xs mx-auto">Stand by for real-time mission dispatch from your coordinator.</p>
+    </div>
+  );
 
   return (
     <div className="flex flex-col lg:flex-row gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -62,15 +170,15 @@ export const ActiveMission = () => {
               <div className="flex items-center justify-between">
                  <div className="flex items-center gap-2 bg-white/20 px-3 py-1 rounded-full backdrop-blur-md">
                     <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                    <span className="text-[9px] font-black uppercase tracking-widest leading-none">ACTIVE SESSION · NF-8821</span>
+                    <span className="text-[9px] font-black uppercase tracking-widest leading-none">ID: {activeMission.id.slice(0, 8)}</span>
                  </div>
                  <Badge className="bg-emerald-500/20 text-emerald-400 border-none font-black text-[9px] tracking-widest uppercase px-4 py-1">Mission Live</Badge>
               </div>
               
               <div className="space-y-3">
-                 <h1 className="text-4xl font-bold tracking-tight">Emergency Supply Re-routing</h1>
+                 <h1 className="text-4xl font-bold tracking-tight">{activeMission.title || "Emergency Response"}</h1>
                  <p className="text-[#E0E7FF] font-medium max-w-lg leading-relaxed italic opacity-80">
-                    Coordinate the distribution of essential medical supplies to the temporary shelter in District 4.
+                    {activeMission.description || "Mission brief is loading..."}
                  </p>
               </div>
 
@@ -79,8 +187,8 @@ export const ActiveMission = () => {
                     <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=facearea&facepad=2&w=80&h=80&q=80" className="w-full h-full rounded-lg object-cover" />
                  </div>
                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-[#E0E7FF]">Dispatched by</p>
-                    <p className="text-sm font-bold">Sarah Coordinator · 10:23 AM</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#E0E7FF]">Assigned Coordinator</p>
+                    <p className="text-sm font-bold">Nexus HQ · Live</p>
                  </div>
               </div>
            </div>
@@ -97,7 +205,7 @@ export const ActiveMission = () => {
                  </div>
                  <div className="space-y-0.5">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Zone Location</p>
-                    <p className="text-sm font-bold text-[#1A1A3D]">Zone 4 · Hebbal North</p>
+                    <p className="text-sm font-bold text-[#1A1A3D]">{activeMission.zoneId || "Assigned Sector"}</p>
                  </div>
               </div>
               <div className="flex items-center gap-3">
@@ -106,7 +214,7 @@ export const ActiveMission = () => {
                  </div>
                  <div className="space-y-0.5">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Need Type</p>
-                    <p className="text-sm font-bold text-[#1A1A3D]">Medical Supplies</p>
+                    <p className="text-sm font-bold text-[#1A1A3D]">{activeMission.needType}</p>
                  </div>
               </div>
            </div>
@@ -118,7 +226,7 @@ export const ActiveMission = () => {
                  </div>
                  <div className="space-y-0.5">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Priority</p>
-                    <p className="text-sm font-bold text-[#1A1A3D]">Critical Response</p>
+                    <p className="text-sm font-bold text-[#1A1A3D]">{activeMission.priority || "High"}</p>
                  </div>
               </div>
               <div className="flex items-center gap-3">
@@ -142,11 +250,11 @@ export const ActiveMission = () => {
            
            <div className="space-y-6 relative z-10">
               <p className="text-lg text-slate-600 leading-relaxed font-medium italic">
-                 "The community in District 4 has been without medical access for 12 hours. The shelter manager, Maria, is expecting these supplies to stabilize three elderly residents. Prioritize the Insulin cold-packs."
+                 "Our synthesis engine suggests prioritizing families with elderly members in this zone. The community trust score is high here, so clear and friendly communication is recommended."
               </p>
               
               <div className="flex flex-wrap gap-4">
-                 <Badge className="bg-white text-indigo-600 border-none px-4 py-1.5 rounded-xl font-bold text-xs ring-1 ring-indigo-100">Language: Kannada</Badge>
+                 <Badge className="bg-white text-indigo-600 border-none px-4 py-1.5 rounded-xl font-bold text-xs ring-1 ring-indigo-100">Language: Region Specific</Badge>
                  <Badge className="bg-white text-indigo-600 border-none px-4 py-1.5 rounded-xl font-bold text-xs ring-1 ring-indigo-100 italic">Tone: Reassuring</Badge>
               </div>
 
@@ -169,21 +277,24 @@ export const ActiveMission = () => {
            
            <div className="flex-1 space-y-6">
               <div className="space-y-1">
-                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Destination Address</p>
-                 <p className="text-lg font-bold text-[#1A1A3D]">Grand Central Junction, Sector 7G, Hebbal</p>
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Destination Sector</p>
+                 <p className="text-lg font-bold text-[#1A1A3D]">{activeMission.location?.address || "Hebbal North, Bangalore"}</p>
               </div>
               <div className="flex items-center gap-8">
                  <div className="space-y-0.5">
-                    <p className="text-[10px] font-black text-[#10B981] uppercase tracking-widest">Distance</p>
-                    <p className="text-xl font-black text-[#1A1A3D]">2.1 KM</p>
+                    <p className="text-[10px] font-black text-[#10B981] uppercase tracking-widest">Active Status</p>
+                    <p className="text-xl font-black text-[#1A1A3D] capitalize">{status.replace('_', ' ')}</p>
                  </div>
                  <div className="w-px h-10 bg-slate-100" />
                  <div className="space-y-0.5">
-                    <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">ETA</p>
-                    <p className="text-xl font-black text-[#1A1A3D]">8 MINS</p>
+                    <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Need ID</p>
+                    <p className="text-xl font-black text-[#1A1A3D]">#429</p>
                  </div>
               </div>
-              <Button className="w-full h-14 bg-[#5A57FF] hover:bg-[#4845E0] rounded-2xl font-bold flex gap-2 shadow-lg shadow-indigo-100">
+              <Button 
+                onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${activeMission.location?.lat},${activeMission.location?.lng}`, '_blank')}
+                className="w-full h-14 bg-[#5A57FF] hover:bg-[#4845E0] rounded-2xl font-bold flex gap-2 shadow-lg shadow-indigo-100"
+              >
                  <Navigation className="w-4 h-4" /> Open in Google Maps
               </Button>
            </div>
@@ -207,18 +318,23 @@ export const ActiveMission = () => {
            <div className="space-y-4">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Quick Status</p>
               <div className="flex flex-wrap gap-4">
-                 {["Arrived", "In Progress", "Issue Found", "Done"].map((s) => (
+                 {[
+                   { label: "En Route", value: "en_route" },
+                   { label: "On Ground", value: "on_ground" },
+                   { label: "Completed", value: "completed" }
+                 ].map((s) => (
                     <button 
-                      key={s}
-                      onClick={() => setStatus(s as any)}
+                      key={s.value}
+                      onClick={() => handleStatusUpdate(s.value)}
+                      disabled={isSubmitting}
                       className={cn(
                         "px-6 py-3 rounded-2xl text-xs font-bold transition-all border shadow-sm",
-                        status === s 
+                        status === s.value 
                           ? "bg-[#5A57FF] text-white border-[#5A57FF]" 
                           : "bg-white text-slate-500 border-slate-100 hover:border-indigo-100"
                       )}
                     >
-                       {s}
+                       {s.label}
                     </button>
                  ))}
               </div>
@@ -243,44 +359,57 @@ export const ActiveMission = () => {
            </div>
            
            <div className="space-y-2">
-              <UpdateRow time="14:32:05" status="Dispatched" text="Inventory Dispatched: Medical kits K-19 through K-24 scanned and loaded." type="system" />
-              <UpdateRow time="14:40:12" status="Geofence" text="Geofence Entered: Worker entered high-priority Sector 7G." type="system" />
-              <UpdateRow time="14:45:55" status="Voice Note" text="'Traffic dense at North intersection. Re-routing via 4th Ave.'" type="field" />
-              <div className="flex gap-4 relative">
-                 <div className="w-6 h-6 rounded-full border-2 border-slate-100 flex items-center justify-center shrink-0 z-10 bg-white">
-                    <div className="w-1.5 h-1.5 rounded-full bg-slate-200" />
-                 </div>
-                 <div className="space-y-1 pt-0.5">
-                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Waiting...</p>
-                    <p className="text-xs font-bold text-slate-300">Delivery Confirmation</p>
-                 </div>
-              </div>
+              {updates.map((u, i) => (
+                <UpdateRow 
+                   key={i} 
+                   time={u.timestamp ? new Date(u.timestamp).toLocaleTimeString() : "Now"} 
+                   status={u.status || u.type} 
+                   text={u.text || u.transcript || `Mission status changed to ${u.status || u.type}`} 
+                   type={u.type === 'voice_update' ? 'field' : 'system'} 
+                />
+              ))}
+              {updates.length === 0 && (
+                <div className="text-center py-20 opacity-20">
+                   <p className="text-sm font-bold">Waiting for updates...</p>
+                </div>
+              )}
            </div>
         </div>
 
         {/* Close Mission or Done State */}
-        {status === "Done" ? (
+        {status === "completed" ? (
            <div className="bg-emerald-500 rounded-[2.5rem] p-10 text-white shadow-xl shadow-emerald-500/20 space-y-8 animate-in zoom-in duration-500">
               <div className="space-y-2">
-                 <h4 className="text-2xl font-bold">Ready to close this mission?</h4>
-                 <p className="text-emerald-50 font-medium italic opacity-80">Complete final logs and finalize session</p>
+                 <h4 className="text-2xl font-bold">Mission Complete</h4>
+                 <p className="text-emerald-50 font-medium italic opacity-80">Please provide final verification</p>
               </div>
               
               <div className="space-y-6 pt-4">
                  <div className="space-y-3">
-                    <p className="text-[10px] font-black uppercase tracking-widest opacity-60">Outcome Selector</p>
-                    <div className="grid grid-cols-1 gap-3">
-                       {["Completed successfully", "Partially complete", "Could not complete"].map((v, i) => (
-                          <div key={i} className="bg-white/10 border border-white/20 p-5 rounded-2xl flex items-center justify-between cursor-pointer hover:bg-white/20 transition-colors">
-                             <span className="text-xs font-bold">{v}</span>
-                             <div className="w-5 h-5 rounded-full border-2 border-white/30" />
-                          </div>
-                       ))}
-                    </div>
+                    <p className="text-[10px] font-black uppercase tracking-widest opacity-60">Families Impacted</p>
+                    <input 
+                      type="number" 
+                      value={familiesHelped}
+                      onChange={(e) => setFamiliesHelped(parseInt(e.target.value))}
+                      className="w-full bg-white/10 border border-white/20 p-5 rounded-2xl text-white font-bold focus:bg-white/20 outline-none"
+                    />
+                 </div>
+                 <div className="space-y-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest opacity-60">Closing Notes</p>
+                    <textarea 
+                      value={completionNotes}
+                      onChange={(e) => setCompletionNotes(e.target.value)}
+                      className="w-full bg-white/10 border border-white/20 p-5 rounded-2xl text-white font-medium min-h-[100px] focus:bg-white/20 outline-none"
+                      placeholder="Summarize the outcome..."
+                    />
                  </div>
                  
-                 <Button className="w-full h-16 bg-white text-emerald-600 hover:bg-emerald-50 rounded-2xl font-bold text-lg flex gap-2">
-                    Close Mission <Check className="w-6 h-6" />
+                 <Button 
+                    onClick={() => handleCompleteMission('success')}
+                    disabled={isSubmitting}
+                    className="w-full h-16 bg-white text-emerald-600 hover:bg-emerald-50 rounded-2xl font-bold text-lg flex gap-2"
+                  >
+                    {isSubmitting ? "Finalizing..." : "Submit & Close Mission"} <Check className="w-6 h-6" />
                  </Button>
               </div>
            </div>

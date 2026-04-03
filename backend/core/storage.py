@@ -12,4 +12,9 @@ if settings.GCP_SERVICE_ACCOUNT_PATH:
 else:
 	storage_client = storage.Client()
 
-bucket = storage_client.bucket(settings.GCS_BUCKET_NAME)
+bucket = None
+if settings.GCS_BUCKET_NAME and settings.GCS_BUCKET_NAME.strip():
+    bucket = storage_client.bucket(settings.GCS_BUCKET_NAME)
+else:
+    import logging
+    logging.getLogger(__name__).warning("GCS_BUCKET_NAME is empty. GCS uploads will be disabled.")

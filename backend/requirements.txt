@@ -3,6 +3,8 @@ uvicorn[standard]
 pydantic-settings
 python-dotenv
 firebase-admin
-google-generativeai
+google-genai
 google-cloud-storage
+google-cloud-translate
 python-jose[cryptography]
+python-multipart

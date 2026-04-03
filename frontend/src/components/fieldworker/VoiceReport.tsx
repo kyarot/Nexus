@@ -11,12 +11,15 @@ import {
   Loader2,
   Volume2,
   Database,
-  ArrowRight
+  ArrowRight,
+  MapPin
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { MapPicker } from "@/components/nexus/MapPicker";
+import { deriveZoneInfo } from "@/lib/location-utils";
 
 const LanguagePill = ({ label, active, onClick }: { label: string, active: boolean, onClick: () => void }) => (
   <button
@@ -55,6 +58,23 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
   const [isMerged, setIsMerged] = useState(true); // Mocking for demo
   const languages = ["Kannada", "Hindi", "Telugu", "Tamil", "Bengali", "Marathi", "English"];
 
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [extractedData, setExtractedData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [voiceUrl, setVoiceUrl] = useState<string | null>(null);
+
+  const [location, setLocation] = useState({
+    lat: 12.9716,
+    lng: 77.5946,
+    address: "",
+    pincode: "",
+    areaName: ""
+  });
+
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const token = localStorage.getItem("nexus_access_token");
+
   useEffect(() => {
     let interval: any;
     if (step === "recording") {
@@ -71,17 +91,124 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleStartRecording = () => {
-    setStep("recording");
+  const handleStartRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: BlobPart[] = [];
+      
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/wav' });
+        setAudioBlob(blob);
+        processVoice(blob);
+      };
+      
+      recorder.start();
+      setMediaRecorder(recorder);
+      setStep("recording");
+    } catch (err) {
+      console.error("Failed to start recording", err);
+      alert("Microphone access denied or not available");
+    }
   };
 
   const handleStopRecording = () => {
-    setStep("processing");
-    setTimeout(() => setStep("result"), 3000);
+    if (mediaRecorder) {
+      mediaRecorder.stop();
+      mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
   };
 
-  const handleSubmit = () => {
-    setStep("submitted");
+  const processVoice = async (blob: Blob) => {
+    setStep("processing");
+    setError(null);
+
+    const formData = new FormData();
+    formData.append("file", blob, "report.wav");
+    formData.append("language", language);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/fieldworker/voice`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      if (!response.ok) throw new Error("Failed to process voice report");
+
+      const data = await response.json();
+      setExtractedData(data.extracted);
+      setVoiceUrl(data.voiceUrl);
+      
+      // Update location address if AI found something
+      if (data.extracted.location) {
+        setLocation(prev => ({ ...prev, address: data.extracted.location }));
+      }
+      
+      setStep("result");
+    } catch (err: any) {
+      setError(err.message);
+      setStep("idle");
+    }
+  };
+
+  const handleSubmit = async () => {
+    setStep("processing");
+
+    const zoneInfo = deriveZoneInfo({
+      lat: location.lat,
+      lng: location.lng,
+      address: location.address,
+      pincode: location.pincode,
+      areaName: location.areaName,
+    });
+    
+    const payload = {
+      zoneId: zoneInfo.zoneId,
+      needType: extractedData?.needType || "General",
+      severity: (extractedData?.severity || "medium").toLowerCase(),
+      familiesAffected: parseInt(extractedData?.familiesAffected || "0"),
+      location: {
+        lat: location.lat || 12.9716,
+        lng: location.lng || 77.5946,
+        address: location.address || zoneInfo.zoneLabel,
+        landmark: location.address || zoneInfo.zoneLabel
+      },
+      inputType: "voice",
+      sourceType: "voice",
+      voiceUrl: voiceUrl,
+      transcript: extractedData?.transcript,
+      transcriptEnglish: extractedData?.transcriptEnglish,
+      extractedData: extractedData,
+      confidence: extractedData?.confidence || 90,
+      safetySignals: extractedData?.safetySignals || [],
+      landmark: extractedData?.landmark || location.address || null,
+      additionalNotes: extractedData?.additionalNotes || null,
+      fieldConfidences: extractedData?.fieldConfidences || null
+    };
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/fieldworker/reports`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) throw new Error("Failed to submit report");
+
+      const data = await response.json();
+      setIsMerged(data.merged);
+      setStep("submitted");
+    } catch (err: any) {
+      setError(err.message);
+      setStep("result");
+    }
   };
 
   if (step === "submitted") {
@@ -238,19 +365,32 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
                  <div className="bg-slate-50 border border-slate-100 rounded-[2rem] p-8 text-left relative overflow-hidden">
                     <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-[#5A57FF]" />
                     <p className="text-lg text-slate-600 leading-relaxed font-medium italic">
-                       "In the north sector of the village, we have observed a critical <span className="bg-indigo-100 text-[#5A57FF] px-2 py-0.5 rounded-md font-bold">food shortage</span> affecting approximately <span className="bg-indigo-100 text-[#5A57FF] px-2 py-0.5 rounded-md font-bold">34 families</span>. The local well water level has dropped by 2 meters since last week. Immediate delivery of grain and clean water tanks is required by Friday in <span className="bg-indigo-100 text-[#5A57FF] px-2 py-0.5 rounded-md font-bold">Hebbal</span>."
+                       "{extractedData?.transcript || 'No transcription available'}"
                     </p>
                  </div>
 
                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl text-left space-y-1">
+                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl text-left space-y-2">
                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Identified Issue</p>
-                       <p className="text-sm font-bold text-[#1A1A3D]">Resource Scarcity</p>
+                       <p className="text-sm font-bold text-[#1A1A3D]">{extractedData?.needType || "General Issue"}</p>
                     </div>
-                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl text-left space-y-1">
-                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Impact Radius</p>
-                       <p className="text-sm font-bold text-[#1A1A3D]">North Sector</p>
+                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl text-left space-y-2">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Mapped Zone</p>
+                      <p className="text-sm font-bold text-[#1A1A3D]">{deriveZoneInfo(location).zoneLabel}</p>
                     </div>
+                 </div>
+
+                 <div className="w-full h-44 rounded-[2rem] overflow-hidden border border-slate-100 relative shadow-inner group">
+                    <MapPicker 
+                      initialLocation={{ lat: location.lat, lng: location.lng }}
+                      onLocationSelect={(loc) => setLocation({
+                        lat: loc.lat,
+                        lng: loc.lng,
+                        address: loc.address || "",
+                        pincode: loc.pincode || "",
+                        areaName: loc.areaName || ""
+                      })}
+                    />
                  </div>
 
                  <div className="flex gap-4 pt-4">

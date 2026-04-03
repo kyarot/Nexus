@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from core.dependencies import get_current_user
 from core.firebase import db
-from core.gemini import gemini_flash
+from core.gemini import client, GEMINI_FLASH
 from core.security import create_access_token, hash_password, verify_password
 from models.user import (
     CoordinatorSignup,
@@ -643,7 +643,10 @@ async def preseed_city_baseline(
         f"City: {payload.city}. Zones: {', '.join(payload.zones)}."
     )
 
-    response = gemini_flash.generate_content(prompt)
+    response = client.models.generate_content(
+        model=GEMINI_FLASH,
+        contents=prompt
+    )
     raw_text = (getattr(response, "text", None) or "").strip()
 
     if not raw_text:

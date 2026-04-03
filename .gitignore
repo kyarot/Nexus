@@ -7,6 +7,11 @@ node_modules
 !.env.example
 !.env.*.example
 
+# Frontend environment files
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
 # Secret and credential files
 secrets/
 **/secrets/

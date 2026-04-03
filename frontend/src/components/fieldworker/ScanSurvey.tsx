@@ -13,7 +13,8 @@ import {
   FileText,
   Calendar,
   Layers,
-  Search
+  Search,
+  Navigation
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,8 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MapPicker } from "@/components/nexus/MapPicker";
+import { deriveZoneInfo } from "@/lib/location-utils";
 import {
   Select,
   SelectContent,
@@ -57,10 +60,88 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
     address: "482 Skyline Blvd, Building C-4, Level 2 Industrial District, West Side",
     pincode: "560024",
     notes: "",
-    surveyDate: new Date().toISOString().split('T')[0]
+    surveyDate: new Date().toISOString().split('T')[0],
+    lat: 12.9716,
+    lng: 77.5946,
+    areaName: ""
   });
 
+  const [extractedResult, setExtractedResult] = useState<any>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const token = localStorage.getItem("nexus_access_token");
+
   const [isMerged, setIsMerged] = useState(true); // Mocking for demo
+
+  const startProcessing = async (file: File) => {
+    setStep("processing");
+    setProgress(0);
+    setIsUploading(true);
+    setError(null);
+
+    const zoneInfo = deriveZoneInfo({
+      lat: formData.lat,
+      lng: formData.lng,
+      address: formData.address,
+      pincode: formData.pincode,
+      areaName: formData.areaName,
+    });
+
+    const uploadFormData = new FormData();
+    uploadFormData.append("file", file);
+    uploadFormData.append("zoneId", zoneInfo.zoneId);
+    uploadFormData.append("language", "en");
+
+    // Start a fake progress for UI
+    const progressInterval = setInterval(() => {
+      setProgress(prev => (prev < 90 ? prev + 5 : prev));
+    }, 200);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/fieldworker/scan`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        },
+        body: uploadFormData
+      });
+
+      if (!response.ok) throw new Error("Failed to process scan");
+
+      const data = await response.json();
+      clearInterval(progressInterval);
+      setProgress(100);
+      
+      setExtractedResult(data.extracted);
+      setImageUrl(data.imageUrl);
+      
+      // Update form data with extracted results
+      setFormData((prev) => ({
+        needType: data.extracted.needType || "Food Insecurity",
+        severity: data.extracted.severity ? (data.extracted.severity.charAt(0).toUpperCase() + data.extracted.severity.slice(1)) : "High",
+        families: String(data.extracted.familiesAffected || "0"),
+        zone: prev.zone,
+        address: prev.address,
+        pincode: prev.pincode,
+        notes: data.extracted.additionalNotes || "",
+        surveyDate: new Date().toISOString().split('T')[0],
+        lat: prev.lat,
+        lng: prev.lng,
+        areaName: prev.areaName
+      }));
+
+      setStep("success");
+    } catch (err: any) {
+      clearInterval(progressInterval);
+      setError(err.message);
+      setStep("idle");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -68,25 +149,10 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
       const reader = new FileReader();
       reader.onloadend = () => {
         setImage(reader.result as string);
-        startProcessing();
+        startProcessing(file);
       };
       reader.readAsDataURL(file);
     }
-  };
-
-  const startProcessing = () => {
-    setStep("processing");
-    setProgress(0);
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setStep("success");
-          return 100;
-        }
-        return prev + 2;
-      });
-    }, 50);
   };
 
   useEffect(() => {
@@ -98,8 +164,59 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
     }
   }, [progress, step]);
 
-  const handleSubmit = () => {
-    setStep("submitted");
+  const handleSubmit = async () => {
+    setStep("processing");
+    setProgress(0);
+
+    const zoneInfo = deriveZoneInfo({
+      lat: formData.lat,
+      lng: formData.lng,
+      address: formData.address,
+      pincode: formData.pincode,
+      areaName: formData.areaName,
+    });
+    
+    const payload = {
+      zoneId: zoneInfo.zoneId,
+      needType: formData.needType,
+      severity: formData.severity.toLowerCase(),
+      familiesAffected: parseInt(formData.families),
+      location: {
+        lat: formData.lat || 12.9716,
+        lng: formData.lng || 77.5946,
+        address: formData.address || zoneInfo.zoneLabel,
+        landmark: formData.address || zoneInfo.zoneLabel
+      },
+      inputType: "ocr",
+      sourceType: "scan",
+      imageUrl: imageUrl,
+      extractedData: extractedResult,
+      confidence: extractedResult?.confidence || 90,
+      safetySignals: extractedResult?.safetySignals || [],
+      landmark: extractedResult?.landmark || formData.address || null,
+      additionalNotes: extractedResult?.additionalNotes || formData.notes || null,
+      fieldConfidences: extractedResult?.fieldConfidences || null
+    };
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/fieldworker/reports`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) throw new Error("Failed to submit report");
+
+      const data = await response.json();
+      setIsMerged(data.merged);
+      setStep("submitted");
+    } catch (err: any) {
+      setError(err.message);
+      setStep("success"); // Go back to success to allow retry
+    }
   };
 
   if (step === "submitted") {
@@ -192,7 +309,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                 <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-white/60 rounded-tl-xl" />
                 <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-white/60 rounded-tr-xl" />
                 <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-white/60 rounded-bl-xl" />
-                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-white/60 rounded-br-xl" />
+                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-white/60 rounded-tr-xl" />
               </div>
 
               {step === "processing" && (
@@ -268,7 +385,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
               </Button>
               <Button 
                 className="h-12 px-6 rounded-2xl bg-[#5A57FF] hover:bg-[#4845E0] font-bold gap-2 shadow-lg shadow-indigo-100 transition-all"
-                onClick={startProcessing}
+                onClick={() => document.getElementById('survey-upload')?.click()}
               >
                  <Camera className="w-4 h-4" /> Use Camera
               </Button>
@@ -322,7 +439,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                        <Label className="text-xs font-bold text-slate-500">Need Type</Label>
                        <ConfidenceDot level="high" />
                     </div>
-                    <Select defaultValue={formData.needType}>
+                    <Select value={formData.needType} onValueChange={(val) => setFormData(prev => ({ ...prev, needType: val }))}>
                        <SelectTrigger className="h-12 rounded-xl bg-slate-50 border-transparent focus:ring-[#5A57FF] group">
                           <SelectValue />
                        </SelectTrigger>
@@ -341,11 +458,11 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                           <Label className="text-xs font-bold text-slate-500">Severity Level</Label>
                           <ConfidenceDot level="high" />
                        </div>
-                       <RadioGroup defaultValue={formData.severity} className="flex flex-col gap-2">
+                       <RadioGroup value={formData.severity} onValueChange={(val) => setFormData(prev => ({ ...prev, severity: val }))} className="flex flex-col gap-2">
                           {["Low", "Medium", "High", "Critical"].map((v) => (
                              <div key={v} className="flex items-center space-x-2">
-                                <RadioGroupItem value={v} id={`severity-${v}`} className="text-[#5A57FF]" />
-                                <Label htmlFor={`severity-${v}`} className="text-xs font-bold text-[#1A1A3D]">{v}</Label>
+                                 <RadioGroupItem value={v} id={`severity-${v}`} className="text-[#5A57FF]" />
+                                 <Label htmlFor={`severity-${v}`} className="text-xs font-bold text-[#1A1A3D]">{v}</Label>
                              </div>
                           ))}
                        </RadioGroup>
@@ -357,7 +474,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                        </div>
                        <Input 
                          type="number" 
-                         defaultValue={formData.families} 
+                         value={formData.families} onChange={(e) => setFormData(prev => ({ ...prev, families: e.target.value }))} 
                          className="h-12 rounded-xl bg-amber-50/50 border-amber-200 focus:ring-amber-500 text-[#1A1A3D] font-bold"
                        />
                     </div>
@@ -379,16 +496,11 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                        <Label className="text-xs font-bold text-slate-500">Zone / Sector</Label>
                        <ConfidenceDot level="high" />
                     </div>
-                    <Select defaultValue={formData.zone}>
-                       <SelectTrigger className="h-12 rounded-xl bg-slate-50 border-transparent">
-                          <SelectValue />
-                       </SelectTrigger>
-                       <SelectContent>
-                          <SelectItem value="Hebbal North">Hebbal North</SelectItem>
-                          <SelectItem value="Bengaluru East">Bengaluru East</SelectItem>
-                          <SelectItem value="Whitefield">Whitefield</SelectItem>
-                       </SelectContent>
-                    </Select>
+                    <Input
+                     value={formData.zone}
+                     readOnly
+                     className="h-12 rounded-xl bg-slate-50 border-transparent text-[#1A1A3D] font-medium"
+                    />
                  </div>
 
                  <div className="space-y-2">
@@ -396,7 +508,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                        <Label className="text-xs font-bold text-slate-500">Address/Landmark</Label>
                        <ConfidenceDot level="high" />
                     </div>
-                    <Input defaultValue={formData.address} className="h-12 rounded-xl bg-slate-50 border-transparent text-[#1A1A3D] font-medium" />
+                    <Input value={formData.address} onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent text-[#1A1A3D] font-medium" />
                  </div>
 
                  <div className="grid grid-cols-2 gap-5 items-start">
@@ -405,18 +517,31 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                           <Label className="text-xs font-bold text-slate-500">Pincode</Label>
                           <ConfidenceDot level="low" />
                        </div>
-                       <Input defaultValue={formData.pincode} className="h-12 rounded-xl bg-amber-50/50 border-amber-200 text-[#1A1A3D] font-bold" />
+                       <Input value={formData.pincode} onChange={(e) => setFormData(prev => ({ ...prev, pincode: e.target.value }))} className="h-12 rounded-xl bg-amber-50/50 border-amber-200 text-[#1A1A3D] font-bold" />
                     </div>
-                    <div className="relative rounded-2xl overflow-hidden h-32 border border-slate-100 group shadow-inner">
-                       <img src="https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?auto=format&fit=crop&q=80&w=400" className="w-full h-full object-cover opacity-80" />
-                       <div className="absolute inset-0 bg-indigo-500/10" />
-                       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                          <MapPin className="w-6 h-6 text-red-500 fill-current" />
-                       </div>
-                       <div className="absolute bottom-2 inset-x-2 bg-white/90 backdrop-blur-sm px-2 py-1.5 rounded-lg text-[9px] font-bold text-slate-500 flex items-center justify-center shadow-sm">
-                          Drag pin to exact location
-                       </div>
-                    </div>
+                    <div className="relative rounded-2xl overflow-hidden h-44 border border-slate-100 group shadow-inner">
+                        <MapPicker 
+                          initialLocation={{ lat: formData.lat, lng: formData.lng }}
+                          onLocationSelect={(loc) => setFormData((f) => {
+                            const zoneInfo = deriveZoneInfo({
+                              lat: loc.lat,
+                              lng: loc.lng,
+                              address: loc.address || f.address,
+                              pincode: loc.pincode || f.pincode,
+                              areaName: loc.areaName || f.areaName,
+                            });
+                            return {
+                              ...f,
+                              lat: loc.lat,
+                              lng: loc.lng,
+                              address: loc.address || f.address,
+                              pincode: loc.pincode || f.pincode,
+                              areaName: loc.areaName || f.areaName,
+                              zone: zoneInfo.zoneLabel,
+                            };
+                          })}
+                        />
+                     </div>
                  </div>
               </div>
            </section>
