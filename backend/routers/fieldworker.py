@@ -582,16 +582,32 @@ async def update_report(
 
 # --- Active Mission Endpoints ---
 
+def _mission_timestamp_value(mission_data: dict) -> datetime:
+    for key in ("updatedAt", "createdAt"):
+        value = mission_data.get(key)
+        if isinstance(value, datetime):
+            return value
+    return datetime.min
+
 @router.get("/mission/active")
 async def get_active_mission(
     user: dict = Depends(role_required("fieldworker"))
 ):
-    missions = db.collection("missions")\
+    missions_snapshot = db.collection("missions")\
         .where("assignedTo", "==", user["id"])\
         .where("status", "in", ["dispatched", "en_route", "on_ground"])\
-        .limit(1)\
         .get()
-    
+
+    missions = sorted(
+        missions_snapshot,
+        key=lambda doc: (
+            doc.to_dict().get("priority") == "critical",
+            doc.to_dict().get("priority") == "high",
+            _mission_timestamp_value(doc.to_dict()),
+        ),
+        reverse=True,
+    )
+
     if not missions:
         return {"mission": None, "updates": []}
     
@@ -649,7 +665,13 @@ async def update_mission_status(
     
     # 4. Update status if terminal
     if payload.status in ["completed", "failed"]:
-        mission_ref.update({"status": payload.status})
+        mission_ref.update({
+            "status": payload.status,
+            "updatedAt": now,
+            "completedAt": now if payload.status == "completed" else None,
+        })
+    else:
+        mission_ref.update({"updatedAt": now})
         
     return {"updated": True, "rtdbWritten": True}
 

@@ -1,3 +1,6 @@
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Camera, UserPlus, FileText, Map } from "lucide-react";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { StatMetricCard } from "@/components/coordinator/StatMetricCard";
 import { NeedTerrainMap } from "@/components/coordinator/NeedTerrainMap";
@@ -6,28 +9,133 @@ import { VolunteerAvatarCard } from "@/components/coordinator/VolunteerAvatarCar
 import { CommunityPulseDonut } from "@/components/coordinator/CommunityPulseDonut";
 import { MissionStatusChip } from "@/components/coordinator/MissionStatusChip";
 import { ZoneRiskBadge } from "@/components/coordinator/ZoneRiskBadge";
-import { Button } from "@/components/ui/button";
-import { Camera, UserPlus, FileText, Map } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  getCoordinatorDashboard,
+  getCoordinatorHeatmap,
+  getCoordinatorZones,
+  type CoordinatorInsight,
+  type CoordinatorZone,
+} from "@/lib/coordinator-api";
+
+const riskPalette: Record<CoordinatorZone["riskLevel"], string> = {
+  critical: "bg-destructive",
+  high: "bg-warning",
+  medium: "bg-primary",
+  low: "bg-success",
+};
+
+const fallbackInsightCards = [
+  {
+    variant: "critical" as const,
+    zone: "No live insight yet",
+    signals: [{ label: "Waiting for backend data", variant: "info" as const }],
+    description: "Connect a coordinator account to see the latest insights from the backend.",
+    sourceCount: "0 reports",
+    timestamp: "now",
+  },
+];
+
+const severityToVariant = (severity?: string) => {
+  const value = (severity || "watch").toLowerCase();
+  if (value === "critical") return "critical" as const;
+  if (value === "high") return "high" as const;
+  if (value === "resolved") return "resolved" as const;
+  return "watch" as const;
+};
+
+const timeAgo = (value?: string) => {
+  if (!value) return "recently";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "recently";
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.floor(diffMs / 60000);
+  if (diffMinutes < 1) return "just now";
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.floor(diffHours / 24)}d ago`;
+};
 
 export default function Dashboard() {
+  const token = localStorage.getItem("nexus_access_token");
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["coordinator-dashboard", token],
+    queryFn: async () => {
+      const [dashboard, zonesResponse, heatmap] = await Promise.all([
+        getCoordinatorDashboard(),
+        getCoordinatorZones(),
+        getCoordinatorHeatmap(),
+      ]);
+
+      return {
+        dashboard,
+        zones: zonesResponse.zones,
+        heatmap,
+      };
+    },
+    enabled: Boolean(token),
+    refetchInterval: 30_000,
+  });
+
+  const zones = data?.zones ?? [];
+  const heatmapPoints = data?.heatmap ?? [];
+  const dashboard = data?.dashboard;
+
+  const topZones = useMemo(
+    () => [...zones].sort((left, right) => right.currentScore - left.currentScore).slice(0, 4),
+    [zones]
+  );
+
+  const insights = dashboard?.recentInsights?.length ? dashboard.recentInsights : [];
+  const insightCards = insights.map((insight: CoordinatorInsight, index: number) => ({
+    variant: severityToVariant(insight.severity),
+    zone: insight.title || `Insight ${index + 1}`,
+    signals: insight.recommendedAction ? [{ label: insight.recommendedAction, variant: "info" as const }] : undefined,
+    description: insight.summary || "No summary available from backend.",
+    sourceCount: insight.status ? `${insight.status} · ${insight.title || "insight"}` : undefined,
+    timestamp: timeAgo(insight.generatedAt),
+  }));
+
   return (
     <div className="flex flex-col h-full">
-      <DashboardTopBar breadcrumb="Dashboard" subtext="Bengaluru · 12 NGOs connected · Synced 4 min ago" />
+      <DashboardTopBar
+        breadcrumb="Dashboard"
+        subtext={dashboard ? `Live backend sync · ${dashboard.zoneCount} zones · ${dashboard.availableVolunteers} volunteers available` : "Connecting to backend..."}
+      />
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Main content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Metric cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-card-gap">
-            <StatMetricCard label="Reports Ingested" value="1,247" delta="+84 this week" accent="indigo" />
-            <StatMetricCard label="Active Needs" value="63" delta="Across 9 zones" deltaDirection="up" accent="amber" />
-            <StatMetricCard label="Missions Completed" value="312" delta="89% success rate" accent="green" />
-            <StatMetricCard label="Volunteers Active" value="47" delta="18 available now" accent="purple" />
+            <StatMetricCard
+              label="Avg Zone Score"
+              value={isLoading ? "--" : `${Math.round(dashboard?.avgZoneScore ?? 0)}`}
+              delta={dashboard ? `${dashboard.zoneCount} zones tracked` : "Loading zone metrics"}
+              accent="indigo"
+            />
+            <StatMetricCard
+              label="Zones at Risk"
+              value={isLoading ? "--" : `${dashboard?.zonesAtRisk ?? 0}`}
+              delta={dashboard ? `${dashboard?.criticalZones?.length ?? 0} critical zones` : "Loading risk profile"}
+              deltaDirection="up"
+              accent="amber"
+            />
+            <StatMetricCard
+              label="Active Missions"
+              value={isLoading ? "--" : `${dashboard?.activeMissions ?? 0}`}
+              delta="From coordinator NGO"
+              accent="green"
+            />
+            <StatMetricCard
+              label="Volunteers Active"
+              value={isLoading ? "--" : `${dashboard?.availableVolunteers ?? 0}`}
+              delta="Presence feed from RTDB"
+              accent="purple"
+            />
           </div>
 
-          {/* Main grid */}
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-card-gap">
-            {/* Left 60% */}
             <div className="lg:col-span-3 space-y-card-gap">
               <div className="rounded-card border bg-card p-5 shadow-card">
                 <div className="flex items-center justify-between mb-3">
@@ -36,40 +144,53 @@ export default function Dashboard() {
                     <span className="flex items-center gap-1 text-[11px] text-success font-medium"><span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />Live</span>
                   </div>
                 </div>
-                <NeedTerrainMap className="h-[260px]" />
+                <NeedTerrainMap heatmapPoints={heatmapPoints} className="h-[260px]" />
               </div>
 
               <div className="rounded-card border bg-card p-5 shadow-card">
                 <h3 className="text-sm font-semibold text-foreground mb-4">Top Urgent Needs</h3>
-                {[
-                  { zone: "Hebbal North", category: "Food Security", score: 89, level: "critical" as const },
-                  { zone: "Yelahanka", category: "Health", score: 72, level: "high" as const },
-                  { zone: "Jalahalli", category: "Education", score: 58, level: "medium" as const },
-                  { zone: "Malleswaram", category: "Shelter", score: 34, level: "low" as const },
-                ].map((n, i) => (
-                  <div key={i} className="flex items-center gap-3 py-3 border-b last:border-0">
-                    <span className="text-xs font-data text-muted-foreground w-5">{i + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground">{n.zone}</p>
-                      <span className="text-xs text-muted-foreground">{n.category}</span>
-                    </div>
-                    <div className="w-24">
-                      <div className="h-1.5 rounded-full bg-muted">
-                        <div className={cn("h-full rounded-full", n.level === "critical" ? "bg-destructive" : n.level === "high" ? "bg-warning" : n.level === "medium" ? "bg-primary" : "bg-success")} style={{ width: `${n.score}%` }} />
+                {topZones.length ? topZones.map((zone, index) => {
+                  const dominantSignal = Object.entries(zone.signalCounts || {}).sort((left, right) => right[1] - left[1])[0];
+                  const signalLabel = dominantSignal ? `${dominantSignal[0].charAt(0).toUpperCase()}${dominantSignal[0].slice(1)} · ${dominantSignal[1]}` : "No live signals";
+
+                  return (
+                    <div key={zone.id} className="flex items-center gap-3 py-3 border-b last:border-0">
+                      <span className="text-xs font-data text-muted-foreground w-5">{index + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground">{zone.name}</p>
+                        <span className="text-xs text-muted-foreground">{signalLabel}</span>
                       </div>
+                      <div className="w-24">
+                        <div className="h-1.5 rounded-full bg-muted">
+                          <div
+                            className={cn("h-full rounded-full", riskPalette[zone.riskLevel])}
+                            style={{ width: `${Math.min(100, Math.max(0, zone.currentScore))}%` }}
+                          />
+                        </div>
+                      </div>
+                      <ZoneRiskBadge level={zone.riskLevel} score={Math.round(zone.currentScore)} />
                     </div>
-                    <ZoneRiskBadge level={n.level} score={n.score} />
-                  </div>
-                ))}
+                  );
+                }) : (
+                  <div className="py-4 text-sm text-muted-foreground">No zones available yet.</div>
+                )}
               </div>
             </div>
 
-            {/* Right 40% */}
             <div className="lg:col-span-2 space-y-card-gap">
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-foreground">Gemini Insights</h3>
-                <GeminiInsightCard variant="critical" zone="Zone 4 — Hebbal North" signals={[{ label: "Absenteeism +34%", variant: "danger" }, { label: "Whisper volume +58%", variant: "warning" }]} description="3 converging signals detected. Pattern matches 2022 Koramangala signature." sourceCount="23 reports" timestamp="3h ago" />
-                <GeminiInsightCard variant="watch" zone="Zone 7 — Yelahanka" signals={[{ label: "Clinic walk-ins ↑", variant: "info" }]} description="Early indicators suggest rising health needs in the eastern corridor." sourceCount="12 reports" timestamp="6h ago" />
+                {(insightCards.length ? insightCards : fallbackInsightCards).map((insight, index) => (
+                  <GeminiInsightCard
+                    key={index}
+                    variant={insight.variant}
+                    zone={insight.zone}
+                    signals={insight.signals}
+                    description={insight.description}
+                    sourceCount={insight.sourceCount}
+                    timestamp={insight.timestamp}
+                  />
+                ))}
               </div>
 
               <div className="space-y-3">
@@ -81,9 +202,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Right stats panel */}
         <div className="hidden xl:block w-panel-w border-l bg-card overflow-y-auto p-5 space-y-6 shrink-0">
-          <CommunityPulseDonut score={68} trend="up" />
+          <CommunityPulseDonut score={Math.round(dashboard?.avgZoneScore ?? 0)} trend="up" />
 
           <div>
             <h4 className="text-sm font-semibold text-foreground mb-3">2-Week Forecast</h4>
@@ -98,14 +218,10 @@ export default function Dashboard() {
           <div>
             <h4 className="text-sm font-semibold text-foreground mb-3">Active Missions</h4>
             <div className="space-y-2">
-              {[
-                { zone: "Zone 4 · 3 workers", status: "in_progress" as const },
-                { zone: "Zone 7 · 2 workers", status: "dispatched" as const },
-                { zone: "Zone 2 · 1 worker", status: "completed" as const },
-              ].map((m, i) => (
-                <div key={i} className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">{m.zone}</span>
-                  <MissionStatusChip status={m.status} />
+              {(dashboard?.criticalZones?.length ? dashboard.criticalZones : [{ name: "Live NGO zones", score: 0, riskLevel: "low" }]).map((zone, index) => (
+                <div key={`${zone.name || index}`} className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">{zone.name || `Zone ${index + 1}`}</span>
+                  <MissionStatusChip status={index === 0 ? "in_progress" : index === 1 ? "dispatched" : "completed"} />
                 </div>
               ))}
             </div>
@@ -131,8 +247,4 @@ export default function Dashboard() {
       </div>
     </div>
   );
-}
-
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
 }

@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils";
 
 interface Zone {
   name: string;
+  zoneId?: string;
   x: number;
   y: number;
   radius: number;
@@ -9,8 +10,18 @@ interface Zone {
   level: string;
 }
 
+interface HeatmapPoint {
+  lat: number;
+  lng: number;
+  weight: number;
+  zoneId: string;
+  name: string;
+  riskLevel: string;
+}
+
 interface NeedTerrainMapProps {
   zones?: Zone[];
+  heatmapPoints?: HeatmapPoint[];
   onZoneClick?: (zone: Zone) => void;
   className?: string;
   showLegend?: boolean;
@@ -23,14 +34,47 @@ const defaultZones: Zone[] = [
   { name: "Malleswaram", x: 45, y: 75, radius: 20, color: "rgba(16,185,129,0.3)", level: "low" },
 ];
 
-export function NeedTerrainMap({ zones = defaultZones, onZoneClick, className, showLegend = true }: NeedTerrainMapProps) {
+const riskColor: Record<string, string> = {
+  critical: "rgba(239,68,68,0.35)",
+  high: "rgba(245,158,11,0.35)",
+  medium: "rgba(59,130,246,0.35)",
+  low: "rgba(16,185,129,0.3)",
+};
+
+const heatmapToZones = (points: HeatmapPoint[]): Zone[] => {
+  if (!points.length) return defaultZones;
+
+  const latitudes = points.map((point) => point.lat);
+  const longitudes = points.map((point) => point.lng);
+  const minLat = Math.min(...latitudes);
+  const maxLat = Math.max(...latitudes);
+  const minLng = Math.min(...longitudes);
+  const maxLng = Math.max(...longitudes);
+
+  const latRange = maxLat - minLat || 1;
+  const lngRange = maxLng - minLng || 1;
+
+  return points.map((point) => ({
+    name: point.name,
+    zoneId: point.zoneId,
+    x: 18 + ((point.lng - minLng) / lngRange) * 64,
+    y: 78 - ((point.lat - minLat) / latRange) * 56,
+    radius: Math.max(14, Math.min(55, 16 + point.weight * 42)),
+    color: riskColor[point.riskLevel] || riskColor.low,
+    level: point.riskLevel,
+  }));
+};
+
+export function NeedTerrainMap({ zones = defaultZones, heatmapPoints, onZoneClick, className, showLegend = true }: NeedTerrainMapProps) {
+  const renderedZones = heatmapPoints && heatmapPoints.length > 0 ? heatmapToZones(heatmapPoints) : zones;
+
   return (
     <div className={cn("relative overflow-hidden rounded-card bg-[#1a1a2e]", className)}>
       {/* Grid pattern */}
       <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "linear-gradient(hsl(var(--primary)/0.3) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--primary)/0.3) 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
       {/* Zones */}
       <svg className="relative h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
-        {zones.map((z, i) => (
+        {renderedZones.map((z, i) => (
           <g key={i} onClick={() => onZoneClick?.(z)} className="cursor-pointer">
             <circle cx={z.x} cy={z.y} r={z.radius / 3} fill={z.color} />
             <circle cx={z.x} cy={z.y} r={z.radius / 5} fill={z.color} opacity={0.6} />
