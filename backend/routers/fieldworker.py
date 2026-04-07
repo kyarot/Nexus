@@ -450,6 +450,47 @@ def _update_zone_terrain(zone_id: str, canonical_report: dict[str, Any], created
     )
 
 
+def _upsert_terrain_signal(
+    *,
+    report_id: str,
+    zone_id: str,
+    canonical_report: dict[str, Any],
+    created_at: datetime,
+) -> None:
+    location = canonical_report.get("location") or {}
+    lat = float(location.get("lat") or 0.0)
+    lng = float(location.get("lng") or 0.0)
+    if lat == 0.0 and lng == 0.0:
+        return
+
+    terrain_inputs = _compute_terrain_inputs(canonical_report)
+    need_type = str(canonical_report.get("needType") or "general").strip().lower()
+    terrain_ref = db.collection("terrainSignals").document(report_id)
+    terrain_ref.set(
+        {
+            "reportId": report_id,
+            "zoneId": zone_id,
+            "needType": need_type,
+            "severity": _normalize_severity(canonical_report.get("severity"), "medium"),
+            "riskLevel": terrain_inputs.get("riskLevel", "low"),
+            "confidence": terrain_inputs.get("confidence", 0),
+            "weight": round(float(terrain_inputs.get("score", 0.0)) / 100.0, 4),
+            "familiesAffected": terrain_inputs.get("familiesAffected", 0),
+            "personsAffected": terrain_inputs.get("personsAffected", 0),
+            "incidentCount": terrain_inputs.get("incidentCount", 0),
+            "minUrgencyWindowHours": terrain_inputs.get("minUrgencyWindowHours", 72),
+            "riskFlags": terrain_inputs.get("riskFlags", []),
+            "lat": lat,
+            "lng": lng,
+            "address": location.get("address"),
+            "landmark": location.get("landmark"),
+            "updatedAt": created_at.isoformat(),
+            "createdAt": created_at.isoformat(),
+        },
+        merge=True,
+    )
+
+
 def _find_active_mission(zone_id: str, need_type: str):
     return db.collection("missions")\
         .where(filter=FieldFilter("zoneId", "==", zone_id))\
@@ -463,7 +504,7 @@ def _normalize_need(value: str) -> str:
     return value.strip().lower().replace("-", " ")
 
 
-def _get_assigned_active_mission(user_id: str, mission_id: str | None = None):
+def _get_assigned_active_mission(user_id: str, mission_id: str | None = None, *, required: bool = True):
     query = db.collection("missions")\
         .where(filter=FieldFilter("assignedTo", "==", user_id))\
         .where(filter=FieldFilter("status", "in", ACTIVE_MISSION_STATUSES))
@@ -479,10 +520,12 @@ def _get_assigned_active_mission(user_id: str, mission_id: str | None = None):
 
     missions = query.limit(1).get()
     if not missions:
-        raise HTTPException(
-            status_code=403,
-            detail="No active assigned mission. Reports must be submitted against an assigned mission.",
-        )
+        if required:
+            raise HTTPException(
+                status_code=403,
+                detail="No active assigned mission. Reports must be submitted against an assigned mission.",
+            )
+        return None
     return missions[0]
 
 
@@ -787,7 +830,6 @@ async def submit_report(
     user: dict = Depends(role_required("fieldworker"))
 ):
     now = datetime.now()
-
     ngo_id = str(user.get("ngoId") or user.get("ngo_id") or "").strip()
 
     report_ref = db.collection("reports").document()
@@ -801,6 +843,12 @@ async def submit_report(
     )
     report_ref.set(report_data)
     _update_zone_terrain(payload.zoneId, report_data.get("extractedData") or {}, now)
+    _upsert_terrain_signal(
+        report_id=report_ref.id,
+        zone_id=payload.zoneId,
+        canonical_report=report_data.get("extractedData") or {},
+        created_at=now,
+    )
 
     background_tasks.add_task(upsert_mission_from_report, report_ref.id, report_data)
     if ngo_id:
@@ -875,6 +923,12 @@ async def offline_sync(
             )
             report_ref.set(report_data)
             _update_zone_terrain(report_payload.zoneId, report_data.get("extractedData") or {}, now)
+            _upsert_terrain_signal(
+                report_id=report_ref.id,
+                zone_id=report_payload.zoneId,
+                canonical_report=report_data.get("extractedData") or {},
+                created_at=now,
+            )
             background_tasks.add_task(upsert_mission_from_report, report_ref.id, report_data)
             if ngo_id:
                 background_tasks.add_task(synthesize_zone_insight, ngo_id, report_payload.zoneId)
@@ -1023,6 +1077,12 @@ async def update_report(
 
     report_ref.set(updated_report)
     _update_zone_terrain(validated_payload.zoneId, updated_report.get("extractedData") or {}, now)
+    _upsert_terrain_signal(
+        report_id=report_id,
+        zone_id=validated_payload.zoneId,
+        canonical_report=updated_report.get("extractedData") or {},
+        created_at=now,
+    )
 
     background_tasks.add_task(upsert_mission_from_report, report_id, updated_report)
     ngo_id = str(existing_report.get("ngoId") or user.get("ngoId") or user.get("ngo_id") or "").strip()

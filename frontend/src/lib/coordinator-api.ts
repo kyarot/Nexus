@@ -142,6 +142,107 @@ export interface CoordinatorHeatmapPoint {
   riskLevel: CoordinatorZone["riskLevel"];
 }
 
+export interface CoordinatorTerrainPoint {
+  id: string;
+  reportId?: string;
+  zoneId: string;
+  needType: string;
+  severity: "low" | "medium" | "high" | "critical";
+  riskLevel: CoordinatorZone["riskLevel"];
+  lat: number;
+  lng: number;
+  weight: number;
+  confidence: number;
+  familiesAffected: number;
+  personsAffected: number;
+  minUrgencyWindowHours: number;
+  riskFlags: string[];
+  updatedAt?: string;
+}
+
+export interface CoordinatorTerrainZone {
+  id: string;
+  name: string;
+  ward?: string;
+  city?: string;
+  lat: number;
+  lng: number;
+  riskLevel: CoordinatorZone["riskLevel"];
+  currentScore: number;
+  trendDirection: "up" | "down" | "stable";
+  terrainConfidence: number;
+  reportVolume7d: number;
+  topNeeds: string[];
+  signalCounts: Record<string, number>;
+  geometry?: Record<string, unknown> | null;
+  updatedAt?: string;
+}
+
+export interface CoordinatorTerrainSnapshotResponse {
+  generatedAt: string;
+  zones: CoordinatorTerrainZone[];
+  points: CoordinatorTerrainPoint[];
+  totalZones: number;
+  totalPoints: number;
+}
+
+export interface CoordinatorTerrainNarrativeResponse {
+  narrative: {
+    summary?: string;
+    highlights?: string[];
+    actions?: string[];
+    confidenceLabel?: string;
+  };
+  source: "cache" | "generated";
+  updatedAt?: string;
+}
+
+export interface CoordinatorTerrainSidebarResponse {
+  zone: {
+    id: string;
+    name: string;
+    ward?: string;
+    city?: string;
+    riskLevel: "low" | "medium" | "high" | "critical";
+    currentScore: number;
+    updatedAt?: string;
+    trendDirection?: "up" | "down" | "stable";
+    signalCounts: Record<string, number>;
+    activeMissions: number;
+    safetyProfile?: {
+      score?: number;
+      level?: string;
+      specificFlags?: string[];
+    };
+  };
+  badges: {
+    category: string;
+    riskPercent: number;
+    lastUpdateLabel: string;
+  };
+  narrative: {
+    summary?: string;
+    etaSignal?: string;
+    highlights?: string[];
+    actions?: string[];
+  };
+  activeResponders: Array<{
+    id: string;
+    name: string;
+    initials: string;
+    photoUrl?: string | null;
+  }>;
+  incidentFrequency: Array<{
+    label: string;
+    value: number;
+  }>;
+  recentReports: Array<{
+    needType?: string;
+    severity?: string;
+    createdAt?: string;
+  }>;
+}
+
 export interface CoordinatorZoneDetailResponse {
   zone: CoordinatorZone;
   recentReports: Array<{
@@ -327,6 +428,36 @@ export const getCoordinatorZoneDetail = (zoneId: string) =>
   request<CoordinatorZoneDetailResponse>(`/coordinator/zones/${zoneId}`);
 
 export const getCoordinatorHeatmap = () => request<CoordinatorHeatmapPoint[]>("/coordinator/zones/heatmap");
+
+export const getCoordinatorTerrainSnapshot = (params?: {
+  needType?: string;
+  severity?: string;
+  confidenceMin?: number;
+  sinceHours?: number;
+}) => {
+  const query = new URLSearchParams();
+  if (params?.needType) {
+    query.set("need_type", params.needType);
+  }
+  if (params?.severity) {
+    query.set("severity", params.severity);
+  }
+  if (typeof params?.confidenceMin === "number") {
+    query.set("confidence_min", String(params.confidenceMin));
+  }
+  if (typeof params?.sinceHours === "number") {
+    query.set("since_hours", String(params.sinceHours));
+  }
+
+  const suffix = query.toString();
+  return request<CoordinatorTerrainSnapshotResponse>(`/coordinator/terrain/snapshot${suffix ? `?${suffix}` : ""}`);
+};
+
+export const getCoordinatorTerrainNarrative = (zoneId: string, forceRefresh = false) =>
+  request<CoordinatorTerrainNarrativeResponse>(`/coordinator/terrain/zones/${zoneId}/narrative${forceRefresh ? "?force_refresh=true" : ""}`);
+
+export const getCoordinatorTerrainSidebar = (zoneId: string, forceRefresh = false) =>
+  request<CoordinatorTerrainSidebarResponse>(`/coordinator/terrain/zones/${zoneId}/sidebar${forceRefresh ? "?force_refresh=true" : ""}`);
 
 export const getCoordinatorZoneHistory = (zoneId: string) =>
   request<CoordinatorZoneHistoryResponse>(`/coordinator/zones/${zoneId}/history`);

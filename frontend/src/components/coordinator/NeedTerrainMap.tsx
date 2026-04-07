@@ -1,94 +1,215 @@
+import { useMemo } from "react";
+import { CircleF, GoogleMap, HeatmapLayerF, PolygonF, useJsApiLoader } from "@react-google-maps/api";
+
 import { cn } from "@/lib/utils";
 
-interface Zone {
+export interface TerrainZoneMapItem {
+  id: string;
   name: string;
-  zoneId?: string;
-  x: number;
-  y: number;
-  radius: number;
-  color: string;
-  level: string;
+  lat: number;
+  lng: number;
+  currentScore: number;
+  riskLevel: "low" | "medium" | "high" | "critical";
+  geometry?: {
+    type?: string;
+    coordinates?: number[][][] | number[][][][];
+  } | null;
 }
 
-interface HeatmapPoint {
+export interface TerrainHeatmapPoint {
+  id?: string;
+  zoneId: string;
   lat: number;
   lng: number;
   weight: number;
-  zoneId: string;
-  name: string;
-  riskLevel: string;
+  riskLevel?: string;
+  needType?: string;
 }
 
 interface NeedTerrainMapProps {
-  zones?: Zone[];
-  heatmapPoints?: HeatmapPoint[];
-  onZoneClick?: (zone: Zone) => void;
+  zones?: TerrainZoneMapItem[];
+  heatmapPoints?: TerrainHeatmapPoint[];
+  opacity?: number;
+  onZoneClick?: (zone: TerrainZoneMapItem) => void;
   className?: string;
   showLegend?: boolean;
 }
 
-const defaultZones: Zone[] = [
-  { name: "Hebbal", x: 55, y: 30, radius: 50, color: "rgba(239,68,68,0.35)", level: "critical" },
-  { name: "Yelahanka", x: 35, y: 50, radius: 35, color: "rgba(245,158,11,0.35)", level: "high" },
-  { name: "Jalahalli", x: 70, y: 65, radius: 25, color: "rgba(59,130,246,0.35)", level: "medium" },
-  { name: "Malleswaram", x: 45, y: 75, radius: 20, color: "rgba(16,185,129,0.3)", level: "low" },
-];
+const libraries: ("visualization")[] = ["visualization"];
+const defaultCenter = { lat: 12.9716, lng: 77.5946 };
 
-const riskColor: Record<string, string> = {
-  critical: "rgba(239,68,68,0.35)",
-  high: "rgba(245,158,11,0.35)",
-  medium: "rgba(59,130,246,0.35)",
-  low: "rgba(16,185,129,0.3)",
+const zoneStroke: Record<string, string> = {
+  critical: "#ef4444",
+  high: "#f59e0b",
+  medium: "#3b82f6",
+  low: "#22c55e",
 };
 
-const heatmapToZones = (points: HeatmapPoint[]): Zone[] => {
-  if (!points.length) return defaultZones;
-
-  const latitudes = points.map((point) => point.lat);
-  const longitudes = points.map((point) => point.lng);
-  const minLat = Math.min(...latitudes);
-  const maxLat = Math.max(...latitudes);
-  const minLng = Math.min(...longitudes);
-  const maxLng = Math.max(...longitudes);
-
-  const latRange = maxLat - minLat || 1;
-  const lngRange = maxLng - minLng || 1;
-
-  return points.map((point) => ({
-    name: point.name,
-    zoneId: point.zoneId,
-    x: 18 + ((point.lng - minLng) / lngRange) * 64,
-    y: 78 - ((point.lat - minLat) / latRange) * 56,
-    radius: Math.max(14, Math.min(55, 16 + point.weight * 42)),
-    color: riskColor[point.riskLevel] || riskColor.low,
-    level: point.riskLevel,
-  }));
+const zoneFill: Record<string, string> = {
+  critical: "#ef444440",
+  high: "#f59e0b40",
+  medium: "#3b82f640",
+  low: "#22c55e40",
 };
 
-export function NeedTerrainMap({ zones = defaultZones, heatmapPoints, onZoneClick, className, showLegend = true }: NeedTerrainMapProps) {
-  const renderedZones = heatmapPoints && heatmapPoints.length > 0 ? heatmapToZones(heatmapPoints) : zones;
+const getGeometryPaths = (geometry?: TerrainZoneMapItem["geometry"]): google.maps.LatLngLiteral[][] => {
+  if (!geometry?.type || !geometry.coordinates) {
+    return [];
+  }
+
+  if (geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
+    return (geometry.coordinates as number[][][])
+      .filter((ring) => Array.isArray(ring))
+      .map((ring) =>
+        ring
+          .filter((point) => Array.isArray(point) && point.length >= 2)
+          .map((point) => ({ lat: Number(point[1]), lng: Number(point[0]) }))
+      )
+      .filter((ring) => ring.length >= 3);
+  }
+
+  if (geometry.type === "MultiPolygon" && Array.isArray(geometry.coordinates)) {
+    return (geometry.coordinates as number[][][][])
+      .flatMap((polygon) =>
+        polygon.map((ring) =>
+          ring
+            .filter((point) => Array.isArray(point) && point.length >= 2)
+            .map((point) => ({ lat: Number(point[1]), lng: Number(point[0]) }))
+        )
+      )
+      .filter((ring) => ring.length >= 3);
+  }
+
+  return [];
+};
+
+export function NeedTerrainMap({ zones = [], heatmapPoints = [], opacity = 0.7, onZoneClick, className, showLegend = true }: NeedTerrainMapProps) {
+  const apiKey = import.meta.env.VITE_GMAPS_KEY || "";
+  const { isLoaded } = useJsApiLoader({
+    id: "terrain-map-script",
+    googleMapsApiKey: apiKey,
+    libraries,
+  });
+
+  const center = useMemo(() => {
+    if (zones.length > 0) {
+      const avgLat = zones.reduce((sum, zone) => sum + zone.lat, 0) / zones.length;
+      const avgLng = zones.reduce((sum, zone) => sum + zone.lng, 0) / zones.length;
+      return { lat: avgLat, lng: avgLng };
+    }
+    if (heatmapPoints.length > 0) {
+      const avgLat = heatmapPoints.reduce((sum, point) => sum + point.lat, 0) / heatmapPoints.length;
+      const avgLng = heatmapPoints.reduce((sum, point) => sum + point.lng, 0) / heatmapPoints.length;
+      return { lat: avgLat, lng: avgLng };
+    }
+    return defaultCenter;
+  }, [zones, heatmapPoints]);
+
+  const weightedPoints = useMemo(() => {
+    if (!(globalThis as any).google?.maps) {
+      return [];
+    }
+    const maxWeight = Math.max(...heatmapPoints.map((point) => Number(point.weight) || 0), 0);
+    const safeMax = maxWeight > 0 ? maxWeight : 1;
+
+    return heatmapPoints.map((point) => ({
+      location: new google.maps.LatLng(point.lat, point.lng),
+      // Normalize to improve visibility when live point weights are very small.
+      weight: Math.max(0.8, Math.min(5, ((Number(point.weight) || 0) / safeMax) * 5)),
+    }));
+  }, [heatmapPoints]);
+
+  if (!apiKey) {
+    return (
+      <div className={cn("relative overflow-hidden rounded-card bg-[#10132a] p-6 text-slate-200", className)}>
+        <p className="text-sm font-semibold">Google Maps key missing</p>
+        <p className="mt-2 text-xs text-slate-400">Set VITE_GMAPS_KEY in frontend environment to render live terrain heatmap.</p>
+      </div>
+    );
+  }
+
+  if (!isLoaded) {
+    return <div className={cn("relative overflow-hidden rounded-card bg-[#10132a]", className)} />;
+  }
 
   return (
-    <div className={cn("relative overflow-hidden rounded-card bg-[#1a1a2e]", className)}>
-      {/* Grid pattern */}
-      <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "linear-gradient(hsl(var(--primary)/0.3) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--primary)/0.3) 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
-      {/* Zones */}
-      <svg className="relative h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
-        {renderedZones.map((z, i) => (
-          <g key={i} onClick={() => onZoneClick?.(z)} className="cursor-pointer">
-            <circle cx={z.x} cy={z.y} r={z.radius / 3} fill={z.color} />
-            <circle cx={z.x} cy={z.y} r={z.radius / 5} fill={z.color} opacity={0.6} />
-            <text x={z.x} y={z.y + z.radius / 3 + 4} textAnchor="middle" fill="white" fontSize="3" fontFamily="var(--font-sans)" fontWeight="600">{z.name}</text>
-          </g>
+    <div className={cn("relative overflow-hidden rounded-card bg-[#10132a]", className)}>
+      <GoogleMap
+        mapContainerStyle={{ width: "100%", height: "100%" }}
+        center={center}
+        zoom={11}
+        options={{
+          disableDefaultUI: true,
+          zoomControl: true,
+          mapTypeControl: true,
+          streetViewControl: false,
+        }}
+      >
+        {weightedPoints.length > 0 ? (
+          <HeatmapLayerF
+            data={weightedPoints}
+            options={{
+              radius: 50,
+              opacity: Math.max(0.1, Math.min(1, opacity)),
+              gradient: [
+                "rgba(34,197,94,0)",
+                "rgba(34,197,94,0.6)",
+                "rgba(59,130,246,0.7)",
+                "rgba(245,158,11,0.8)",
+                "rgba(239,68,68,0.9)",
+              ],
+            }}
+          />
+        ) : null}
+
+        {zones.map((zone) => (
+          <CircleF
+            key={`${zone.id}-risk`}
+            center={{ lat: zone.lat, lng: zone.lng }}
+            radius={Math.max(120, zone.currentScore * 12)}
+            options={{
+              strokeColor: zoneStroke[zone.riskLevel] || zoneStroke.low,
+              fillColor: zoneFill[zone.riskLevel] || zoneFill.low,
+              strokeOpacity: 0.8,
+              fillOpacity: 0.35,
+              strokeWeight: 2,
+              clickable: true,
+            }}
+            onClick={() => onZoneClick?.(zone)}
+          />
         ))}
-      </svg>
-      {showLegend && (
+
+        {zones.flatMap((zone) => {
+          const paths = getGeometryPaths(zone.geometry);
+          return paths.map((path, index) => (
+            <PolygonF
+              key={`${zone.id}-poly-${index}`}
+              paths={path}
+              options={{
+                strokeColor: zoneStroke[zone.riskLevel] || zoneStroke.low,
+                fillColor: zoneFill[zone.riskLevel] || zoneFill.low,
+                strokeOpacity: 0.9,
+                fillOpacity: 0.2,
+                strokeWeight: 2,
+                clickable: true,
+              }}
+              onClick={() => onZoneClick?.(zone)}
+            />
+          ));
+        })}
+
+      </GoogleMap>
+
+      {showLegend ? (
         <div className="absolute bottom-3 left-3 flex gap-3 rounded-lg bg-card/90 px-3 py-2 text-[10px] font-medium backdrop-blur-sm">
-          {[{ c: "bg-destructive", l: "Critical" }, { c: "bg-warning", l: "High" }, { c: "bg-primary", l: "Medium" }, { c: "bg-success", l: "Low" }].map(i => (
-            <span key={i.l} className="flex items-center gap-1"><span className={cn("h-2 w-2 rounded-full", i.c)} />{i.l}</span>
+          {[{ c: "bg-destructive", l: "Critical" }, { c: "bg-warning", l: "High" }, { c: "bg-primary", l: "Medium" }, { c: "bg-success", l: "Low" }].map((item) => (
+            <span key={item.l} className="flex items-center gap-1">
+              <span className={cn("h-2 w-2 rounded-full", item.c)} />
+              {item.l}
+            </span>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
