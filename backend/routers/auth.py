@@ -23,6 +23,7 @@ from models.user import (
     SignupRequest,
     UserDocument,
     UserRole,
+    VolunteerProfileSettings,
     VolunteerSignup,
 )
 
@@ -85,8 +86,10 @@ class UserUpdateRequest(BaseModel):
     availability: str | None = None
     travelRadius: int | None = None
     skills: list[str] | None = None
+    additionalLanguages: list[str] | None = None
     emotionalCapacity: float | None = Field(default=None, ge=0, le=100)
     avoidCategories: list[str] | None = None
+    volunteerProfileSettings: VolunteerProfileSettings | None = None
     burnoutRisk: str | None = None
     burnoutScore: float | None = Field(default=None, ge=0, le=100)
     dnaProfile: DNAProfile | None = None
@@ -193,8 +196,36 @@ def _user_payload(
         "availability": "available",
         "travelRadius": 10,
         "skills": skills,
+        "additionalLanguages": [],
         "emotionalCapacity": 75.0,
         "avoidCategories": [],
+        "volunteerProfileSettings": {
+            "skillDetails": [],
+            "availabilityWindows": {
+                "monFri": {"morning": False, "afternoon": False, "evening": True},
+                "satSun": {"morning": True, "afternoon": True, "evening": True},
+            },
+            "maxMissionsPerWeek": 5,
+            "travelPreferences": {
+                "transportModes": ["Two Wheeler"],
+            },
+            "emotionalPreferences": {
+                "preferredMissionIntensity": "moderate",
+            },
+            "notificationPreferences": {
+                "pushNotifications": True,
+                "emailDigest": True,
+                "smsAlerts": False,
+            },
+            "accountMeta": {
+                "connectedProvider": "google",
+                "connectedEmail": email,
+            },
+            "profileMeta": {
+                "city": None,
+                "zoneLabel": None,
+            },
+        },
         "impactPoints": 0,
         "missionsCompleted": 0,
         "successRate": 0.0,
@@ -348,6 +379,38 @@ async def signup(payload: SignupRequest) -> dict[str, Any]:
     if isinstance(payload, (FieldWorkerSignup, VolunteerSignup)):
         user_doc["additionalLanguages"] = payload.additional_languages
 
+    if isinstance(payload, VolunteerSignup):
+        user_doc["volunteerProfileSettings"] = {
+            "skillDetails": [
+                {"name": skill, "level": 2}
+                for skill in payload.skills
+            ],
+            "availabilityWindows": {
+                "monFri": {"morning": False, "afternoon": False, "evening": True},
+                "satSun": {"morning": True, "afternoon": True, "evening": True},
+            },
+            "maxMissionsPerWeek": 5,
+            "travelPreferences": {
+                "transportModes": ["Two Wheeler"],
+            },
+            "emotionalPreferences": {
+                "preferredMissionIntensity": payload.emotional_capacity,
+            },
+            "notificationPreferences": {
+                "pushNotifications": True,
+                "emailDigest": True,
+                "smsAlerts": False,
+            },
+            "accountMeta": {
+                "connectedProvider": "google",
+                "connectedEmail": payload.email.lower(),
+            },
+            "profileMeta": {
+                "city": None,
+                "zoneLabel": payload.zones[0] if payload.zones else None,
+            },
+        }
+
     db.collection("users").document(uid).set(user_doc)
 
     role_collection = ROLE_COLLECTIONS[payload.role]
@@ -426,7 +489,8 @@ async def signin(payload: SignInRequest) -> dict[str, Any]:
         logger.warning("Signin failed: bad password email=%s", payload.email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    user_data.setdefault("id", user_snapshot.id)
+    # Always trust the Firestore document id as canonical user id.
+    user_data["id"] = user_snapshot.id
     user = UserDocument.model_validate(user_data)
 
     if payload.role and payload.role != user.role:
@@ -441,8 +505,8 @@ async def signin(payload: SignInRequest) -> dict[str, Any]:
             detail=f"Account is registered as {user.role.value}",
         )
 
-    token = create_access_token(user.id)
-    logger.info("Signin successful uid=%s role=%s", user.id, user.role.value)
+    token = create_access_token(user_snapshot.id)
+    logger.info("Signin successful uid=%s role=%s", user_snapshot.id, user.role.value)
     return {
         "accessToken": token,
         "tokenType": "bearer",

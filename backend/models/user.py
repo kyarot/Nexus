@@ -77,6 +77,58 @@ class DNAProfile(BaseModel):
         return self
 
 
+class VolunteerSkillDetail(BaseModel):
+    name: str
+    level: int = Field(2, ge=1, le=3)
+
+
+class AvailabilitySlot(BaseModel):
+    morning: bool = False
+    afternoon: bool = False
+    evening: bool = False
+
+
+class VolunteerAvailabilityWindows(BaseModel):
+    monFri: AvailabilitySlot = Field(default_factory=lambda: AvailabilitySlot(evening=True))
+    satSun: AvailabilitySlot = Field(default_factory=lambda: AvailabilitySlot(morning=True, afternoon=True, evening=True))
+
+
+class VolunteerTravelPreferences(BaseModel):
+    transportModes: list[str] = Field(default_factory=lambda: ["Two Wheeler"])
+
+
+class VolunteerEmotionalPreferences(BaseModel):
+    preferredMissionIntensity: Literal["light", "moderate", "intensive"] = "moderate"
+
+
+class VolunteerNotificationPreferences(BaseModel):
+    pushNotifications: bool = True
+    emailDigest: bool = True
+    smsAlerts: bool = False
+
+
+class VolunteerAccountMeta(BaseModel):
+    passwordLastChangedAt: datetime | None = None
+    connectedProvider: str | None = None
+    connectedEmail: str | None = None
+
+
+class VolunteerProfileMeta(BaseModel):
+    city: str | None = None
+    zoneLabel: str | None = None
+
+
+class VolunteerProfileSettings(BaseModel):
+    skillDetails: list[VolunteerSkillDetail] = Field(default_factory=list)
+    availabilityWindows: VolunteerAvailabilityWindows = Field(default_factory=VolunteerAvailabilityWindows)
+    maxMissionsPerWeek: int = Field(5, ge=0, le=14)
+    travelPreferences: VolunteerTravelPreferences = Field(default_factory=VolunteerTravelPreferences)
+    emotionalPreferences: VolunteerEmotionalPreferences = Field(default_factory=VolunteerEmotionalPreferences)
+    notificationPreferences: VolunteerNotificationPreferences = Field(default_factory=VolunteerNotificationPreferences)
+    accountMeta: VolunteerAccountMeta = Field(default_factory=VolunteerAccountMeta)
+    profileMeta: VolunteerProfileMeta = Field(default_factory=VolunteerProfileMeta)
+
+
 class UserDocument(BaseModel):
     id: str
     name: str
@@ -90,8 +142,10 @@ class UserDocument(BaseModel):
     availability: str = "available"
     travelRadius: int = 10
     skills: list[str] = Field(default_factory=list)
+    additionalLanguages: list[str] = Field(default_factory=list)
     emotionalCapacity: float = Field(75.0, ge=0, le=100)
     avoidCategories: list[str] = Field(default_factory=list)
+    volunteerProfileSettings: VolunteerProfileSettings = Field(default_factory=VolunteerProfileSettings)
     impactPoints: int = 0
     missionsCompleted: int = 0
     successRate: float = 0.0

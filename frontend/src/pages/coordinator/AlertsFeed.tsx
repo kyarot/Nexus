@@ -1,46 +1,144 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { SignalPill } from "@/components/coordinator/SignalPill";
 import { ZoneRiskBadge } from "@/components/coordinator/ZoneRiskBadge";
 import { EmptyState } from "@/components/coordinator/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Slider } from "@/components/ui/slider";
 import { ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
+import {
+  createMissionFromDriftAlert,
+  dismissCoordinatorDriftAlert,
+  evaluateCoordinatorDriftAlerts,
+  getCoordinatorDriftAlerts,
+  type CoordinatorDriftAlert,
+} from "@/lib/coordinator-api";
 
-const alerts = [
-  {
-    id: 1, zone: "Zone 4 — Hebbal North", level: "critical" as const, badge: "Critical",
-    signals: [{ label: "Absenteeism +34%", variant: "danger" as const }, { label: "Whisper volume +58%", variant: "warning" as const }, { label: "Clinic walk-ins ↑", variant: "info" as const }],
-    description: "Pattern matches 2022 Koramangala signature. Est. 4–5 weeks to threshold.",
-    time: "3h ago",
-  },
-  {
-    id: 2, zone: "Zone 7 — Yelahanka East", level: "high" as const, badge: "Watch",
-    signals: [{ label: "Ration delays +2 weeks", variant: "warning" as const }, { label: "Migration ↑", variant: "info" as const }],
-    description: "Rising food insecurity indicators detected in eastern corridor. Monitor closely.",
-    time: "8h ago",
-  },
-  {
-    id: 3, zone: "Zone 2 — Jalahalli", level: "low" as const, badge: "Resolved",
-    signals: [],
-    description: "Intervention successful — need score dropped 40% over 3 weeks.",
-    time: "2d ago", resolved: true,
-  },
-];
+const relativeTime = (value?: string | null) => {
+  if (!value) return "just now";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "just now";
+  const diffMs = Date.now() - parsed.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h ago`;
+  return `${Math.floor(diffHour / 24)}d ago`;
+};
+
+const toZoneRiskLevel = (alert: CoordinatorDriftAlert): "critical" | "high" | "medium" | "low" => {
+  if (alert.severity === "critical") return "critical";
+  if (alert.severity === "high") return "high";
+  if (alert.status === "resolved") return "low";
+  return "medium";
+};
 
 export default function AlertsFeed() {
-  const [filter, setFilter] = useState("All");
-  const [expandedResolved, setExpandedResolved] = useState<number[]>([]);
-  const [severityRange, setSeverityRange] = useState([0]);
+  const token = localStorage.getItem("nexus_access_token");
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const { toast } = useToast();
 
-  const filtered = alerts.filter(a => {
-    if (filter === "Critical") return a.level === "critical";
-    if (filter === "High") return a.level === "high";
-    if (filter === "Watch") return a.level === "high";
-    return true;
+  const [filter, setFilter] = useState("All");
+  const [expandedResolved, setExpandedResolved] = useState<string[]>([]);
+  const [expandedSources, setExpandedSources] = useState<string[]>([]);
+  const [selectedZones, setSelectedZones] = useState<string[]>([]);
+
+  const alertsQuery = useQuery({
+    queryKey: ["coordinator-drift-alerts", token],
+    queryFn: () => getCoordinatorDriftAlerts(),
+    enabled: Boolean(token),
+    refetchInterval: 10_000,
   });
+
+  const evaluateMutation = useMutation({
+    mutationFn: () => evaluateCoordinatorDriftAlerts(),
+    onSuccess: () => alertsQuery.refetch(),
+  });
+
+  const createMissionMutation = useMutation({
+    mutationFn: (alertId: string) => createMissionFromDriftAlert(alertId),
+    onSuccess: (payload) => {
+      alertsQuery.refetch();
+      toast({
+        title: payload.created ? "Mission created" : "Mission already linked",
+        description: payload.autoAssigned
+          ? "Volunteer was auto-assigned automatically."
+          : "Mission created, assignment may be pending.",
+      });
+    },
+    onError: (error) => {
+      toast({ title: "Mission action failed", description: error instanceof Error ? error.message : "Unknown error" });
+    },
+  });
+
+  const dismissMutation = useMutation({
+    mutationFn: ({ alertId, reason }: { alertId: string; reason: string }) => dismissCoordinatorDriftAlert(alertId, reason),
+    onSuccess: () => {
+      alertsQuery.refetch();
+      toast({ title: "Alert dismissed", description: "Dismiss reason saved." });
+    },
+    onError: (error) => {
+      toast({ title: "Dismiss failed", description: error instanceof Error ? error.message : "Unknown error" });
+    },
+  });
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const streamUrl = `${apiBaseUrl}/coordinator/drift-alerts/stream?token=${encodeURIComponent(token)}`;
+    const source = new EventSource(streamUrl);
+
+    source.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data || "{}");
+        if (payload?.type === "drift_alert_update") {
+          alertsQuery.refetch();
+        }
+      } catch {
+        // Ignore malformed stream payloads.
+      }
+    };
+
+    source.onerror = () => {
+      source.close();
+    };
+
+    return () => {
+      source.close();
+    };
+  }, [alertsQuery, apiBaseUrl, token]);
+
+  const alerts = alertsQuery.data?.alerts ?? [];
+  const counts = alertsQuery.data?.counts;
+
+  const zones = useMemo(() => {
+    const names = new Set<string>();
+    alerts.forEach((alert) => {
+      if (alert.zoneName) {
+        names.add(alert.zoneName);
+      }
+    });
+    return Array.from(names).sort();
+  }, [alerts]);
+
+  const filtered = useMemo(() => {
+    return alerts.filter((alert) => {
+      if (filter === "Critical" && alert.severity !== "critical") return false;
+      if (filter === "High" && alert.severity !== "high") return false;
+      if (filter === "Watch" && alert.severity !== "watch") return false;
+      if (filter === "Actioned" && alert.status !== "actioned") return false;
+      if (filter === "Resolved" && alert.status !== "resolved") return false;
+
+      if (selectedZones.length > 0 && !selectedZones.includes(alert.zoneName)) return false;
+      return true;
+    });
+  }, [alerts, filter, selectedZones]);
 
   const borderColor = { critical: "border-l-destructive", high: "border-l-warning", medium: "border-l-primary", low: "border-l-success", insufficient: "border-l-muted" };
 
@@ -53,19 +151,30 @@ export default function AlertsFeed() {
           <h3 className="text-sm font-semibold text-foreground">Filter by</h3>
           <div className="space-y-3">
             <p className="text-xs font-medium text-muted-foreground uppercase">Zone</p>
-            {["Hebbal North", "Yelahanka", "Jalahalli", "Malleswaram"].map(z => (
-              <label key={z} className="flex items-center gap-2 text-xs text-foreground"><Checkbox />{z}</label>
+            {zones.map((zone) => (
+              <label key={zone} className="flex items-center gap-2 text-xs text-foreground">
+                <Checkbox
+                  checked={selectedZones.includes(zone)}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setSelectedZones((prev) => prev.includes(zone) ? prev : [...prev, zone]);
+                    } else {
+                      setSelectedZones((prev) => prev.filter((item) => item !== zone));
+                    }
+                  }}
+                />
+                {zone}
+              </label>
             ))}
           </div>
           <div className="space-y-3">
-            <p className="text-xs font-medium text-muted-foreground uppercase">Category</p>
-            {["Food", "Health", "Education", "Shelter"].map(c => (
-              <label key={c} className="flex items-center gap-2 text-xs text-foreground"><Checkbox />{c}</label>
-            ))}
-          </div>
-          <div>
-            <p className="text-xs font-medium text-muted-foreground uppercase mb-2">Severity</p>
-            <Slider value={severityRange} onValueChange={setSeverityRange} max={100} />
+            <p className="text-xs font-medium text-muted-foreground uppercase">Actions</p>
+            <Button size="sm" variant="outline" className="w-full" onClick={() => evaluateMutation.mutate()}>
+              Re-evaluate
+            </Button>
+            <Button size="sm" variant="ghost" className="w-full" onClick={() => setSelectedZones([])}>
+              Clear Filters
+            </Button>
           </div>
         </div>
 
@@ -74,29 +183,39 @@ export default function AlertsFeed() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-xl font-bold text-foreground">Drift Alerts</h1>
-              <p className="text-sm text-muted-foreground">7 active this week</p>
+              <p className="text-sm text-muted-foreground">
+                {counts ? `${counts.active + counts.actioned} active this week · ${counts.critical} critical` : "Live trend and prediction feed"}
+              </p>
             </div>
             <div className="flex items-center gap-3">
               <div className="flex gap-1">
-                {["All", "Critical", "High", "Watch"].map(f => (
+                {["All", "Critical", "High", "Watch", "Actioned", "Resolved"].map((f) => (
                   <button key={f} onClick={() => setFilter(f)} className={cn("rounded-pill px-3 py-1 text-xs font-medium transition-all", filter === f ? "bg-primary text-white" : "text-muted-foreground hover:bg-muted")}>{f}</button>
                 ))}
               </div>
-              <button className="text-xs text-primary font-medium hover:underline">Mark all read</button>
+              <button className="text-xs text-primary font-medium hover:underline" onClick={() => alertsQuery.refetch()}>Refresh</button>
             </div>
           </div>
 
-          {filtered.length === 0 ? (
+          {alertsQuery.isLoading ? (
+            <div className="py-6 text-sm text-muted-foreground">Loading drift alerts...</div>
+          ) : filtered.length === 0 ? (
             <EmptyState icon={AlertTriangle} heading="No alerts match your filters" subtext="Try adjusting your filter criteria" actionLabel="Clear filters" onAction={() => setFilter("All")} />
           ) : (
             <div className="space-y-4">
-              {filtered.map(a => (
-                <div key={a.id} className={cn("rounded-card border border-l-4 bg-card p-5 shadow-card transition-opacity", borderColor[a.level], a.resolved && "opacity-70")}>
-                  {a.resolved && !expandedResolved.includes(a.id) ? (
-                    <button onClick={() => setExpandedResolved(p => [...p, a.id])} className="flex w-full items-center justify-between">
+              {filtered.map((alert) => {
+                const zoneRisk = toZoneRiskLevel(alert);
+                const isResolvedLike = ["resolved", "dismissed", "expired"].includes(alert.status);
+                const showCollapsed = isResolvedLike && !expandedResolved.includes(alert.id);
+                const createLabel = alert.severity === "watch" ? "Schedule Follow-up Survey →" : "Create Mission →";
+
+                return (
+                <div key={alert.id} className={cn("rounded-card border border-l-4 bg-card p-5 shadow-card transition-opacity", borderColor[zoneRisk], isResolvedLike && "opacity-80")}>
+                  {showCollapsed ? (
+                    <button onClick={() => setExpandedResolved((prev) => [...prev, alert.id])} className="flex w-full items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <span className="text-sm font-semibold text-foreground">{a.zone}</span>
-                        <ZoneRiskBadge level={a.level} />
+                        <span className="text-sm font-semibold text-foreground">{alert.title}</span>
+                        <ZoneRiskBadge level={zoneRisk} />
                       </div>
                       <ChevronDown className="h-4 w-4 text-muted-foreground" />
                     </button>
@@ -104,35 +223,84 @@ export default function AlertsFeed() {
                     <>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <span className="text-sm font-semibold text-foreground">{a.zone}</span>
-                          <ZoneRiskBadge level={a.level} />
+                          <span className="text-sm font-semibold text-foreground">{alert.title}</span>
+                          <ZoneRiskBadge level={zoneRisk} />
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{alert.status}</span>
                         </div>
-                        <span className="text-xs text-muted-foreground">{a.time}</span>
+                        <span className="text-xs text-muted-foreground">{relativeTime(alert.updatedAt || alert.triggeredAt)}</span>
                       </div>
-                      {a.signals.length > 0 && (
+                      {(alert.signals || []).length > 0 && (
                         <div className="mt-3 flex flex-wrap gap-1.5">
-                          {a.signals.map((s, i) => <SignalPill key={i} label={s.label} variant={s.variant} />)}
+                          {(alert.signals || []).map((signal, index) => (
+                            <SignalPill key={`${signal.label}-${index}`} label={signal.label} variant={signal.variant} />
+                          ))}
                         </div>
                       )}
-                      <p className="mt-3 text-sm text-foreground leading-relaxed">{a.description}</p>
-                      {!a.resolved && (
+                      <p className="mt-3 text-sm text-foreground leading-relaxed">{alert.summary}</p>
+
+                      {alert.predictionText ? (
+                        <div className="mt-3 rounded-lg bg-muted/40 p-3 text-sm text-foreground/90">{alert.predictionText}</div>
+                      ) : null}
+
+                      {alert.recommendedAction ? (
+                        <p className="mt-3 text-sm text-foreground/80"><span className="font-semibold">Gemini recommendation:</span> {alert.recommendedAction}</p>
+                      ) : null}
+
+                      {alert.linkedMissionId ? (
+                        <p className="mt-2 text-xs font-medium text-success">Linked mission: {alert.linkedMissionId}</p>
+                      ) : null}
+
+                      {!isResolvedLike && (
                         <div className="mt-4 flex items-center gap-3">
-                          <span className="text-xs text-muted-foreground">Detected {a.time}</span>
+                          <span className="text-xs text-muted-foreground">Detected {relativeTime(alert.triggeredAt || alert.createdAt)}</span>
                           <div className="ml-auto flex gap-2">
-                            <Button size="sm" variant="gradient">Generate Brief →</Button>
-                            <Button size="sm" variant="ghost">Dispatch Volunteer →</Button>
+                            <Button size="sm" variant="gradient" onClick={() => createMissionMutation.mutate(alert.id)} disabled={createMissionMutation.isPending}>
+                              {createLabel}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setExpandedSources((prev) => prev.includes(alert.id) ? prev.filter((item) => item !== alert.id) : [...prev, alert.id])}
+                            >
+                              View source reports
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                const reason = window.prompt("Dismiss reason (required):", "already handled");
+                                if (!reason || !reason.trim()) {
+                                  return;
+                                }
+                                dismissMutation.mutate({ alertId: alert.id, reason: reason.trim() });
+                              }}
+                              disabled={dismissMutation.isPending}
+                            >
+                              Dismiss
+                            </Button>
                           </div>
                         </div>
                       )}
-                      {a.resolved && (
-                        <button onClick={() => setExpandedResolved(p => p.filter(x => x !== a.id))} className="mt-2 text-xs text-primary hover:underline flex items-center gap-1">
+
+                      {expandedSources.includes(alert.id) && (alert.sourceReports || []).length > 0 ? (
+                        <div className="mt-3 space-y-2 rounded-lg border bg-muted/20 p-3">
+                          {(alert.sourceReports || []).map((report) => (
+                            <div key={report.id} className="text-xs text-foreground/80">
+                              {report.needType || "need"} · {report.severity || "unknown"} · {report.familiesAffected || 0} families · {relativeTime(report.createdAt)}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {isResolvedLike && (
+                        <button onClick={() => setExpandedResolved((prev) => prev.filter((item) => item !== alert.id))} className="mt-2 text-xs text-primary hover:underline flex items-center gap-1">
                           <ChevronUp className="h-3 w-3" />Collapse
                         </button>
                       )}
                     </>
                   )}
                 </div>
-              ))}
+              )})}
             </div>
           )}
         </div>

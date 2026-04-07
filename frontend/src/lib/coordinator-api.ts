@@ -411,6 +411,350 @@ export interface CoordinatorMissionSourceReport {
   updatedAt?: string | null;
 }
 
+export interface CoordinatorVolunteerScoreDimensions {
+  skillMatch: number;
+  proximity: number;
+  languageMatch: number;
+  pastSuccess: number;
+  emotionalCapacity: number;
+  zoneFamiliarity: number;
+  availability: number;
+  burnoutRisk: number;
+}
+
+export interface CoordinatorVolunteerAIBreakdown {
+  dimensions: CoordinatorVolunteerScoreDimensions;
+  reasoning: string;
+}
+
+export interface CoordinatorVolunteerDecisionLogItem {
+  date: string;
+  missionType: string;
+  score: number;
+  outcome: string;
+  status: string;
+}
+
+export interface CoordinatorVolunteerMissionHistoryItem {
+  zone: string;
+  type: string;
+  outcome: string;
+  date: string;
+}
+
+export interface CoordinatorVolunteerDnaProfile {
+  skill: number;
+  proximity: number;
+  emotional: number;
+  language: number;
+  success: number;
+  availability: number;
+}
+
+export interface CoordinatorVolunteerItem {
+  id: string;
+  name: string;
+  initials: string;
+  org: string;
+  matchPercent: number;
+  distance: string;
+  distanceKm: number;
+  skills: string[];
+  burnout: "low" | "medium" | "high";
+  missions: number;
+  successRate: number;
+  color: string;
+  availability: string;
+  aiBreakdown: CoordinatorVolunteerAIBreakdown;
+  decisionLog: CoordinatorVolunteerDecisionLogItem[];
+  missionHistory: CoordinatorVolunteerMissionHistoryItem[];
+  dnaProfile: CoordinatorVolunteerDnaProfile;
+  languages: string[];
+  availableNow: boolean;
+  activeMissionCount: number;
+  hasThisWeekActivity: boolean;
+}
+
+export interface CoordinatorVolunteersResponse {
+  summary: {
+    totalVolunteers: number;
+    availableNow: number;
+    onMission: number;
+    burnoutRisk: number;
+  };
+  filters: {
+    skills: string[];
+    languages: string[];
+  };
+  volunteers: CoordinatorVolunteerItem[];
+  total: number;
+}
+
+export interface CoordinatorDriftAlertSignal {
+  label: string;
+  variant: "danger" | "warning" | "info" | "success";
+}
+
+export interface CoordinatorDriftAlertSourceReport {
+  id: string;
+  needType?: string | null;
+  severity?: string | null;
+  familiesAffected?: number | null;
+  personsAffected?: number | null;
+  additionalNotes?: string | null;
+  createdAt?: string | null;
+}
+
+export interface CoordinatorDriftAlert {
+  id: string;
+  ngoId: string;
+  zoneId: string;
+  zoneName: string;
+  ruleType: "rapid_score_rise" | "threshold_crossing" | "pattern_match" | "silence_high_score";
+  severity: "watch" | "high" | "critical";
+  status: "active" | "actioned" | "resolved" | "dismissed" | "expired";
+  title: string;
+  summary: string;
+  predictionText?: string | null;
+  recommendedAction?: string | null;
+  etaToCriticalDays?: number | null;
+  needType?: string;
+  signals?: CoordinatorDriftAlertSignal[];
+  sourceReportIds?: string[];
+  sourceReports?: CoordinatorDriftAlertSourceReport[];
+  evidence?: Record<string, unknown>;
+  linkedMissionId?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  triggeredAt?: string | null;
+  actionedAt?: string | null;
+  resolvedAt?: string | null;
+  dismissedAt?: string | null;
+  dismissedReason?: string | null;
+  expiredAt?: string | null;
+}
+
+export interface CoordinatorDriftAlertsResponse {
+  alerts: CoordinatorDriftAlert[];
+  total: number;
+  counts: {
+    total: number;
+    active: number;
+    actioned: number;
+    resolved: number;
+    dismissed: number;
+    expired: number;
+    critical: number;
+    high: number;
+    watch: number;
+  };
+}
+
+export interface CoordinatorCreateMissionFromAlertResponse {
+  alert?: CoordinatorDriftAlert;
+  mission?: CoordinatorMissionCreateResponse;
+  created: boolean;
+  autoAssigned: boolean;
+}
+
+export interface VolunteerSkillDetail {
+  name: string;
+  level: 1 | 2 | 3;
+}
+
+export interface VolunteerAvailabilitySlot {
+  morning: boolean;
+  afternoon: boolean;
+  evening: boolean;
+}
+
+export interface VolunteerProfileSettings {
+  skillDetails?: VolunteerSkillDetail[];
+  availabilityWindows?: {
+    monFri?: VolunteerAvailabilitySlot;
+    satSun?: VolunteerAvailabilitySlot;
+  };
+  maxMissionsPerWeek?: number;
+  travelPreferences?: {
+    transportModes?: string[];
+  };
+  emotionalPreferences?: {
+    preferredMissionIntensity?: "light" | "moderate" | "intensive";
+  };
+  notificationPreferences?: {
+    pushNotifications?: boolean;
+    emailDigest?: boolean;
+    smsAlerts?: boolean;
+  };
+  accountMeta?: {
+    passwordLastChangedAt?: string | null;
+    connectedProvider?: string | null;
+    connectedEmail?: string | null;
+  };
+  profileMeta?: {
+    city?: string | null;
+    zoneLabel?: string | null;
+  };
+}
+
+export interface VolunteerProfile {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+  role: "volunteer" | "fieldworker" | "coordinator";
+  zones: string[];
+  profilePhoto?: string | null;
+  availability?: string;
+  travelRadius?: number;
+  skills?: string[];
+  additionalLanguages?: string[];
+  emotionalCapacity?: number;
+  avoidCategories?: string[];
+  impactPoints?: number;
+  missionsCompleted?: number;
+  successRate?: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  primaryLanguage?: string;
+  volunteerProfileSettings?: VolunteerProfileSettings;
+}
+
+export interface VolunteerDashboardHero {
+  greeting: string;
+  weeklyImpactFamilies: number;
+  subtitle: string;
+}
+
+export interface VolunteerDashboardMissionCard {
+  id: string;
+  title: string;
+  zoneName: string;
+  distanceLabel: string;
+  durationLabel: string;
+  relativeTime: string;
+  status: string;
+  locationAddress: string;
+}
+
+export interface VolunteerDashboardImpactItem {
+  id: string;
+  title: string;
+  locationLabel: string;
+  status: string;
+  quote?: string | null;
+  needType: string;
+  completedAt?: string | null;
+}
+
+export interface VolunteerDashboardSidebar {
+  missionsPerMonth: number;
+  percentileText: string;
+  burnoutRisk: string;
+  burnoutScore: number;
+  burnoutInsight: string;
+  dnaProfile: Record<string, number>;
+  badges: string[];
+}
+
+export interface VolunteerDashboardResponse {
+  availability: string;
+  hero: VolunteerDashboardHero;
+  priorityMission?: VolunteerDashboardMissionCard | null;
+  activeMission?: VolunteerDashboardMissionCard | null;
+  recentImpactHistory: VolunteerDashboardImpactItem[];
+  sidebar: VolunteerDashboardSidebar;
+}
+
+export interface VolunteerImpactSummaryCard {
+  label: string;
+  value: string;
+  delta: string;
+}
+
+export interface VolunteerImpactTimelinePoint {
+  month: string;
+  points: number;
+  avg: number;
+}
+
+export interface VolunteerImpactLedgerItem {
+  missionId: string;
+  name: string;
+  zone: string;
+  beforeScore: number;
+  afterScore: number;
+  deltaScore: number;
+  type: "pos" | "neg";
+  date: string;
+}
+
+export interface VolunteerImpactZoneItem {
+  zoneId: string;
+  name: string;
+  missionCount: number;
+  lat: number;
+  lng: number;
+}
+
+export interface VolunteerImpactWellbeing {
+  risk: string;
+  score: number;
+  activity30d: {
+    missions: number;
+    avgDurationMinutes: number;
+    restDays: number;
+  };
+  advice: string;
+}
+
+export interface VolunteerImpactRank {
+  globalRank: number;
+  level: number;
+  xp: number;
+  xpTarget: number;
+  title: string;
+}
+
+export interface VolunteerImpactShare {
+  headline: string;
+  missions: number;
+  level: number;
+  shareText: string;
+  shareUrl: string;
+}
+
+export interface VolunteerImpactResponse {
+  range: string;
+  summaryCards: {
+    familiesHelped: VolunteerImpactSummaryCard;
+    needScoreReduced: VolunteerImpactSummaryCard;
+    totalHours: VolunteerImpactSummaryCard;
+    impactPoints: VolunteerImpactSummaryCard;
+  };
+  timeline: VolunteerImpactTimelinePoint[];
+  ledger: VolunteerImpactLedgerItem[];
+  zones: VolunteerImpactZoneItem[];
+  wellbeing: VolunteerImpactWellbeing;
+  dna: Record<string, number>;
+  badges: string[];
+  rank: VolunteerImpactRank;
+  share: VolunteerImpactShare;
+}
+
+export type VolunteerProfilePatchPayload = Partial<{
+  name: string;
+  phone: string | null;
+  profilePhoto: string | null;
+  availability: string;
+  travelRadius: number;
+  skills: string[];
+  additionalLanguages: string[];
+  emotionalCapacity: number;
+  avoidCategories: string[];
+  volunteerProfileSettings: VolunteerProfileSettings;
+}>;
+
 export const getCoordinatorDashboard = () => request<CoordinatorDashboardResponse>("/coordinator/dashboard");
 
 export const getCoordinatorInsights = () => request<{ insights: GeminiInsightItem[]; total: number }>("/coordinator/insights");
@@ -504,7 +848,90 @@ export const assignCoordinatorMission = (missionId: string, volunteerId: string)
 export const getCoordinatorMissionSourceReports = (missionId: string) =>
   request<{ reports: CoordinatorMissionSourceReport[]; total: number }>(`/coordinator/missions/${missionId}/source-reports`);
 
+export const getCoordinatorVolunteers = (params?: {
+  search?: string;
+  availability?: "available_now" | "this_week" | "anytime";
+  skills?: string[];
+  languages?: string[];
+  minMatch?: number;
+  maxDistanceKm?: number;
+  sortBy?: "match" | "distance" | "missions";
+}) => {
+  const query = new URLSearchParams();
+  if (params?.search) {
+    query.set("search", params.search);
+  }
+  if (params?.availability) {
+    query.set("availability", params.availability);
+  }
+  if (params?.skills?.length) {
+    query.set("skills", params.skills.join(","));
+  }
+  if (params?.languages?.length) {
+    query.set("languages", params.languages.join(","));
+  }
+  if (typeof params?.minMatch === "number") {
+    query.set("minMatch", String(params.minMatch));
+  }
+  if (typeof params?.maxDistanceKm === "number") {
+    query.set("maxDistanceKm", String(params.maxDistanceKm));
+  }
+  if (params?.sortBy) {
+    query.set("sortBy", params.sortBy);
+  }
+  const suffix = query.toString();
+  return request<CoordinatorVolunteersResponse>(`/coordinator/volunteers${suffix ? `?${suffix}` : ""}`);
+};
+
+export const getCoordinatorDriftAlerts = (params?: {
+  status?: string;
+  severity?: string;
+  zoneId?: string;
+}) => {
+  const query = new URLSearchParams();
+  if (params?.status) {
+    query.set("status", params.status);
+  }
+  if (params?.severity) {
+    query.set("severity", params.severity);
+  }
+  if (params?.zoneId) {
+    query.set("zoneId", params.zoneId);
+  }
+  const suffix = query.toString();
+  return request<CoordinatorDriftAlertsResponse>(`/coordinator/drift-alerts${suffix ? `?${suffix}` : ""}`);
+};
+
+export const evaluateCoordinatorDriftAlerts = (zoneId?: string) =>
+  request<{ updated: number; triggered: number }>(`/coordinator/drift-alerts/evaluate${zoneId ? `?zoneId=${encodeURIComponent(zoneId)}` : ""}`, {
+    method: "POST",
+  });
+
+export const createMissionFromDriftAlert = (alertId: string) =>
+  request<CoordinatorCreateMissionFromAlertResponse>(`/coordinator/drift-alerts/${alertId}/create-mission`, {
+    method: "POST",
+  });
+
+export const dismissCoordinatorDriftAlert = (alertId: string, reason: string) =>
+  request<{ alert: CoordinatorDriftAlert }>(`/coordinator/drift-alerts/${alertId}/dismiss`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+
 export const getVolunteerMissions = (status?: string) => {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
   return request<CoordinatorMissionListResponse>(`/volunteer/missions${query}`);
 };
+
+export const getVolunteerDashboard = () => request<VolunteerDashboardResponse>("/volunteer/dashboard");
+
+export const getVolunteerImpact = (range: "month" | "3m" | "6m" | "all") =>
+  request<VolunteerImpactResponse>(`/volunteer/impact?range=${encodeURIComponent(range)}`);
+
+export const getVolunteerProfile = () => request<VolunteerProfile>("/auth/me");
+
+export const updateVolunteerProfile = (payload: VolunteerProfilePatchPayload) =>
+  request<{ updated: boolean; fields: string[] }>("/auth/me", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });

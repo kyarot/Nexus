@@ -44,7 +44,8 @@ def _coerce_datetime(value: Any) -> Optional[datetime]:
             return None
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
         except ValueError:
             return None
     return None

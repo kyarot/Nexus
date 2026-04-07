@@ -17,6 +17,7 @@ from services.ocr_service import process_scan
 from services.voice_service import process_voice
 from services.mission_synthesis import upsert_mission_from_report
 from services.insights_synthesis import synthesize_zone_insight
+from services.drift_alerts import evaluate_zone_drift_alerts
 from models.report import (
     AssignmentRequirementProfile,
     CanonicalReportExtraction,
@@ -853,6 +854,7 @@ async def submit_report(
     background_tasks.add_task(upsert_mission_from_report, report_ref.id, report_data)
     if ngo_id:
         background_tasks.add_task(synthesize_zone_insight, ngo_id, payload.zoneId)
+        background_tasks.add_task(evaluate_zone_drift_alerts, ngo_id, payload.zoneId)
 
     return {
         "reportId": report_ref.id,
@@ -932,6 +934,7 @@ async def offline_sync(
             background_tasks.add_task(upsert_mission_from_report, report_ref.id, report_data)
             if ngo_id:
                 background_tasks.add_task(synthesize_zone_insight, ngo_id, report_payload.zoneId)
+                background_tasks.add_task(evaluate_zone_drift_alerts, ngo_id, report_payload.zoneId)
 
             synced_count += 1
         except HTTPException as exc:
@@ -1088,6 +1091,7 @@ async def update_report(
     ngo_id = str(existing_report.get("ngoId") or user.get("ngoId") or user.get("ngo_id") or "").strip()
     if ngo_id:
         background_tasks.add_task(synthesize_zone_insight, ngo_id, validated_payload.zoneId)
+        background_tasks.add_task(evaluate_zone_drift_alerts, ngo_id, validated_payload.zoneId)
 
     if merged_into:
         db.collection("missions").document(merged_into).collection("updates").add({

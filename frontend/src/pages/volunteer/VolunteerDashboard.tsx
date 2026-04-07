@@ -1,13 +1,115 @@
-import { useState } from "react";
+import { useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, Navigation, Clock, CheckCircle2, Leaf, Droplets, Languages, Utensils, ArrowRight, Bell, Target, Award, HeartPulse } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import {
+  getVolunteerDashboard,
+  updateVolunteerProfile,
+  type VolunteerDashboardImpactItem,
+} from "@/lib/coordinator-api";
+import {
+  Activity,
+  ArrowRight,
+  Award,
+  Clock,
+  Droplets,
+  HeartPulse,
+  Languages,
+  Leaf,
+  Loader2,
+  MapPin,
+  Navigation,
+  Target,
+  Utensils,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const needTypeIcon = (needType: string) => {
+  const normalized = needType.toLowerCase();
+  if (normalized.includes("food")) return { icon: Utensils, bg: "bg-[#FDF2E9]", textColor: "text-[#93522E]" };
+  if (normalized.includes("water") || normalized.includes("health")) return { icon: Droplets, bg: "bg-[#EFF6FF]", textColor: "text-[#3B82F6]" };
+  if (normalized.includes("education")) return { icon: Leaf, bg: "bg-[#ECFDF5]", textColor: "text-[#10B981]" };
+  return { icon: Activity, bg: "bg-[#EEF2FF]", textColor: "text-[#4F46E5]" };
+};
+
+const badgePresentation = (badge: string) => {
+  const normalized = badge.toLowerCase();
+  if (normalized.includes("food")) {
+    return { label: "Food Expert", icon: Utensils, iconClass: "text-amber-500", bgClass: "bg-amber-50" };
+  }
+  if (normalized.includes("kannada") || normalized.includes("language")) {
+    return { label: "Language Specialist", icon: Languages, iconClass: "text-emerald-500", bgClass: "bg-emerald-50" };
+  }
+  return { label: badge, icon: Award, iconClass: "text-indigo-500", bgClass: "bg-indigo-50" };
+};
+
+const statusClass = (status: string) => {
+  const normalized = status.toLowerCase();
+  if (normalized === "success" || normalized === "completed") return "bg-[#10B981] text-white";
+  if (normalized === "closed") return "bg-slate-200 text-slate-600";
+  return "bg-indigo-100 text-indigo-700";
+};
+
 export default function VolunteerDashboard() {
-  const [isAvailable, setIsAvailable] = useState(true);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const dashboardQuery = useQuery({
+    queryKey: ["volunteer-dashboard"],
+    queryFn: getVolunteerDashboard,
+    refetchInterval: 10000,
+  });
+
+  const updateAvailability = useMutation({
+    mutationFn: (isAvailable: boolean) =>
+      updateVolunteerProfile({
+        availability: isAvailable ? "available" : "unavailable",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["volunteer-dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["volunteer-profile"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Could not update availability", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const dashboard = dashboardQuery.data;
+  const isAvailable = (dashboard?.availability || "available").toLowerCase() === "available";
+
+  const recentImpactHistory = useMemo<VolunteerDashboardImpactItem[]>(
+    () => dashboard?.recentImpactHistory ?? [],
+    [dashboard?.recentImpactHistory],
+  );
+
+  const burnoutPercent = Math.max(0, Math.min(100, dashboard?.sidebar.burnoutScore || 0));
+  const missionRingPercent = Math.max(0, Math.min(100, ((dashboard?.sidebar.missionsPerMonth || 0) / 20) * 100));
+  const strokeDashoffset = 440 - (440 * missionRingPercent) / 100;
+
+  if (dashboardQuery.isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F8F9FE] text-slate-600">
+        <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Loading volunteer dashboard...
+      </div>
+    );
+  }
+
+  if (dashboardQuery.isError || !dashboard) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F8F9FE] p-8">
+        <div className="bg-white rounded-3xl p-8 border border-red-100 text-center max-w-lg w-full">
+          <h2 className="text-lg font-bold text-red-600 mb-2">Unable to load dashboard</h2>
+          <p className="text-slate-500 text-sm mb-6">{(dashboardQuery.error as Error)?.message || "Please try again."}</p>
+          <Button onClick={() => dashboardQuery.refetch()}>Retry</Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[#F8F9FE]">
@@ -21,16 +123,17 @@ export default function VolunteerDashboard() {
           <div className="bg-gradient-to-br from-[#4F46E5] to-[#3730A3] rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden">
             <div className="relative z-10 flex justify-between items-center">
               <div>
-                <h1 className="text-[2rem] font-bold tracking-tight">Good morning, Priya!</h1>
+                <h1 className="text-[2rem] font-bold tracking-tight">{dashboard.hero.greeting}</h1>
                 <p className="text-base opacity-80 mt-1 font-medium max-w-md">
-                  Your contribution to the Hebbal community last week impacted 45 families.
+                  {dashboard.hero.subtitle}
                 </p>
               </div>
               <div className="flex flex-col items-center gap-2">
                 <span className="text-[9px] font-black uppercase tracking-[0.2em] opacity-60">Availability</span>
                 <Switch 
                   checked={isAvailable} 
-                  onCheckedChange={setIsAvailable}
+                  onCheckedChange={(next) => updateAvailability.mutate(next)}
+                  disabled={updateAvailability.isPending}
                   className="data-[state=checked]:bg-[#10B981] h-7 w-12"
                 />
               </div>
@@ -45,34 +148,41 @@ export default function VolunteerDashboard() {
               <div className="absolute top-0 left-0 w-1.5 h-full bg-orange-400" />
               <div className="flex items-center justify-between mb-4">
                 <Badge className="bg-orange-50 text-orange-600 border-none font-black text-[9px] tracking-widest px-3 py-1 rounded-full">
-                  NEW MISSION PRIORITY
+                  {dashboard.priorityMission ? "NEW MISSION PRIORITY" : "NO PRIORITY MISSION"}
                 </Badge>
-                <span className="text-[10px] font-bold text-slate-400">2m ago</span>
+                <span className="text-[10px] font-bold text-slate-400">{dashboard.priorityMission?.relativeTime || "-"}</span>
               </div>
 
-              <h2 className="text-xl font-bold text-[#1A1A3D] mb-4">Hebbal North Food Distribution</h2>
+              <h2 className="text-xl font-bold text-[#1A1A3D] mb-4">{dashboard.priorityMission?.title || "No mission available right now"}</h2>
               
               <div className="space-y-3 mb-6">
                 <div className="flex items-center gap-3 text-slate-500 font-bold text-xs">
                   <MapPin className="w-4 h-4 text-slate-300" />
-                  Hebbal North Zone
+                  {dashboard.priorityMission?.zoneName || "Zone not assigned"}
                 </div>
                 <div className="flex items-center gap-3 text-slate-500 font-bold text-xs">
                   <Navigation className="w-4 h-4 text-slate-300" />
-                  3.2 km away
+                  {dashboard.priorityMission?.distanceLabel || "Distance unavailable"}
                 </div>
                 <div className="flex items-center gap-3 text-slate-500 font-bold text-xs">
                   <Clock className="w-4 h-4 text-slate-300" />
-                  4 Hours (Start 11:00 AM)
+                  {dashboard.priorityMission?.durationLabel || "Duration unavailable"}
                 </div>
               </div>
 
               <div className="flex gap-3">
-                <Button className="flex-1 bg-[#5A57FF] hover:bg-[#4845E0] text-white font-bold py-5 rounded-xl shadow-lg shadow-indigo-50">
+                <Button
+                  className="flex-1 bg-[#5A57FF] hover:bg-[#4845E0] text-white font-bold py-5 rounded-xl shadow-lg shadow-indigo-50"
+                  onClick={() => navigate("/volunteer/missions")}
+                >
                   View Details
                 </Button>
-                <Button variant="secondary" className="bg-slate-50 text-slate-400 font-bold py-5 px-8 rounded-xl border-none hover:bg-slate-100 italic">
-                  Decline
+                <Button
+                  variant="secondary"
+                  className="bg-slate-50 text-slate-400 font-bold py-5 px-8 rounded-xl border-none hover:bg-slate-100 italic"
+                  onClick={() => navigate("/volunteer/missions")}
+                >
+                  Open Missions
                 </Button>
               </div>
             </div>
@@ -85,17 +195,20 @@ export default function VolunteerDashboard() {
               </div>
 
               <div>
-                <h2 className="text-xl font-bold mb-1">Education Outreach</h2>
-                <p className="text-slate-400 text-sm font-medium">Marthahalli Community Center</p>
+                <h2 className="text-xl font-bold mb-1">{dashboard.activeMission?.title || "No active mission"}</h2>
+                <p className="text-slate-400 text-sm font-medium">{dashboard.activeMission?.locationAddress || "Awaiting next assignment"}</p>
               </div>
 
               <div className="mt-6 flex items-center justify-between">
-                <div className="flex -space-x-2">
-                  <img src="https://i.pravatar.cc/150?u=1" className="w-8 h-8 rounded-full border-2 border-[#1A1A3D]" alt="v" />
-                  <img src="https://i.pravatar.cc/150?u=2" className="w-8 h-8 rounded-full border-2 border-[#1A1A3D]" alt="v" />
-                  <div className="w-8 h-8 rounded-full bg-[#3730A3] border-2 border-[#1A1A3D] flex items-center justify-center text-[9px] font-bold">+4</div>
+                <div className="flex items-center gap-2">
+                  <Badge className="bg-[#3730A3] text-white border-none text-[9px] uppercase tracking-widest">
+                    {dashboard.activeMission?.status || "idle"}
+                  </Badge>
                 </div>
-                <Button className="bg-white text-[#1A1A3D] hover:bg-slate-100 font-bold px-6 py-4 rounded-xl flex gap-1.5 text-xs">
+                <Button
+                  className="bg-white text-[#1A1A3D] hover:bg-slate-100 font-bold px-6 py-4 rounded-xl flex gap-1.5 text-xs"
+                  onClick={() => navigate("/volunteer/missions")}
+                >
                   <Navigation className="w-3.5 h-3.5" /> Navigate
                 </Button>
               </div>
@@ -112,38 +225,26 @@ export default function VolunteerDashboard() {
             </div>
 
             <div className="space-y-3">
-              {[
-                { 
-                  title: "Peer Mentorship Program", 
-                  loc: "Whitefield • 3 days ago", 
-                  status: "SUCCESS", 
-                  quote: "Priya was exceptional in her communication.",
-                  icon: Leaf,
-                  bg: "bg-[#ECFDF5]",
-                  textColor: "text-[#10B981]"
-                },
-                { 
-                  title: "Clean Water Drive", 
-                  loc: "Koramangala • 1 week ago", 
-                  status: "SUCCESS", 
-                  icon: Droplets,
-                  bg: "bg-[#EFF6FF]",
-                  textColor: "text-[#3B82F6]"
-                }
-              ].map((h, i) => (
-                <div key={i} className="bg-white rounded-[1.5rem] p-4 shadow-sm border border-slate-50 relative group">
+              {recentImpactHistory.length === 0 ? (
+                <div className="bg-white rounded-[1.5rem] p-6 shadow-sm border border-slate-100 text-sm text-slate-500">
+                  No completed missions yet. Your impact history will appear here after your first completed assignment.
+                </div>
+              ) : recentImpactHistory.map((h, i) => {
+                const visual = needTypeIcon(h.needType);
+                return (
+                <div key={h.id} className="bg-white rounded-[1.5rem] p-4 shadow-sm border border-slate-50 relative group">
                   <div className="flex items-start gap-4">
-                    <div className={cn("p-3 rounded-xl", h.bg)}>
-                      <h.icon className={cn("w-5 h-5", h.textColor)} />
+                    <div className={cn("p-3 rounded-xl", visual.bg)}>
+                      <visual.icon className={cn("w-5 h-5", visual.textColor)} />
                     </div>
                     <div className="flex-1">
                       <div className="flex justify-between items-center">
                         <h3 className="text-base font-bold text-[#1A1A3D]">{h.title}</h3>
-                        <Badge className="bg-[#10B981] text-white border-none font-black text-[8px] tracking-widest px-2">
+                        <Badge className={cn("border-none font-black text-[8px] tracking-widest px-2", statusClass(h.status))}>
                           {h.status}
                         </Badge>
                       </div>
-                      <p className="text-xs font-medium text-slate-400 mb-2">{h.loc}</p>
+                      <p className="text-xs font-medium text-slate-400 mb-2">{h.locationLabel}</p>
                       {h.quote && (
                         <div className="bg-[#F8F9FE] rounded-xl p-3 border border-slate-50 italic text-slate-500 font-medium text-xs leading-relaxed relative">
                           "{h.quote}"
@@ -153,7 +254,7 @@ export default function VolunteerDashboard() {
                     </div>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           </div>
         </div>
@@ -170,17 +271,18 @@ export default function VolunteerDashboard() {
                 <circle 
                   cx="80" cy="80" r="70" stroke="#3730A3" strokeWidth="10" fill="transparent" 
                   strokeDasharray="440" strokeDashoffset="110"
+                  strokeDashoffset={strokeDashoffset}
                   strokeLinecap="round"
                   className="drop-shadow-[0_0_8px_rgba(55,48,163,0.2)]"
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-4xl font-black text-[#1A1A3D]">12</span>
+                <span className="text-4xl font-black text-[#1A1A3D]">{dashboard.sidebar.missionsPerMonth}</span>
                 <span className="text-[9px] font-black uppercase tracking-widest text-[#3730A3] mt-0.5">Missions/Mo</span>
               </div>
             </div>
             <p className="mt-6 text-xs font-bold text-[#1A1A3D] flex items-center justify-center gap-2">
-              <Target className="w-3.5 h-3.5 text-[#5A57FF]" /> Top 5% in Bengaluru
+              <Target className="w-3.5 h-3.5 text-[#5A57FF]" /> {dashboard.sidebar.percentileText}
             </p>
           </div>
 
@@ -195,8 +297,15 @@ export default function VolunteerDashboard() {
               
               {/* Radar Data Shape */}
               <svg viewBox="0 0 100 100" className="w-[80%] h-[80%]">
-                <polygon 
-                  points="50,15 88,38 82,78 50,92 18,78 12,38" 
+                <polygon
+                  points={
+                    `${50},${100 - (dashboard.sidebar.dnaProfile.skill || 50) * 0.85} ` +
+                    `${40 + (dashboard.sidebar.dnaProfile.proximity || 50) * 0.9},${35 + (100 - (dashboard.sidebar.dnaProfile.proximity || 50)) * 0.45} ` +
+                    `${30 + (dashboard.sidebar.dnaProfile.emotional || 50) * 0.75},${45 + (dashboard.sidebar.dnaProfile.emotional || 50) * 0.5} ` +
+                    `${50},${15 + (dashboard.sidebar.dnaProfile.lang || 50) * 0.75} ` +
+                    `${15 + (dashboard.sidebar.dnaProfile.success || 50) * 0.35},${45 + (dashboard.sidebar.dnaProfile.success || 50) * 0.4} ` +
+                    `${15 + (dashboard.sidebar.dnaProfile.avail || 50) * 0.2},${35 + (100 - (dashboard.sidebar.dnaProfile.avail || 50)) * 0.45}`
+                  }
                   fill="rgba(90, 87, 255, 0.25)" 
                   stroke="#5A57FF" 
                   strokeWidth="2.5" 
@@ -227,18 +336,23 @@ export default function VolunteerDashboard() {
               <Award className="w-3.5 h-3.5 text-slate-300" />
             </div>
             <div className="space-y-3">
-              <div className="bg-white border text-xs border-slate-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
-                <div className="p-2 bg-amber-50 rounded-lg">
-                  <Utensils className="w-4 h-4 text-amber-500" />
+              {dashboard.sidebar.badges.length === 0 ? (
+                <div className="bg-white border text-xs border-slate-100 rounded-xl p-3 flex items-center gap-3 shadow-sm text-slate-500 font-medium">
+                  No verified badges yet.
                 </div>
-                <span className="font-bold text-[#1A1A3D]">Food Expert</span>
-              </div>
-              <div className="bg-white border text-xs border-slate-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
-                <div className="p-2 bg-emerald-50 rounded-lg">
-                  <Languages className="w-4 h-4 text-emerald-500" />
-                </div>
-                <span className="font-bold text-[#1A1A3D]">Kannada Specialist</span>
-              </div>
+              ) : (
+                dashboard.sidebar.badges.slice(0, 4).map((badge) => {
+                  const visual = badgePresentation(badge);
+                  return (
+                    <div key={badge} className="bg-white border text-xs border-slate-100 rounded-xl p-3 flex items-center gap-3 shadow-sm">
+                      <div className={cn("p-2 rounded-lg", visual.bgClass)}>
+                        <visual.icon className={cn("w-4 h-4", visual.iconClass)} />
+                      </div>
+                      <span className="font-bold text-[#1A1A3D]">{visual.label}</span>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -249,14 +363,24 @@ export default function VolunteerDashboard() {
                 <HeartPulse className="w-3.5 h-3.5 text-slate-300" />
                 <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400">Burnout Risk</p>
               </div>
-              <span className="text-[8px] font-black text-[#10B981] uppercase tracking-widest px-2 py-0.5 bg-emerald-50 rounded-full">Low</span>
+              <span className={cn(
+                "text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full",
+                dashboard.sidebar.burnoutRisk === "high" || dashboard.sidebar.burnoutRisk === "critical"
+                  ? "text-red-600 bg-red-50"
+                  : dashboard.sidebar.burnoutRisk === "medium" || dashboard.sidebar.burnoutRisk === "moderate"
+                    ? "text-amber-600 bg-amber-50"
+                    : "text-[#10B981] bg-emerald-50"
+              )}>{dashboard.sidebar.burnoutRisk.toUpperCase()}</span>
             </div>
             <div className="h-2 bg-slate-100 rounded-full mb-4 overflow-hidden">
-              <div className="h-full w-1/4 bg-[#10B981] rounded-full" />
+              <div className={cn(
+                "h-full rounded-full",
+                burnoutPercent >= 70 ? "bg-red-500" : burnoutPercent >= 40 ? "bg-amber-500" : "bg-[#10B981]"
+              )} style={{ width: `${burnoutPercent}%` }} />
             </div>
             <div className="bg-[#5A57FF]/5 rounded-xl p-3 border border-[#5A57FF]/10">
               <p className="text-[9px] italic text-[#5A57FF] leading-relaxed font-bold">
-                "Stable engagement patterns detected."
+                "{dashboard.sidebar.burnoutInsight}"
               </p>
             </div>
           </div>
