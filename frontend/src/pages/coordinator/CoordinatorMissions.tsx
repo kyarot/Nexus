@@ -44,6 +44,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import {
+  assignCoordinatorMission,
   createCoordinatorMission,
   createCoordinatorZone,
   getCoordinatorMissionCandidatesForAudience,
@@ -56,7 +57,7 @@ import {
   type CoordinatorMissionSourceReport,
   type CoordinatorZone,
 } from "@/lib/coordinator-api";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 const statusLabel = (status: CoordinatorMission["status"]) => {
   switch (status) {
@@ -126,6 +127,8 @@ const CoordinatorMissions = () => {
   const [creationStep, setCreationStep] = useState(1);
   const [selectedVolunteerForMission, setSelectedVolunteerForMission] = useState<CoordinatorMissionCandidate | null>(null);
   const [selectedMission, setSelectedMission] = useState<CoordinatorMission | null>(null);
+  const [assignMission, setAssignMission] = useState<CoordinatorMission | null>(null);
+  const [selectedAssignCandidate, setSelectedAssignCandidate] = useState<CoordinatorMissionCandidate | null>(null);
   const [isScoringExpanded, setIsScoringExpanded] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState("Overview");
   const [selectedSourceReport, setSelectedSourceReport] = useState<CoordinatorMissionSourceReport | null>(null);
@@ -176,6 +179,12 @@ const CoordinatorMissions = () => {
     enabled: Boolean(missionForm.zoneId && missionForm.needType),
   });
 
+  const assignCandidatesQuery = useQuery({
+    queryKey: ["coordinator-mission-assign-candidates", assignMission?.id],
+    queryFn: () => getCoordinatorMissionCandidatesForAudience(assignMission!.zoneId, assignMission!.needType, "volunteer"),
+    enabled: Boolean(assignMission?.zoneId && assignMission?.needType),
+  });
+
   const sourceReportsQuery = useQuery({
     queryKey: ["coordinator-mission-source-reports", selectedMission?.id],
     queryFn: () => getCoordinatorMissionSourceReports(selectedMission!.id),
@@ -187,6 +196,16 @@ const CoordinatorMissions = () => {
       setSelectedVolunteerForMission(candidatesQuery.data[0]);
     }
   }, [candidatesQuery.data, selectedVolunteerForMission]);
+
+  useEffect(() => {
+    if (!assignMission) {
+      setSelectedAssignCandidate(null);
+      return;
+    }
+    if (assignCandidatesQuery.data?.length) {
+      setSelectedAssignCandidate(assignCandidatesQuery.data[0]);
+    }
+  }, [assignCandidatesQuery.data, assignMission]);
 
   const createMissionMutation = useMutation({
     mutationFn: (payload: CoordinatorMissionCreatePayload) => createCoordinatorMission(payload),
@@ -202,6 +221,21 @@ const CoordinatorMissions = () => {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to dispatch mission");
+    },
+  });
+
+  const assignVolunteerMutation = useMutation({
+    mutationFn: (candidateId: string) => assignCoordinatorMission(assignMission!.id, candidateId),
+    onSuccess: async (response) => {
+      await queryClient.invalidateQueries({ queryKey: ["coordinator-missions"] });
+      await queryClient.invalidateQueries({ queryKey: ["coordinator-dashboard"] });
+      setSelectedMission(response.mission);
+      setAssignMission(null);
+      setSelectedAssignCandidate(null);
+      toast.success("Volunteer assigned to mission");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to assign volunteer");
     },
   });
 
@@ -224,6 +258,27 @@ const CoordinatorMissions = () => {
     }
     return true;
   });
+
+  const pendingVolunteerMissions = filteredMissions.filter(
+    (mission) => mission.status === "pending" && mission.targetAudience === "volunteer" && !mission.assignedTo,
+  );
+
+  const bestMatchQueries = useQueries({
+    queries: pendingVolunteerMissions.map((mission) => ({
+      queryKey: ["coordinator-mission-best-match", mission.id],
+      queryFn: () => getCoordinatorMissionCandidatesForAudience(mission.zoneId, mission.needType, "volunteer"),
+      staleTime: 60_000,
+    })),
+  });
+
+  const bestMatchByMission = useMemo(() => {
+    const map = new Map<string, CoordinatorMissionCandidate | null>();
+    pendingVolunteerMissions.forEach((mission, index) => {
+      const bestCandidate = bestMatchQueries[index]?.data?.[0] ?? null;
+      map.set(mission.id, bestCandidate);
+    });
+    return map;
+  }, [bestMatchQueries, pendingVolunteerMissions]);
 
   const stats = [
     { label: "Active Missions", value: String(missionsQuery.data?.active ?? 0).padStart(2, "0"), delta: "Live from backend", color: "border-[#4F46E5]", icon: "bg-[#10B981]" },
@@ -423,26 +478,25 @@ const CoordinatorMissions = () => {
                               <span className="text-sm font-bold text-[#92400E] truncate">No volunteer assigned yet</span>
                             </div>
                             <div className="flex items-center gap-2 bg-white/60 px-3 py-1.5 rounded-lg text-[10px] font-black text-[#4F46E5] uppercase tracking-widest border border-indigo-100 whitespace-nowrap">
-                              <Sparkles className="w-3 h-3" /> Best match: {candidatesQuery.data?.[0]?.name || "Auto assign ready"}
+                              <Sparkles className="w-3 h-3" /> Best match: {bestMatchByMission.get(mission.id)?.name || "Auto assign ready"}
                             </div>
                           </div>
                           <div className="flex gap-4 flex-wrap">
                             <Button
                               className="bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] text-white font-bold rounded-xl px-6"
+                              onClick={() => setAssignMission(mission)}
+                            >
+                              Assign Volunteer →
+                            </Button>
+                            <Button
+                              variant="outline"
+                              className="border-slate-200 text-[#4F46E5] font-bold px-6"
                               onClick={() => {
-                                setShowCreateMission(true);
-                                setMissionForm((current) => ({
-                                  ...current,
-                                  title: mission.title,
-                                  description: mission.description,
-                                  zoneId: mission.zoneId,
-                                  needType: mission.needType,
-                                  priority: mission.priority,
-                                }));
-                                setSelectedVolunteerForMission(null);
+                                setSelectedMission(mission);
+                                setDetailTab("Source Reports");
                               }}
                             >
-                              Reassign Mission →
+                              View Reports
                             </Button>
                             <div className="flex-1" />
                             <Button variant="ghost" className="text-slate-400 font-bold">Edit Details</Button>
@@ -488,6 +542,16 @@ const CoordinatorMissions = () => {
                             <div className="flex gap-4">
                               <Button onClick={() => setSelectedMission(mission)} variant="ghost" className="text-[#4F46E5] font-bold flex gap-2 hover:bg-indigo-50">
                                 <Eye className="w-4 h-4" /> View Live
+                              </Button>
+                              <Button
+                                onClick={() => {
+                                  setSelectedMission(mission);
+                                  setDetailTab("Source Reports");
+                                }}
+                                variant="ghost"
+                                className="text-[#4F46E5] font-bold flex gap-2 hover:bg-indigo-50"
+                              >
+                                <FileText className="w-4 h-4" /> View Reports
                               </Button>
                               <Button variant="outline" className="border-red-100 text-red-500 hover:bg-red-50 font-bold px-6">Close Mission</Button>
                             </div>
@@ -1415,6 +1479,96 @@ const CoordinatorMissions = () => {
                   <span>Visit: {selectedSourceReport.visitType || "first_visit"}</span>
                   <span>Submitted: {selectedSourceReport.createdAt ? new Date(selectedSourceReport.createdAt).toLocaleString() : "N/A"}</span>
                 </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!assignMission} onOpenChange={(open) => !open && setAssignMission(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Assign volunteer to mission</DialogTitle>
+          </DialogHeader>
+
+          {assignMission && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm">
+                <span className="font-bold text-[#1A1A3D]">{assignMission.title}</span>
+                <span className="text-slate-500"> · {assignMission.zoneName || assignMission.zoneId}</span>
+                <span className="text-slate-500"> · {assignMission.needType}</span>
+              </div>
+
+              {assignCandidatesQuery.isLoading && (
+                <div className="rounded-xl border border-slate-100 bg-white px-4 py-6 text-sm text-slate-500">
+                  Loading volunteer recommendations...
+                </div>
+              )}
+
+              {!assignCandidatesQuery.isLoading && !(assignCandidatesQuery.data?.length) && (
+                <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-6 text-sm text-amber-700">
+                  No volunteer candidates available for this mission.
+                </div>
+              )}
+
+              <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
+                {(assignCandidatesQuery.data || []).map((candidate, index) => (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    onClick={() => setSelectedAssignCandidate(candidate)}
+                    className={cn(
+                      "w-full text-left rounded-xl border px-4 py-3 transition-all",
+                      selectedAssignCandidate?.id === candidate.id
+                        ? "border-[#4F46E5] bg-indigo-50"
+                        : "border-slate-100 bg-white hover:border-indigo-200",
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-[#1A1A3D]">{candidate.name}</span>
+                          {index === 0 && (
+                            <Badge className="bg-[#EEF2FF] text-[#3730A3] border-none text-[10px] font-bold">BEST MATCH</Badge>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-medium">{candidate.reason}</p>
+                        <p className="text-[11px] text-slate-400 font-medium">Skills: {candidate.skills.join(", ") || "-"}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs font-bold text-[#1A1A3D]">{candidate.matchPercent}%</p>
+                        <p className="text-[11px] text-slate-400">{candidate.distance}</p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between">
+                <Button variant="outline" onClick={() => setAssignMission(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={!assignCandidatesQuery.data?.length || assignVolunteerMutation.isPending}
+                  onClick={() => {
+                    const candidates = assignCandidatesQuery.data || [];
+                    const pool = candidates.slice(0, 3);
+                    const pick = pool[Math.floor(Math.random() * pool.length)];
+                    if (pick) {
+                      setSelectedAssignCandidate(pick);
+                      assignVolunteerMutation.mutate(pick.id);
+                    }
+                  }}
+                >
+                  Auto-assign
+                </Button>
+                <Button
+                  disabled={!selectedAssignCandidate || assignVolunteerMutation.isPending}
+                  onClick={() => selectedAssignCandidate && assignVolunteerMutation.mutate(selectedAssignCandidate.id)}
+                >
+                  {assignVolunteerMutation.isPending ? "Assigning..." : "Confirm assignment"}
+                </Button>
               </div>
             </div>
           )}

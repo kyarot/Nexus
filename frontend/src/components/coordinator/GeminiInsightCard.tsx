@@ -26,9 +26,18 @@ interface GeminiInsightCardProps {
   sourceCount?: string;
   timestamp?: string;
   className?: string;
+  sourceReports?: Array<{
+    id: string;
+    needType?: string | null;
+    severity?: string | null;
+    familiesAffected?: number | null;
+    personsAffected?: number | null;
+    additionalNotes?: string | null;
+    createdAt?: string | null;
+  }>;
 }
 
-export function GeminiInsightCard({ variant = "watch", zone, signals, description, sourceCount, timestamp, className }: GeminiInsightCardProps) {
+export function GeminiInsightCard({ variant = "watch", zone, signals, description, sourceCount, timestamp, className, sourceReports }: GeminiInsightCardProps) {
   const [expanded, setExpanded] = useState(false);
   const v = variantStyles[variant];
 
@@ -55,7 +64,24 @@ export function GeminiInsightCard({ variant = "watch", zone, signals, descriptio
         {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
         View source reports
       </button>
-      {expanded && <div className="mt-2 rounded-lg bg-muted p-3 text-xs text-muted-foreground">Source report data would appear here.</div>}
+      {expanded && (
+        <div className="mt-2 rounded-lg bg-muted p-3 text-xs text-muted-foreground space-y-2">
+          {sourceReports?.length ? (
+            sourceReports.map((report) => (
+              <div key={report.id} className="rounded-md bg-card p-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-foreground">{report.needType || "Report"}</span>
+                  <span className="text-[10px] uppercase">{report.severity || "unknown"}</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground">Families: {report.familiesAffected ?? 0} • Persons: {report.personsAffected ?? 0}</div>
+                {report.additionalNotes && <div className="text-[11px] text-muted-foreground">{report.additionalNotes}</div>}
+              </div>
+            ))
+          ) : (
+            <div className="text-[11px] text-muted-foreground">No source reports available.</div>
+          )}
+        </div>
+      )}
       <div className="mt-4 flex items-center gap-2">
         <Button size="sm" variant="gradient">Generate Plan →</Button>
         <Button size="sm" variant="ghost">Dispatch Volunteers →</Button>

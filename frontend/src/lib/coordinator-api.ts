@@ -46,6 +46,30 @@ export interface CoordinatorInsight {
   recommendedAction?: string;
 }
 
+export interface GeminiInsightSourceReport {
+  id: string;
+  needType?: string | null;
+  severity?: string | null;
+  familiesAffected?: number | null;
+  personsAffected?: number | null;
+  additionalNotes?: string | null;
+  createdAt?: string | null;
+}
+
+export interface GeminiInsightItem {
+  id: string;
+  zoneId?: string | null;
+  zoneName?: string | null;
+  summary?: string | null;
+  signals?: Array<{ label: string; variant: "danger" | "warning" | "info" | "success" }>;
+  severity?: "critical" | "high" | "watch" | "resolved";
+  status?: string | null;
+  reportCount?: number;
+  sourceNgoCount?: number;
+  generatedAt?: string | null;
+  sourceReports?: GeminiInsightSourceReport[];
+}
+
 export interface CoordinatorDashboardResponse {
   avgZoneScore: number;
   zonesAtRisk: number;
@@ -288,6 +312,12 @@ export interface CoordinatorMissionSourceReport {
 
 export const getCoordinatorDashboard = () => request<CoordinatorDashboardResponse>("/coordinator/dashboard");
 
+export const getCoordinatorInsights = () => request<{ insights: GeminiInsightItem[]; total: number }>("/coordinator/insights");
+
+export const synthesizeCoordinatorInsights = () => request<{ updated: boolean; zonesUpdated: number; reportsAdded: number }>("/coordinator/insights/synthesize", {
+  method: "POST",
+});
+
 export const getCoordinatorZones = (riskFilter?: string) => {
   const query = riskFilter ? `?risk_filter=${encodeURIComponent(riskFilter)}` : "";
   return request<{ zones: CoordinatorZone[]; total: number }>(`/coordinator/zones${query}`);
@@ -333,6 +363,12 @@ export const createCoordinatorMission = (payload: CoordinatorMissionCreatePayloa
 
 export const getCoordinatorMissionDetail = (missionId: string) =>
   request<CoordinatorMissionCreateResponse>(`/coordinator/missions/${missionId}`);
+
+export const assignCoordinatorMission = (missionId: string, volunteerId: string) =>
+  request<CoordinatorMissionCreateResponse>(`/coordinator/missions/${missionId}/assign`, {
+    method: "PATCH",
+    body: JSON.stringify({ volunteerId }),
+  });
 
 export const getCoordinatorMissionSourceReports = (missionId: string) =>
   request<{ reports: CoordinatorMissionSourceReport[]; total: number }>(`/coordinator/missions/${missionId}/source-reports`);

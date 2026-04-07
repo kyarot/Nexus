@@ -285,11 +285,6 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
   }, [progress, step]);
 
   const handleSubmit = async () => {
-    if (!activeMission?.id) {
-      setError("No active assigned mission found. Submit reports only from your Active Mission.");
-      return;
-    }
-
     setStep("processing");
     setProgress(0);
 
@@ -305,7 +300,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
     const personsAffected = parseInt(formData.persons || "0", 10) > 0
       ? parseInt(formData.persons || "0", 10)
       : (Number(extractedResult?.personsAffected) > 0 ? Number(extractedResult.personsAffected) : familiesAffected * 4);
-    const needType = activeMission.needType || formData.needType;
+    const needType = formData.needType;
     const severity = formData.severity.toLowerCase();
     const safetySignals = splitCsv(formData.riskFlags || "");
     const requiredResourceName = `${String(needType).toLowerCase().replace(/\s+/g, "-")}-support`;
@@ -321,8 +316,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
     });
 
     const payload = {
-      missionId: activeMission.id,
-      zoneId: activeMission.zoneId || zoneInfo.zoneId,
+      zoneId: zoneInfo.zoneId,
       needType,
       severity,
       familiesAffected,
@@ -921,7 +915,12 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                        <Label className="text-xs font-bold text-slate-500">Survey Date</Label>
                        <div className="relative">
                           <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                          <Input type="date" value={formData.surveyDate} className="h-12 pl-12 rounded-xl bg-slate-50 border-transparent text-sm font-bold" />
+                          <Input
+                            type="date"
+                            value={formData.surveyDate}
+                            onChange={(e) => setFormData(prev => ({ ...prev, surveyDate: e.target.value }))}
+                            className="h-12 pl-12 rounded-xl bg-slate-50 border-transparent text-sm font-bold"
+                          />
                        </div>
                     </div>
                  </div>

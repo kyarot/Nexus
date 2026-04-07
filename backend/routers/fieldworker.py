@@ -15,7 +15,8 @@ from core.storage import bucket
 from core.firebase import db, rtdb
 from services.ocr_service import process_scan
 from services.voice_service import process_voice
-from core.gemini import client, GEMINI_FLASH
+from services.mission_synthesis import upsert_mission_from_report
+from services.insights_synthesis import synthesize_zone_insight
 from models.report import (
     AssignmentRequirementProfile,
     CanonicalReportExtraction,
@@ -508,6 +509,7 @@ def _build_report_record(
     *,
     report_id: str,
     user_id: str,
+    ngo_id: str,
     merged_into: str | None,
     created_at: datetime,
     updated_at: datetime | None = None,
@@ -519,6 +521,7 @@ def _build_report_record(
         "id": report_id,
         "submittedBy": user_id,
         "submittedByName": payload.extractedData.get("submittedByName") if isinstance(payload.extractedData, dict) else None,
+        "ngoId": ngo_id,
         "missionId": merged_into,
         "zoneId": payload.zoneId,
         "createdAt": created_at,
@@ -784,65 +787,30 @@ async def submit_report(
     user: dict = Depends(role_required("fieldworker"))
 ):
     now = datetime.now()
-    mission_doc = _get_assigned_active_mission(user["id"], payload.missionId)
-    _assert_report_matches_mission(payload, mission_doc)
-    mission_id = mission_doc.id
 
-    mission_data = mission_doc.to_dict() or {}
-    payload = payload.model_copy(
-        update={
-            "missionId": mission_id,
-            "zoneId": mission_data.get("zoneId") or payload.zoneId,
-            "needType": mission_data.get("needType") or payload.needType,
-        }
-    )
+    ngo_id = str(user.get("ngoId") or user.get("ngo_id") or "").strip()
 
     report_ref = db.collection("reports").document()
     report_data = _build_report_record(
         payload,
         report_id=report_ref.id,
         user_id=user["id"],
-        merged_into=mission_id,
+        ngo_id=ngo_id,
+        merged_into=None,
         created_at=now,
     )
     report_ref.set(report_data)
     _update_zone_terrain(payload.zoneId, report_data.get("extractedData") or {}, now)
 
-    merged = True
-    triggered_synthesis = False
-
-    if mission_id:
-        mission_ref = db.collection("missions").document(mission_id)
-        mission_ref.update(
-            {
-                "sourceReportIds": firestore.ArrayUnion([report_ref.id]),
-                "updatedAt": now,
-                "newUpdates": firestore.Increment(1),
-                "notes": payload.additionalNotes or payload.extractedData.get("additionalNotes"),
-            }
-        )
-        mission_ref.collection("updates").add(
-            {
-                "type": "report_merged",
-                "reportId": report_ref.id,
-                "timestamp": now,
-                "submittedBy": user["id"],
-                "needType": payload.needType,
-                "severity": payload.severity,
-                "familiesAffected": payload.familiesAffected,
-            }
-        )
-    else:
-        # Safety fallback; should never happen due to active mission enforcement.
-        triggered_synthesis = should_trigger_synthesis(payload.zoneId)
-        if triggered_synthesis:
-            background_tasks.add_task(trigger_synthesis_check, payload.zoneId)
+    background_tasks.add_task(upsert_mission_from_report, report_ref.id, report_data)
+    if ngo_id:
+        background_tasks.add_task(synthesize_zone_insight, ngo_id, payload.zoneId)
 
     return {
         "reportId": report_ref.id,
-        "merged": merged,
-        "missionId": mission_id,
-        "triggeredSynthesis": triggered_synthesis,
+        "merged": False,
+        "missionId": None,
+        "triggeredSynthesis": True,
     }
 
 @router.get("/reports")
@@ -887,25 +855,13 @@ async def offline_sync(
     user: dict = Depends(role_required("fieldworker"))
 ):
     synced_count = 0
-    merged_count = 0
     errors: list[dict[str, Any]] = []
+
+    ngo_id = str(user.get("ngoId") or user.get("ngo_id") or "").strip()
 
     for index, report_payload in enumerate(payload.reports):
         try:
             report_payload = ReportPayload.model_validate(report_payload.model_dump())
-            mission_doc = _get_assigned_active_mission(user["id"], report_payload.missionId)
-            _assert_report_matches_mission(report_payload, mission_doc)
-
-            # Sequential processing to avoid race conditions.
-            merged_into = mission_doc.id
-            mission_data = mission_doc.to_dict() or {}
-            report_payload = report_payload.model_copy(
-                update={
-                    "missionId": merged_into,
-                    "zoneId": mission_data.get("zoneId") or report_payload.zoneId,
-                    "needType": mission_data.get("needType") or report_payload.needType,
-                }
-            )
 
             now = datetime.now()
             report_ref = db.collection("reports").document()
@@ -913,27 +869,15 @@ async def offline_sync(
                 report_payload,
                 report_id=report_ref.id,
                 user_id=user["id"],
-                merged_into=merged_into,
+                ngo_id=ngo_id,
+                merged_into=None,
                 created_at=now,
             )
             report_ref.set(report_data)
             _update_zone_terrain(report_payload.zoneId, report_data.get("extractedData") or {}, now)
-
-            merged_count += 1
-            mission_ref = db.collection("missions").document(merged_into)
-            mission_ref.update(
-                {
-                    "sourceReportIds": firestore.ArrayUnion([report_ref.id]),
-                    "updatedAt": now,
-                    "newUpdates": firestore.Increment(1),
-                }
-            )
-            db.collection("missions").document(merged_into).collection("updates").add({
-                "type": "report_merged",
-                "reportId": report_ref.id,
-                "timestamp": now,
-                "submittedBy": user["id"]
-            })
+            background_tasks.add_task(upsert_mission_from_report, report_ref.id, report_data)
+            if ngo_id:
+                background_tasks.add_task(synthesize_zone_insight, ngo_id, report_payload.zoneId)
 
             synced_count += 1
         except HTTPException as exc:
@@ -943,7 +887,7 @@ async def offline_sync(
 
     return {
         "synced": synced_count,
-        "merged": merged_count,
+        "merged": 0,
         "errors": errors,
     }
 
@@ -952,6 +896,7 @@ async def offline_sync(
 async def update_report(
     report_id: str,
     payload: ReportUpdatePayload,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(role_required("fieldworker"))
 ):
     report_ref = db.collection("reports").document(report_id)
@@ -1068,6 +1013,7 @@ async def update_report(
         validated_payload,
         report_id=report_id,
         user_id=user["id"],
+        ngo_id=str(existing_report.get("ngoId") or user.get("ngoId") or user.get("ngo_id") or "").strip(),
         merged_into=merged_into,
         created_at=existing_report.get("createdAt") or now,
         updated_at=now,
@@ -1077,6 +1023,11 @@ async def update_report(
 
     report_ref.set(updated_report)
     _update_zone_terrain(validated_payload.zoneId, updated_report.get("extractedData") or {}, now)
+
+    background_tasks.add_task(upsert_mission_from_report, report_id, updated_report)
+    ngo_id = str(existing_report.get("ngoId") or user.get("ngoId") or user.get("ngo_id") or "").strip()
+    if ngo_id:
+        background_tasks.add_task(synthesize_zone_insight, ngo_id, validated_payload.zoneId)
 
     if merged_into:
         db.collection("missions").document(merged_into).collection("updates").add({

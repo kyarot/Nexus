@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from google.cloud.firestore_v1.base_query import FieldFilter
+from pydantic import BaseModel
 
 from core.dependencies import role_required
 from core.firebase import db
@@ -27,6 +28,10 @@ router = APIRouter()
 logger = logging.getLogger("nexus.missions")
 
 ACTIVE_MISSION_STATUSES = {MissionStatus.dispatched.value, MissionStatus.en_route.value, MissionStatus.on_ground.value}
+
+
+class MissionAssignRequest(BaseModel):
+    volunteerId: str
 
 
 def _now() -> datetime:
@@ -255,6 +260,14 @@ async def get_mission_candidates(
         user_data["id"] = doc.id
         if str(user_data.get("availability") or "available").lower() not in {"available", "online"}:
             continue
+        assigned_snapshot = (
+            db.collection("missions")
+            .where(filter=FieldFilter("assignedTo", "==", user_data["id"]))
+            .limit(5)
+            .get()
+        )
+        if any(str(mission.to_dict().get("status") or "").lower() in ACTIVE_MISSION_STATUSES for mission in assigned_snapshot):
+            continue
         candidates.append(_score_candidate(user_data, zone, need_type))
 
     candidates.sort(key=lambda candidate: (candidate.matchPercent, candidate.successRate), reverse=True)
@@ -390,6 +403,81 @@ async def get_mission_detail(
         )
 
     return MissionCreateResponse(mission=mission, matchedCandidate=best_candidate)
+
+
+@router.patch("/missions/{mission_id}/assign", response_model=MissionCreateResponse)
+async def assign_mission_volunteer(
+    mission_id: str,
+    payload: MissionAssignRequest,
+    user: dict[str, Any] = Depends(role_required("coordinator")),
+) -> MissionCreateResponse:
+    ngo_id = _get_coordinator_ngo_id(user)
+    mission_ref = db.collection("missions").document(mission_id)
+    mission_snapshot = mission_ref.get()
+    if not mission_snapshot.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission not found")
+
+    mission_data = mission_snapshot.to_dict() or {}
+    if str(mission_data.get("ngoId") or "") != ngo_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mission does not belong to your NGO")
+
+    zone_id = str(mission_data.get("zoneId") or "").strip()
+    if not zone_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mission has no zone assigned")
+
+    zone = _get_zone(zone_id, ngo_id)
+
+    volunteer_id = payload.volunteerId.strip()
+    volunteer_snapshot = db.collection("users").document(volunteer_id).get()
+    if not volunteer_snapshot.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Volunteer not found")
+
+    volunteer_data = volunteer_snapshot.to_dict() or {}
+    if str(volunteer_data.get("ngoId") or "") != ngo_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Volunteer does not belong to your NGO")
+
+    role = str(volunteer_data.get("role") or "").lower().strip()
+    if role != "volunteer":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected user is not a volunteer")
+
+    candidate = _score_candidate(volunteer_data | {"id": volunteer_id}, zone, str(mission_data.get("needType") or ""))
+    now = _now()
+    mission_update = {
+        "assignedTo": candidate.id,
+        "assignedToName": candidate.name,
+        "assignedVolunteerMatch": candidate.matchPercent,
+        "assignedVolunteerDistance": candidate.distance,
+        "assignedVolunteerReason": candidate.reason,
+        "status": MissionStatus.dispatched.value,
+        "statusText": "Volunteer en route",
+        "updatedAt": now,
+        "dispatchedAt": now,
+        "autoAssigned": False,
+    }
+
+    mission_ref.update(mission_update)
+    mission_ref.collection("updates").add({
+        "type": "mission_assigned",
+        "volunteerId": candidate.id,
+        "volunteerName": candidate.name,
+        "timestamp": now,
+        "submittedBy": user["id"],
+    })
+
+    db.collection("notifications").add({
+        "userId": candidate.id,
+        "type": "mission_assigned",
+        "missionId": mission_id,
+        "title": mission_data.get("title") or "Mission assignment",
+        "message": f"New mission assigned in {zone.name}",
+        "timestamp": now,
+        "read": False,
+    })
+
+    mission_data.update(mission_update)
+    mission_data["id"] = mission_id
+    mission = _mission_from_doc(mission_id, mission_data)
+    return MissionCreateResponse(mission=mission, matchedCandidate=candidate)
 
 
 @router.get("/missions/{mission_id}/source-reports", response_model=dict[str, Any])

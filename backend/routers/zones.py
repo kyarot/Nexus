@@ -27,6 +27,22 @@ router = APIRouter()
 logger = logging.getLogger("nexus.zones")
 
 
+def _coerce_datetime(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    if hasattr(value, "to_datetime"):
+        try:
+            return value.to_datetime()
+        except Exception:
+            return None
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
 def get_coordinator_ngo_id(user: dict[str, Any]) -> str:
     ngo_id = user.get("ngoId") or user.get("ngo_id")
     if not ngo_id:
@@ -97,7 +113,27 @@ async def get_coordinator_dashboard(
         .order_by("generatedAt", direction="DESCENDING")
         .limit(2)
     )
-    recent_insights = [doc.to_dict() or {} for doc in insights_query.stream()]
+    try:
+        recent_insights = [doc.to_dict() or {} for doc in insights_query.stream()]
+    except Exception as exc:
+        logger.warning("Falling back to index-free insights query: %s", exc)
+        fallback_docs = db.collection("insights").where("ngoId", "==", ngo_id).stream()
+        fallback_items: list[dict[str, Any]] = []
+
+        for doc in fallback_docs:
+            item = doc.to_dict() or {}
+            if item.get("status") != "active":
+                continue
+            item["_generatedAt"] = _coerce_datetime(item.get("generatedAt"))
+            fallback_items.append(item)
+
+        fallback_items.sort(
+            key=lambda item: item.get("_generatedAt") or datetime.min,
+            reverse=True,
+        )
+        for item in fallback_items:
+            item.pop("_generatedAt", None)
+        recent_insights = fallback_items[:2]
 
     available_volunteers = 0
     try:

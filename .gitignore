@@ -20,8 +20,13 @@ secrets/
 *.p12
 *.pfx
 *.service-account.json
+service-account*.json
 firebase-service-account.json
 gcp-service-account.json
+firebase-adminsdk*.json
+google-credentials.json
+credentials.json
+serviceAccountKey.json
 
 # Local runtime artifacts
 *.db

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Camera, UserPlus, FileText, Map } from "lucide-react";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
@@ -56,6 +57,13 @@ const timeAgo = (value?: string) => {
   if (diffHours < 24) return `${diffHours}h ago`;
   return `${Math.floor(diffHours / 24)}d ago`;
 };
+
+const quickActions = [
+  { icon: Camera, label: "Scan Report" },
+  { icon: UserPlus, label: "Add Volunteer" },
+  { icon: FileText, label: "Gemini Insights", path: "/dashboard/insights" },
+  { icon: Map, label: "View Map" },
+];
 
 export default function Dashboard() {
   const token = localStorage.getItem("nexus_access_token");
@@ -179,7 +187,12 @@ export default function Dashboard() {
 
             <div className="lg:col-span-2 space-y-card-gap">
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-foreground">Gemini Insights</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-foreground">Gemini Insights</h3>
+                  <Link className="text-xs font-semibold text-primary hover:text-primary/80" to="/dashboard/insights">
+                    Open Insights
+                  </Link>
+                </div>
                 {(insightCards.length ? insightCards : fallbackInsightCards).map((insight, index) => (
                   <GeminiInsightCard
                     key={index}
@@ -230,17 +243,26 @@ export default function Dashboard() {
           <div>
             <h4 className="text-sm font-semibold text-foreground mb-3">Quick Actions</h4>
             <div className="grid grid-cols-2 gap-2">
-              {[
-                { icon: Camera, label: "Scan Report" },
-                { icon: UserPlus, label: "Add Volunteer" },
-                { icon: FileText, label: "Generate Brief" },
-                { icon: Map, label: "View Map" },
-              ].map((a, i) => (
-                <button key={i} className="flex flex-col items-center gap-1.5 rounded-card border p-3 text-xs font-medium text-muted-foreground hover:bg-primary-light hover:text-primary hover:border-primary/30 transition-all">
-                  <a.icon className="h-4 w-4" />
-                  {a.label}
-                </button>
-              ))}
+              {quickActions.map((action, index) => {
+                const className =
+                  "flex flex-col items-center gap-1.5 rounded-card border p-3 text-xs font-medium text-muted-foreground hover:bg-primary-light hover:text-primary hover:border-primary/30 transition-all";
+
+                if (action.path) {
+                  return (
+                    <Link key={index} className={className} to={action.path}>
+                      <action.icon className="h-4 w-4" />
+                      {action.label}
+                    </Link>
+                  );
+                }
+
+                return (
+                  <button key={index} className={className}>
+                    <action.icon className="h-4 w-4" />
+                    {action.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

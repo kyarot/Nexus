@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { GeminiInsightCard } from "@/components/coordinator/GeminiInsightCard";
 import { GeminiProcessing } from "@/components/coordinator/GeminiProcessing";
@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sparkles, Send, RefreshCw, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getCoordinatorInsights, synthesizeCoordinatorInsights } from "@/lib/coordinator-api";
 
 const chatMessages = [
   { role: "user", text: "What's the situation in Hebbal North?" },
@@ -16,6 +18,26 @@ const promptChips = ["Summarize all zones", "What worked in Hebbal?", "Generate 
 
 export default function GeminiInsights() {
   const [chatInput, setChatInput] = useState("");
+  const queryClient = useQueryClient();
+
+  const insightsQuery = useQuery({
+    queryKey: ["coordinator-insights"],
+    queryFn: getCoordinatorInsights,
+  });
+
+  const synthesizeMutation = useMutation({
+    mutationFn: synthesizeCoordinatorInsights,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["coordinator-insights"] });
+    },
+  });
+
+  const insights = insightsQuery.data?.insights ?? [];
+  const totals = useMemo(() => {
+    const reportTotal = insights.reduce((sum, insight) => sum + (insight.reportCount || 0), 0);
+    const ngoTotal = insights.reduce((sum, insight) => sum + (insight.sourceNgoCount || 0), 0);
+    return { reportTotal, ngoTotal };
+  }, [insights]);
 
   return (
     <div className="flex flex-col h-full">
@@ -29,40 +51,37 @@ export default function GeminiInsights() {
                 <Sparkles className="h-5 w-5 text-primary" />
                 <h1 className="text-xl font-bold text-foreground">Gemini Insights</h1>
               </div>
-              <p className="text-sm text-muted-foreground mt-1">AI-synthesized intelligence from 1,247 reports across 12 NGOs</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                AI-synthesized intelligence from {totals.reportTotal || 0} reports across {totals.ngoTotal || 1} NGOs
+              </p>
             </div>
             <div className="flex gap-2">
-              <Button size="sm" variant="ghost"><RefreshCw className="h-4 w-4 mr-1" />Refresh</Button>
+              <Button size="sm" variant="ghost" onClick={() => synthesizeMutation.mutate()}>
+                <Sparkles className="h-4 w-4 mr-1" />Synthesize
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => insightsQuery.refetch()}>
+                <RefreshCw className="h-4 w-4 mr-1" />Refresh
+              </Button>
               <Button size="sm" variant="ghost"><Download className="h-4 w-4 mr-1" />Export All</Button>
             </div>
           </div>
 
-          <GeminiInsightCard
-            variant="critical"
-            zone="Zone 4 — Hebbal North"
-            signals={[
-              { label: "Absenteeism +34%", variant: "danger" },
-              { label: "Whisper volume +58%", variant: "warning" },
-              { label: "Clinic walk-ins ↑", variant: "info" },
-            ]}
-            description="Three converging signals detected in Hebbal North. School absenteeism has spiked 34% in the last 2 weeks, coinciding with a 58% increase in whisper network volume. Local clinic walk-ins are also rising. This pattern closely matches the 2022 Koramangala food insecurity signature. Estimated 4-5 weeks to critical threshold."
-            sourceCount="Synthesized from 23 reports · 4 NGOs"
-            timestamp="3h ago"
-          />
+          {insights.map((insight) => (
+            <GeminiInsightCard
+              key={insight.id}
+              variant={insight.severity || "watch"}
+              zone={`${insight.zoneName || insight.zoneId || "Zone"}`}
+              signals={insight.signals || []}
+              description={insight.summary || "No summary available."}
+              sourceCount={`Synthesized from ${insight.reportCount || 0} reports · ${insight.sourceNgoCount || 1} NGOs`}
+              timestamp={insight.generatedAt ? new Date(insight.generatedAt).toLocaleString() : ""}
+              sourceReports={insight.sourceReports || []}
+            />
+          ))}
 
-          <GeminiInsightCard
-            variant="watch"
-            zone="Zone 7 — Yelahanka East"
-            signals={[
-              { label: "Ration delays +2 weeks", variant: "warning" },
-              { label: "Migration patterns ↑", variant: "info" },
-            ]}
-            description="Rising food insecurity indicators in the eastern corridor. Ration delivery delays extending to 2 weeks, combined with increased seasonal migration. Monitor closely — could escalate within 3 weeks."
-            sourceCount="Synthesized from 12 reports · 3 NGOs"
-            timestamp="6h ago"
-          />
-
-          <GeminiProcessing text="Synthesizing 47 new reports..." />
+          {synthesizeMutation.isPending && (
+            <GeminiProcessing text="Synthesizing new reports..." />
+          )}
 
           {/* Synthesis history */}
           <div>
