@@ -10,8 +10,13 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
-  SheetClose,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -42,11 +47,13 @@ import {
   createCoordinatorMission,
   createCoordinatorZone,
   getCoordinatorMissionCandidatesForAudience,
+  getCoordinatorMissionSourceReports,
   getCoordinatorMissions,
   getCoordinatorZones,
   type CoordinatorMission,
   type CoordinatorMissionCandidate,
   type CoordinatorMissionCreatePayload,
+  type CoordinatorMissionSourceReport,
   type CoordinatorZone,
 } from "@/lib/coordinator-api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -121,6 +128,7 @@ const CoordinatorMissions = () => {
   const [selectedMission, setSelectedMission] = useState<CoordinatorMission | null>(null);
   const [isScoringExpanded, setIsScoringExpanded] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState("Overview");
+  const [selectedSourceReport, setSelectedSourceReport] = useState<CoordinatorMissionSourceReport | null>(null);
   const [missionForm, setMissionForm] = useState<CoordinatorMissionCreatePayload>(defaultMissionForm);
   const [newZoneForm, setNewZoneForm] = useState(defaultNewZoneForm);
   const [showNewZoneForm, setShowNewZoneForm] = useState(false);
@@ -166,6 +174,12 @@ const CoordinatorMissions = () => {
     queryKey: ["coordinator-mission-candidates", missionForm.zoneId, missionForm.needType, missionForm.targetAudience],
     queryFn: () => getCoordinatorMissionCandidatesForAudience(missionForm.zoneId, missionForm.needType, missionForm.targetAudience),
     enabled: Boolean(missionForm.zoneId && missionForm.needType),
+  });
+
+  const sourceReportsQuery = useQuery({
+    queryKey: ["coordinator-mission-source-reports", selectedMission?.id],
+    queryFn: () => getCoordinatorMissionSourceReports(selectedMission!.id),
+    enabled: Boolean(selectedMission?.id),
   });
 
   useEffect(() => {
@@ -387,7 +401,15 @@ const CoordinatorMissions = () => {
                           {(mission.newUpdates ?? 0) > 0 && (
                             <div className="flex items-center justify-between bg-[#FFF7ED] text-[#92400E] px-3 py-1.5 rounded-full border border-amber-100">
                               <span className="text-[11px] font-bold">{mission.newUpdates} new reports added while mission is active</span>
-                              <button className="text-[11px] font-black underline hover:opacity-80">View updates →</button>
+                              <button
+                                className="text-[11px] font-black underline hover:opacity-80"
+                                onClick={() => {
+                                  setSelectedMission(mission);
+                                  setDetailTab("Live Updates");
+                                }}
+                              >
+                                View updates →
+                              </button>
                             </div>
                           )}
                         </div>
@@ -600,9 +622,6 @@ const CoordinatorMissions = () => {
                     </div>
                     <div className="flex items-center gap-2">
                       <Button variant="ghost" className="w-10 h-10 p-0 rounded-xl hover:bg-slate-50"><MoreHorizontal className="w-5 h-5" /></Button>
-                      <SheetClose className="w-10 h-10 p-0 rounded-xl bg-slate-100/50 flex items-center justify-center text-slate-400 hover:text-slate-600 focus:outline-none">
-                        <X className="w-5 h-5" />
-                      </SheetClose>
                     </div>
                   </div>
                 </SheetHeader>
@@ -712,26 +731,110 @@ const CoordinatorMissions = () => {
                         <div className="flex items-center justify-between">
                           <p className="text-[13px] text-slate-500 font-medium">Source inputs used to create this mission</p>
                           <Badge className="bg-[#EEF2FF] text-[#3730A3] border-none font-bold text-[11px] px-3 py-1 rounded-full">
-                            {selectedMission.sourceReportIds.length || 0} reports · {selectedMission.sourceNgoIds.length || 1} NGOs
+                            {(sourceReportsQuery.data?.total ?? selectedMission.sourceReportIds.length ?? 0)} reports · {(selectedMission.sourceNgoIds.length || 1)} NGOs
                           </Badge>
                         </div>
 
                         <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
-                          {(selectedMission.sourceReportIds.length ? selectedMission.sourceReportIds : [selectedMission.id]).map((reportId) => (
-                            <div key={reportId} className="bg-white rounded-2xl border border-slate-100 p-4 flex items-center gap-4 hover:shadow-md transition-shadow">
-                              <div className="flex flex-col items-center gap-2">
-                                <div className="w-2 h-2 rounded-full bg-[#4F46E5]" />
-                                <span className="text-[10px] font-mono font-black text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">{reportId}</span>
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-baseline gap-2">
-                                  <span className="text-sm font-bold text-[#1A1A3D]">Mission source</span>
-                                  <span className="text-[11px] font-medium text-slate-400">{selectedMission.zoneName}</span>
+                          {sourceReportsQuery.isLoading && (
+                            <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4 text-sm font-medium text-slate-500">Loading source reports...</div>
+                          )}
+
+                          {!sourceReportsQuery.isLoading && !(sourceReportsQuery.data?.reports?.length) && (
+                            <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4 text-sm font-medium text-slate-500">
+                              No source reports found for this mission.
+                            </div>
+                          )}
+
+                          {(sourceReportsQuery.data?.reports || []).map((report: CoordinatorMissionSourceReport) => (
+                            <div key={report.id} className="bg-white rounded-2xl border border-slate-100 p-4 space-y-4 hover:shadow-md transition-shadow">
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="space-y-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[10px] font-mono font-black text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">{report.id}</span>
+                                    <Badge className="bg-[#FFF7ED] text-[#9A3412] border-none text-[10px] font-black uppercase tracking-widest">{report.needType || "Unknown Need"}</Badge>
+                                    <Badge className="bg-slate-50 text-slate-500 border-none text-[10px] font-black uppercase tracking-widest">{report.severity || "unknown"}</Badge>
+                                  </div>
+                                  <p className="text-xs text-slate-500 font-medium">
+                                    {report.location?.address || selectedMission.zoneName} • {report.sourceType || report.inputType || "source"}
+                                  </p>
                                 </div>
-                                <p className="text-xs text-slate-500 font-medium mt-0.5 truncate">{selectedMission.description}</p>
+                                <div className="text-right">
+                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Confidence</p>
+                                  <p className="text-sm font-bold text-[#1A1A3D]">{report.confidence ?? 0}%</p>
+                                </div>
                               </div>
-                              <div className="text-right space-y-2">
-                                <Badge variant="outline" className="bg-slate-50 text-slate-500 border-slate-200 text-[9px] font-black uppercase tracking-widest">Source</Badge>
+
+                              <div className="grid grid-cols-3 gap-3">
+                                <div className="bg-slate-50 rounded-xl p-3">
+                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Families</p>
+                                  <p className="text-sm font-bold text-[#1A1A3D]">{report.familiesAffected ?? 0}</p>
+                                </div>
+                                <div className="bg-slate-50 rounded-xl p-3">
+                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Persons</p>
+                                  <p className="text-sm font-bold text-[#1A1A3D]">{report.personsAffected ?? 0}</p>
+                                </div>
+                                <div className="bg-slate-50 rounded-xl p-3">
+                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Verification</p>
+                                  <p className="text-sm font-bold text-[#1A1A3D]">{report.verificationState || "unverified"}</p>
+                                </div>
+                              </div>
+
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Need Incidents</p>
+                                {report.needIncidents?.length ? (
+                                  <div className="space-y-2">
+                                    {report.needIncidents.map((incident: any, index: number) => (
+                                      <div key={`${report.id}-incident-${index}`} className="text-xs text-slate-600 font-medium bg-slate-50 rounded-lg p-2 border border-slate-100">
+                                        <span className="font-bold text-[#1A1A3D]">{incident.needType || "need"}</span>
+                                        {" · "}
+                                        <span className="uppercase">{incident.severity || "medium"}</span>
+                                        {" · "}
+                                        {incident.familiesAffected ?? 0} families
+                                        {" · "}
+                                        {incident.personsAffected ?? 0} persons
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-600 font-medium break-words">No incident details attached.</p>
+                                )}
+                              </div>
+
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Assignment Requirement Profile</p>
+                                {report.assignmentRequirementProfile ? (
+                                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 font-medium">
+                                    <div className="bg-slate-50 rounded-lg p-2 border border-slate-100">Responder: {String((report.assignmentRequirementProfile as any).preferredResponderType || "volunteer")}</div>
+                                    <div className="bg-slate-50 rounded-lg p-2 border border-slate-100">Effort: {String((report.assignmentRequirementProfile as any).estimatedEffortMinutes || 60)} min</div>
+                                    <div className="bg-slate-50 rounded-lg p-2 border border-slate-100 col-span-2">Skills: {((report.assignmentRequirementProfile as any).requiredSkills || []).join(", ") || "-"}</div>
+                                    <div className="bg-slate-50 rounded-lg p-2 border border-slate-100 col-span-2">Languages: {((report.assignmentRequirementProfile as any).languageNeeds || []).join(", ") || "-"}</div>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-600 font-medium break-words">No assignment profile attached.</p>
+                                )}
+                              </div>
+
+                              {report.additionalNotes && (
+                                <div className="space-y-1">
+                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Additional Notes</p>
+                                  <p className="text-xs text-slate-600 font-medium">{report.additionalNotes}</p>
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                                <span>Visit: {report.visitType || "first_visit"}</span>
+                                <span>Submitted: {report.createdAt ? new Date(report.createdAt).toLocaleString() : "N/A"}</span>
+                              </div>
+
+                              <div className="pt-1">
+                                <Button
+                                  variant="outline"
+                                  className="w-full rounded-xl border-slate-200 text-[#4F46E5] font-bold"
+                                  onClick={() => setSelectedSourceReport(report)}
+                                >
+                                  View full report
+                                </Button>
                               </div>
                             </div>
                           ))}
@@ -811,9 +914,6 @@ const CoordinatorMissions = () => {
               <h2 className="text-2xl font-bold text-[#1A1A3D]">
                 {creationStep === 1 ? "Create New Mission" : creationStep === 2 ? "Audience Assignment" : "Review and Dispatch"}
               </h2>
-              <SheetClose className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:text-slate-600 focus:outline-none ring-0">
-                <X className="w-4 h-4" />
-              </SheetClose>
             </div>
             <div className="flex gap-2">
               {[1, 2, 3].map((step) => (
@@ -1219,6 +1319,107 @@ const CoordinatorMissions = () => {
           </div>
         </SheetContent>
       </Sheet>
+
+      <Dialog open={!!selectedSourceReport} onOpenChange={(open) => !open && setSelectedSourceReport(null)}>
+        <DialogContent className="sm:max-w-5xl w-[95vw] h-[90vh] overflow-hidden rounded-2xl p-0">
+          {selectedSourceReport && (
+            <div className="h-full flex flex-col bg-white">
+              <DialogHeader className="p-6 border-b border-slate-100">
+                <DialogTitle className="text-xl font-bold text-[#1A1A3D] flex items-center gap-3 flex-wrap">
+                  <span className="text-xs font-mono text-slate-400 bg-slate-50 px-2 py-1 rounded">{selectedSourceReport.id}</span>
+                  <span>{selectedSourceReport.needType || "Unknown Need"}</span>
+                  <Badge className="bg-[#FFF7ED] text-[#9A3412] border-none uppercase">{selectedSourceReport.severity || "unknown"}</Badge>
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div className="text-sm text-slate-500 font-medium">
+                  {selectedSourceReport.location?.address || "Unknown location"} • {selectedSourceReport.sourceType || selectedSourceReport.inputType || "source"}
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-slate-50 rounded-xl border border-slate-100 p-3">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Confidence</p>
+                    <p className="text-2xl font-black text-[#1A1A3D]">{selectedSourceReport.confidence ?? 0}%</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl border border-slate-100 p-3">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Families</p>
+                    <p className="text-2xl font-black text-[#1A1A3D]">{selectedSourceReport.familiesAffected ?? 0}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl border border-slate-100 p-3">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Persons</p>
+                    <p className="text-2xl font-black text-[#1A1A3D]">{selectedSourceReport.personsAffected ?? 0}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl border border-slate-100 p-3">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Verification</p>
+                    <p className="text-2xl font-black text-[#1A1A3D] lowercase">{selectedSourceReport.verificationState || "unverified"}</p>
+                  </div>
+                </div>
+
+                <section className="space-y-2">
+                  <h4 className="text-[13px] font-black text-slate-400 uppercase tracking-widest">Need Incidents</h4>
+                  {selectedSourceReport.needIncidents?.length ? (
+                    <div className="space-y-3">
+                      {selectedSourceReport.needIncidents.map((incident: any, index: number) => (
+                        <div key={`dialog-incident-${index}`} className="p-4 rounded-xl border border-slate-100 bg-white">
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
+                            <Badge className="bg-indigo-50 text-[#4F46E5] border-none">{incident.needType || "Need"}</Badge>
+                            <Badge className="bg-slate-50 text-slate-600 border-none uppercase">{incident.severity || "medium"}</Badge>
+                            <span className="text-xs text-slate-500 font-bold">Urgency: {incident.urgencyWindowHours ?? 24}h</span>
+                          </div>
+                          <p className="text-sm text-slate-600">Families: {incident.familiesAffected ?? 0} • Persons: {incident.personsAffected ?? 0}</p>
+                          <p className="text-sm text-slate-600">Vulnerable Groups: {(incident.vulnerableGroups || []).join(", ") || "-"}</p>
+                          <p className="text-sm text-slate-600">Risk Flags: {(incident.riskFlags || []).join(", ") || "-"}</p>
+                          <div className="mt-2">
+                            <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1">Required Resources</p>
+                            {(incident.requiredResources || []).length ? (
+                              <div className="space-y-1">
+                                {(incident.requiredResources || []).map((res: any, resourceIndex: number) => (
+                                  <p key={`res-${resourceIndex}`} className="text-sm text-slate-600">
+                                    {res.name || "resource"} • qty {res.quantity ?? 0} • {res.priority || "medium"}
+                                  </p>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-slate-500">No resources listed.</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">No incident details attached.</p>
+                  )}
+                </section>
+
+                <section className="space-y-2">
+                  <h4 className="text-[13px] font-black text-slate-400 uppercase tracking-widest">Assignment Requirement Profile</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="p-3 rounded-xl border border-slate-100 bg-slate-50 text-sm text-slate-600">Preferred Responder: {String((selectedSourceReport.assignmentRequirementProfile as any)?.preferredResponderType || "volunteer")}</div>
+                    <div className="p-3 rounded-xl border border-slate-100 bg-slate-50 text-sm text-slate-600">Estimated Effort: {String((selectedSourceReport.assignmentRequirementProfile as any)?.estimatedEffortMinutes || 60)} minutes</div>
+                    <div className="p-3 rounded-xl border border-slate-100 bg-slate-50 text-sm text-slate-600">Required Skills: {(((selectedSourceReport.assignmentRequirementProfile as any)?.requiredSkills) || []).join(", ") || "-"}</div>
+                    <div className="p-3 rounded-xl border border-slate-100 bg-slate-50 text-sm text-slate-600">Language Needs: {(((selectedSourceReport.assignmentRequirementProfile as any)?.languageNeeds) || []).join(", ") || "-"}</div>
+                    <div className="p-3 rounded-xl border border-slate-100 bg-slate-50 text-sm text-slate-600">Safe Visit Windows: {(((selectedSourceReport.assignmentRequirementProfile as any)?.safeVisitTimeWindows) || []).join(", ") || "-"}</div>
+                    <div className="p-3 rounded-xl border border-slate-100 bg-slate-50 text-sm text-slate-600">Revisit Recommended At: {String((selectedSourceReport.assignmentRequirementProfile as any)?.revisitRecommendedAt || "-")}</div>
+                  </div>
+                </section>
+
+                {selectedSourceReport.additionalNotes && (
+                  <section className="space-y-2">
+                    <h4 className="text-[13px] font-black text-slate-400 uppercase tracking-widest">Additional Notes</h4>
+                    <p className="text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-xl p-4">{selectedSourceReport.additionalNotes}</p>
+                  </section>
+                )}
+
+                <div className="flex items-center justify-between text-[11px] text-slate-500 font-bold uppercase tracking-widest pt-2 border-t border-slate-100">
+                  <span>Visit: {selectedSourceReport.visitType || "first_visit"}</span>
+                  <span>Submitted: {selectedSourceReport.createdAt ? new Date(selectedSourceReport.createdAt).toLocaleString() : "N/A"}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

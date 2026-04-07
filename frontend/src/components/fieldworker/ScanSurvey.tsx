@@ -34,6 +34,21 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 
+const MAX_SCAN_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_SCAN_MIMES = new Set(["image/png", "image/jpeg", "application/pdf"]);
+
+const extractPincode = (text?: string | null): string => {
+  if (!text) return "";
+  const match = text.match(/\b\d{6}\b/);
+  return match ? match[0] : "";
+};
+
+const splitCsv = (value: string): string[] =>
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
 const ConfidenceDot = ({ level }: { level: "high" | "low" }) => (
   <div className={cn(
     "w-2 h-2 rounded-full",
@@ -44,6 +59,7 @@ const ConfidenceDot = ({ level }: { level: "high" | "low" }) => (
 export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void }) => {
   const [step, setStep] = useState<"idle" | "processing" | "success" | "submitted">( "idle");
   const [image, setImage] = useState<string | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string>("");
   const [progress, setProgress] = useState(0);
   const [processingSteps, setProcessingSteps] = useState([
     { label: "Image quality check", status: "pending" },
@@ -53,13 +69,27 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
   ]);
 
   const [formData, setFormData] = useState({
-    needType: "Food Insecurity",
-    severity: "High",
-    families: "34",
-    zone: "Hebbal North",
-    address: "482 Skyline Blvd, Building C-4, Level 2 Industrial District, West Side",
-    pincode: "560024",
+    needType: "General",
+    severity: "Medium",
+    families: "0",
+    persons: "0",
+    zone: "",
+    address: "",
+    pincode: "",
     notes: "",
+    householdRef: "",
+    visitType: "first_visit",
+    verificationState: "unverified",
+    urgencyWindowHours: "24",
+    vulnerableGroups: "",
+    requiredResources: "",
+    riskFlags: "",
+    preferredResponderType: "volunteer",
+    requiredSkills: "local_language",
+    languageNeeds: "kannada",
+    safeVisitTimeWindows: "08:00-17:00",
+    estimatedEffortMinutes: "60",
+    revisitRecommendedAt: "",
     surveyDate: new Date().toISOString().split('T')[0],
     lat: 12.9716,
     lng: 77.5946,
@@ -74,9 +104,47 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const token = localStorage.getItem("nexus_access_token");
 
-  const [isMerged, setIsMerged] = useState(true); // Mocking for demo
+  const [isMerged, setIsMerged] = useState(false);
+  const [reportId, setReportId] = useState<string | null>(null);
+  const [missionId, setMissionId] = useState<string | null>(null);
+  const [activeMission, setActiveMission] = useState<any | null>(null);
+  const [detectedLocation, setDetectedLocation] = useState<string>("");
+
+  useEffect(() => {
+    const fetchActiveMission = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/fieldworker/mission/active`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        const mission = data?.mission || null;
+        setActiveMission(mission);
+        if (mission) {
+          setMissionId(mission.id || null);
+          setFormData((prev) => ({
+            ...prev,
+            needType: mission.needType || prev.needType,
+            zone: mission.zoneName || mission.zoneId || prev.zone,
+            address: mission.location?.address || prev.address,
+            lat: mission.location?.lat ?? prev.lat,
+            lng: mission.location?.lng ?? prev.lng,
+          }));
+        }
+      } catch {
+        // keep current form defaults if active mission is unavailable
+      }
+    };
+
+    fetchActiveMission();
+  }, [apiBaseUrl, token]);
 
   const startProcessing = async (file: File) => {
+    setSelectedFileName(file.name || "survey-upload");
     setStep("processing");
     setProgress(0);
     setIsUploading(true);
@@ -92,7 +160,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
 
     const uploadFormData = new FormData();
     uploadFormData.append("file", file);
-    uploadFormData.append("zoneId", zoneInfo.zoneId);
+    uploadFormData.append("zoneId", activeMission?.zoneId || zoneInfo.zoneId);
     uploadFormData.append("language", "en");
 
     // Start a fake progress for UI
@@ -109,7 +177,10 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
         body: uploadFormData
       });
 
-      if (!response.ok) throw new Error("Failed to process scan");
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => null);
+        throw new Error(errorPayload?.detail || "Failed to process scan");
+      }
 
       const data = await response.json();
       clearInterval(progressInterval);
@@ -117,16 +188,45 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
       
       setExtractedResult(data.extracted);
       setImageUrl(data.imageUrl);
+      setDetectedLocation(data.extracted?.location || "");
+
+      const detectedAddress = String(data.extracted?.location || "").trim();
+      const detectedPincode = extractPincode(detectedAddress);
+      const missionAddress = String(activeMission?.location?.address || "").trim();
+      const resolvedAddress = missionAddress || detectedAddress || "";
+      const resolvedPincode = extractPincode(missionAddress) || detectedPincode || "";
       
       // Update form data with extracted results
+      const primaryIncident = Array.isArray(data.extracted?.needIncidents) && data.extracted.needIncidents.length > 0
+        ? data.extracted.needIncidents[0]
+        : null;
+
       setFormData((prev) => ({
-        needType: data.extracted.needType || "Food Insecurity",
-        severity: data.extracted.severity ? (data.extracted.severity.charAt(0).toUpperCase() + data.extracted.severity.slice(1)) : "High",
+        needType: data.extracted.needType || "General",
+        severity: data.extracted.severity ? (data.extracted.severity.charAt(0).toUpperCase() + data.extracted.severity.slice(1)) : "Medium",
         families: String(data.extracted.familiesAffected || "0"),
+        persons: String(data.extracted.personsAffected || (Number(data.extracted.familiesAffected || 0) * 4) || "0"),
         zone: prev.zone,
-        address: prev.address,
-        pincode: prev.pincode,
+        address: resolvedAddress || prev.address,
+        pincode: resolvedPincode || prev.pincode,
         notes: data.extracted.additionalNotes || "",
+        householdRef: data.extracted.householdRef || "",
+        visitType: data.extracted.visitType || "first_visit",
+        verificationState: data.extracted.verificationState || "unverified",
+        urgencyWindowHours: String(primaryIncident?.urgencyWindowHours || (data.extracted.severity === "high" || data.extracted.severity === "critical" ? 24 : 72)),
+        vulnerableGroups: Array.isArray(primaryIncident?.vulnerableGroups) ? primaryIncident.vulnerableGroups.join(", ") : "",
+        requiredResources: Array.isArray(primaryIncident?.requiredResources)
+          ? primaryIncident.requiredResources.map((r: any) => `${r.name}:${r.quantity}:${r.priority || "medium"}`).join(", ")
+          : "",
+        riskFlags: Array.isArray(primaryIncident?.riskFlags)
+          ? primaryIncident.riskFlags.join(", ")
+          : Array.isArray(data.extracted.safetySignals) ? data.extracted.safetySignals.join(", ") : "",
+        preferredResponderType: data.extracted.preferredResponderType || "volunteer",
+        requiredSkills: Array.isArray(data.extracted.requiredSkills) ? data.extracted.requiredSkills.join(", ") : "local_language",
+        languageNeeds: Array.isArray(data.extracted.languageNeeds) ? data.extracted.languageNeeds.join(", ") : "kannada",
+        safeVisitTimeWindows: Array.isArray(data.extracted.safeVisitTimeWindows) ? data.extracted.safeVisitTimeWindows.join(", ") : "08:00-17:00",
+        estimatedEffortMinutes: String(data.extracted.estimatedEffortMinutes || 60),
+        revisitRecommendedAt: data.extracted.revisitRecommendedAt ? String(data.extracted.revisitRecommendedAt).slice(0, 16) : "",
         surveyDate: new Date().toISOString().split('T')[0],
         lat: prev.lat,
         lng: prev.lng,
@@ -146,6 +246,26 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > MAX_SCAN_FILE_SIZE) {
+        setError("File is too large. Maximum supported size is 10MB.");
+        return;
+      }
+
+      const nameLower = file.name.toLowerCase();
+      const mimeOk = ALLOWED_SCAN_MIMES.has(file.type);
+      const extensionOk = nameLower.endsWith(".pdf") || nameLower.endsWith(".png") || nameLower.endsWith(".jpg") || nameLower.endsWith(".jpeg");
+      if (!mimeOk && !extensionOk) {
+        setError("Unsupported file type. Upload PNG, JPEG, or PDF.");
+        return;
+      }
+
+      const isPdf = file.type === "application/pdf" || nameLower.endsWith(".pdf");
+      if (isPdf) {
+        setImage(null);
+        startProcessing(file);
+        return;
+      }
+
       const reader = new FileReader();
       reader.onloadend = () => {
         setImage(reader.result as string);
@@ -165,6 +285,11 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
   }, [progress, step]);
 
   const handleSubmit = async () => {
+    if (!activeMission?.id) {
+      setError("No active assigned mission found. Submit reports only from your Active Mission.");
+      return;
+    }
+
     setStep("processing");
     setProgress(0);
 
@@ -176,11 +301,32 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
       areaName: formData.areaName,
     });
     
+    const familiesAffected = parseInt(formData.families || "0", 10) || 0;
+    const personsAffected = parseInt(formData.persons || "0", 10) > 0
+      ? parseInt(formData.persons || "0", 10)
+      : (Number(extractedResult?.personsAffected) > 0 ? Number(extractedResult.personsAffected) : familiesAffected * 4);
+    const needType = activeMission.needType || formData.needType;
+    const severity = formData.severity.toLowerCase();
+    const safetySignals = splitCsv(formData.riskFlags || "");
+    const requiredResourceName = `${String(needType).toLowerCase().replace(/\s+/g, "-")}-support`;
+    const requiredResources = splitCsv(formData.requiredResources).map((item) => {
+      const [name, quantity, priority] = item.split(":").map((part) => part.trim());
+      return {
+        name: name || requiredResourceName,
+        quantity: Number(quantity) > 0 ? Number(quantity) : familiesAffected,
+        priority: ["low", "medium", "high", "critical"].includes((priority || "").toLowerCase())
+          ? (priority || "medium").toLowerCase()
+          : severity,
+      };
+    });
+
     const payload = {
-      zoneId: zoneInfo.zoneId,
-      needType: formData.needType,
-      severity: formData.severity.toLowerCase(),
-      familiesAffected: parseInt(formData.families),
+      missionId: activeMission.id,
+      zoneId: activeMission.zoneId || zoneInfo.zoneId,
+      needType,
+      severity,
+      familiesAffected,
+      personsAffected,
       location: {
         lat: formData.lat || 12.9716,
         lng: formData.lng || 77.5946,
@@ -189,12 +335,49 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
       },
       inputType: "ocr",
       sourceType: "scan",
+      householdRef: formData.householdRef || extractedResult?.householdRef || null,
+      visitType: formData.visitType || "first_visit",
+      verificationState: formData.verificationState || "unverified",
+      needIncidents: (extractedResult?.needIncidents && extractedResult.needIncidents.length > 0)
+        ? [{
+            ...extractedResult.needIncidents[0],
+            needType: String(needType).toLowerCase(),
+            severity,
+            urgencyWindowHours: parseInt(formData.urgencyWindowHours || "24", 10) || 24,
+            familiesAffected,
+            personsAffected,
+            vulnerableGroups: splitCsv(formData.vulnerableGroups),
+            requiredResources: requiredResources.length > 0
+              ? requiredResources
+              : extractedResult.needIncidents[0]?.requiredResources || [],
+            riskFlags: safetySignals,
+          }]
+        : [{
+            needType: String(needType).toLowerCase(),
+            severity,
+            urgencyWindowHours: parseInt(formData.urgencyWindowHours || "24", 10) || (severity === "high" || severity === "critical" ? 24 : 72),
+            familiesAffected,
+            personsAffected,
+            vulnerableGroups: splitCsv(formData.vulnerableGroups),
+            requiredResources: requiredResources.length > 0
+              ? requiredResources
+              : familiesAffected > 0
+              ? [{ name: requiredResourceName, quantity: familiesAffected, priority: severity }]
+              : [],
+            riskFlags: safetySignals,
+          }],
+      preferredResponderType: formData.preferredResponderType || "volunteer",
+      requiredSkills: splitCsv(formData.requiredSkills),
+      languageNeeds: splitCsv(formData.languageNeeds),
+      safeVisitTimeWindows: splitCsv(formData.safeVisitTimeWindows),
+      estimatedEffortMinutes: parseInt(formData.estimatedEffortMinutes || "60", 10) || 60,
+      revisitRecommendedAt: formData.revisitRecommendedAt ? new Date(formData.revisitRecommendedAt).toISOString() : null,
       imageUrl: imageUrl,
       extractedData: extractedResult,
       confidence: extractedResult?.confidence || 90,
-      safetySignals: extractedResult?.safetySignals || [],
+      safetySignals,
       landmark: extractedResult?.landmark || formData.address || null,
-      additionalNotes: extractedResult?.additionalNotes || formData.notes || null,
+      additionalNotes: formData.notes || extractedResult?.additionalNotes || null,
       fieldConfidences: extractedResult?.fieldConfidences || null
     };
 
@@ -212,6 +395,8 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
 
       const data = await response.json();
       setIsMerged(data.merged);
+      setReportId(data.reportId || null);
+      setMissionId(data.missionId || null);
       setStep("submitted");
     } catch (err: any) {
       setError(err.message);
@@ -242,7 +427,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                 <div className="flex gap-3">
                   <Database className="w-5 h-5 text-[#3730A3] shrink-0 mt-0.5" />
                   <p className="text-sm font-medium text-[#3730A3] leading-relaxed">
-                    Your report was automatically merged into <span className="font-bold">Mission M-047 — Hebbal Food Distribution</span> (currently active)
+                    Your report was automatically merged into <span className="font-bold">mission {missionId || "active mission"}</span>.
                   </p>
                 </div>
                 <p className="text-[11px] text-[#3730A3]/70 font-bold uppercase tracking-wider pl-8">
@@ -254,7 +439,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                 <Database className="w-5 h-5 text-emerald-600" />
                 <div>
                    <p className="text-sm font-bold text-emerald-900">Syncing to Nexus...</p>
-                   <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Transaction ID: #NX-90122</p>
+                   <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Transaction ID: {reportId || "Pending"}</p>
                 </div>
              </div>
            )}
@@ -265,7 +450,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                   variant="ghost"
                   className="w-full h-14 text-[#5A57FF] font-bold border border-indigo-100 hover:bg-indigo-50 rounded-2xl"
                 >
-                  View mission M-047 →
+                  View mission {missionId || "details"} →
                 </Button>
               )}
               <Button 
@@ -329,6 +514,12 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                       <Progress value={progress} className="h-2 bg-white/20" indicatorClassName="bg-white shadow-[0_0_15px_rgba(255,255,255,0.5)]" />
                    </div>
 
+                   {selectedFileName && (
+                      <p className="mt-4 text-[11px] font-bold text-white/80 uppercase tracking-widest text-center">
+                        Processing {selectedFileName}
+                      </p>
+                   )}
+
                    <div className="grid grid-cols-1 gap-3 mt-10 w-full max-w-sm">
                       {processingSteps.map((s, i) => (
                         <div key={i} className={cn(
@@ -356,11 +547,50 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                          </div>
                          <span className="font-bold text-sm">Extraction complete</span>
                       </div>
-                      <Badge className="bg-white/20 text-white border-none font-bold">98% Accuracy</Badge>
+                       <Badge className="bg-white/20 text-white border-none font-bold">Review extracted fields</Badge>
                    </div>
                 </div>
               )}
             </>
+             ) : step === "processing" ? (
+              <div className="absolute inset-0 bg-indigo-900/40 backdrop-blur-[2px] flex flex-col items-center justify-center text-white p-10">
+                <div className="relative mb-8">
+                  <Sparkles className="w-16 h-16 text-indigo-400 animate-pulse" />
+                  <div className="absolute inset-0 animate-ping opacity-20">
+                    <Sparkles className="w-16 h-16 text-white" />
+                  </div>
+                </div>
+
+                <div className="w-full max-w-xs space-y-4">
+                  <div className="flex justify-between text-sm font-bold">
+                    <span>Extracting data...</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <Progress value={progress} className="h-2 bg-white/20" indicatorClassName="bg-white shadow-[0_0_15px_rgba(255,255,255,0.5)]" />
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 mt-10 w-full max-w-sm">
+                  {processingSteps.map((s, i) => (
+                    <div key={i} className={cn(
+                     "flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all duration-300",
+                     s.status === "done" ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-50" :
+                     s.status === "active" ? "bg-white/10 border-white/20 text-white animate-pulse" :
+                     "bg-black/10 border-transparent text-white/40"
+                    )}>
+                      {s.status === "done" ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> :
+                      s.status === "active" ? <Sparkles className="w-4 h-4 animate-spin" /> :
+                      <div className="w-4 h-4 rounded-full border border-white/20" />}
+                      <span className="text-xs font-bold">{s.status === "active" ? "⏳ " : ""}{s.label}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {selectedFileName && (
+                  <p className="mt-4 text-[11px] font-bold text-white/80 uppercase tracking-widest text-center">
+                    Processing {selectedFileName}
+                  </p>
+                )}
+              </div>
           ) : (
             <div className="text-center p-10 cursor-pointer" onClick={() => document.getElementById('survey-upload')?.click()}>
               <div className="w-24 h-24 bg-[#F3F2FF] rounded-[2rem] flex items-center justify-center text-[#5A57FF] mx-auto mb-6 group-hover:scale-110 transition-transform shadow-sm">
@@ -371,7 +601,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
               <button className="mt-6 text-[#5A57FF] font-bold text-sm underline-offset-4 hover:underline transition-all">or use camera</button>
             </div>
           )}
-          <input type="file" id="survey-upload" className="hidden" accept="image/*" onChange={handleFileChange} />
+          <input type="file" id="survey-upload" className="hidden" accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf" onChange={handleFileChange} />
         </div>
 
         <div className="flex items-center justify-between px-2">
@@ -381,7 +611,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                 className="h-12 px-6 rounded-2xl border-slate-200 font-bold text-slate-600 gap-2 hover:bg-slate-50 transition-all"
                 onClick={() => document.getElementById('survey-upload')?.click()}
               >
-                 <Upload className="w-4 h-4" /> Upload Image
+                  <Upload className="w-4 h-4" /> Upload File
               </Button>
               <Button 
                 className="h-12 px-6 rounded-2xl bg-[#5A57FF] hover:bg-[#4845E0] font-bold gap-2 shadow-lg shadow-indigo-100 transition-all"
@@ -392,21 +622,33 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
            </div>
            <button 
              className="text-slate-400 font-bold text-sm hover:text-red-500 transition-colors"
-             onClick={() => { setImage(null); setStep("idle"); setProgress(0); }}
+             onClick={() => { setImage(null); setStep("idle"); setProgress(0); setSelectedFileName(""); }}
            >
              Clear
            </button>
         </div>
 
         {/* Confidence Banner */}
-        {step === "success" && (
+          {error && (
+            <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center gap-4 animate-in fade-in slide-in-from-left-4">
+              <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center text-red-600 shrink-0">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-red-900">Scan failed</p>
+                <p className="text-[11px] text-red-700 font-medium italic">{error}</p>
+              </div>
+            </div>
+          )}
+
+          {step === "success" && (
            <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex items-center gap-4 animate-in fade-in slide-in-from-left-4">
               <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center text-amber-600 shrink-0">
                  <AlertCircle className="w-6 h-6" />
               </div>
               <div>
-                 <p className="text-sm font-bold text-amber-900">2 fields need your review before submitting</p>
-                 <p className="text-[11px] text-amber-700 font-medium italic">Gemini flagged "Affected Families" & "Pincode" for verification.</p>
+                <p className="text-sm font-bold text-amber-900">Please review extracted fields before submitting</p>
+                <p className="text-[11px] text-amber-700 font-medium italic">Verify severity, families, and location details for mission accuracy.</p>
               </div>
            </div>
         )}
@@ -419,8 +661,9 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
               <h3 className="text-xl font-bold text-[#1A1A3D]">Extracted Information</h3>
               <p className="text-xs text-slate-400 font-medium mt-0.5">Automated extraction by Nexus OCR</p>
            </div>
-           <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100 px-3 py-1 font-bold text-xs flex gap-1.5 items-center">
-              <ConfidenceDot level="high" /> 94% confidence
+            <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100 px-3 py-1 font-bold text-xs flex gap-1.5 items-center">
+              <ConfidenceDot level={(extractedResult?.confidence || 0) >= 80 ? "high" : "low"} />
+              {`${extractedResult?.confidence ?? 0}% confidence`}
            </Badge>
         </div>
 
@@ -452,7 +695,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                     </Select>
                  </div>
 
-                 <div className="grid grid-cols-2 gap-5">
+                  <div className="grid grid-cols-3 gap-5">
                     <div className="space-y-3">
                        <div className="flex items-center justify-between">
                           <Label className="text-xs font-bold text-slate-500">Severity Level</Label>
@@ -478,9 +721,105 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                          className="h-12 rounded-xl bg-amber-50/50 border-amber-200 focus:ring-amber-500 text-[#1A1A3D] font-bold"
                        />
                     </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-bold text-slate-500">Affected Persons</Label>
+                          <ConfidenceDot level="low" />
+                        </div>
+                        <Input 
+                         type="number" 
+                         value={formData.persons} onChange={(e) => setFormData(prev => ({ ...prev, persons: e.target.value }))} 
+                         className="h-12 rounded-xl bg-amber-50/50 border-amber-200 focus:ring-amber-500 text-[#1A1A3D] font-bold"
+                        />
+                      </div>
                  </div>
               </div>
            </section>
+
+                <section className="space-y-5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 bg-indigo-50 rounded flex items-center justify-center">
+                      <Layers className="w-3.5 h-3.5 text-[#5A57FF]" />
+                    </div>
+                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">V2 Incident & Assignment</h4>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-5">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Household Ref</Label>
+                      <Input value={formData.householdRef} onChange={(e) => setFormData(prev => ({ ...prev, householdRef: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Visit Type</Label>
+                      <Select value={formData.visitType} onValueChange={(val) => setFormData(prev => ({ ...prev, visitType: val }))}>
+                       <SelectTrigger className="h-12 rounded-xl bg-slate-50 border-transparent"><SelectValue /></SelectTrigger>
+                       <SelectContent>
+                        <SelectItem value="first_visit">first_visit</SelectItem>
+                        <SelectItem value="follow_up">follow_up</SelectItem>
+                        <SelectItem value="revisit">revisit</SelectItem>
+                       </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Verification State</Label>
+                      <Select value={formData.verificationState} onValueChange={(val) => setFormData(prev => ({ ...prev, verificationState: val }))}>
+                       <SelectTrigger className="h-12 rounded-xl bg-slate-50 border-transparent"><SelectValue /></SelectTrigger>
+                       <SelectContent>
+                        <SelectItem value="unverified">unverified</SelectItem>
+                        <SelectItem value="verified">verified</SelectItem>
+                        <SelectItem value="rejected">rejected</SelectItem>
+                       </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Urgency (hours)</Label>
+                      <Input type="number" value={formData.urgencyWindowHours} onChange={(e) => setFormData(prev => ({ ...prev, urgencyWindowHours: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent" />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Vulnerable Groups (comma separated)</Label>
+                      <Input value={formData.vulnerableGroups} onChange={(e) => setFormData(prev => ({ ...prev, vulnerableGroups: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent" placeholder="children, elderly" />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Required Resources (name:qty:priority)</Label>
+                      <Input value={formData.requiredResources} onChange={(e) => setFormData(prev => ({ ...prev, requiredResources: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent" placeholder="rice-kit:34:high, water-kit:20:medium" />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Risk Flags / Safety Signals</Label>
+                      <Input value={formData.riskFlags} onChange={(e) => setFormData(prev => ({ ...prev, riskFlags: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent" placeholder="night_safety, access_blocked" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Preferred Responder</Label>
+                      <Select value={formData.preferredResponderType} onValueChange={(val) => setFormData(prev => ({ ...prev, preferredResponderType: val }))}>
+                       <SelectTrigger className="h-12 rounded-xl bg-slate-50 border-transparent"><SelectValue /></SelectTrigger>
+                       <SelectContent>
+                        <SelectItem value="volunteer">volunteer</SelectItem>
+                        <SelectItem value="ngo_staff">ngo_staff</SelectItem>
+                        <SelectItem value="mixed">mixed</SelectItem>
+                       </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Estimated Effort (minutes)</Label>
+                      <Input type="number" value={formData.estimatedEffortMinutes} onChange={(e) => setFormData(prev => ({ ...prev, estimatedEffortMinutes: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent" />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Required Skills</Label>
+                      <Input value={formData.requiredSkills} onChange={(e) => setFormData(prev => ({ ...prev, requiredSkills: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent" placeholder="local_language, ration_distribution" />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Language Needs</Label>
+                      <Input value={formData.languageNeeds} onChange={(e) => setFormData(prev => ({ ...prev, languageNeeds: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent" placeholder="kannada, hindi" />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Safe Visit Time Windows</Label>
+                      <Input value={formData.safeVisitTimeWindows} onChange={(e) => setFormData(prev => ({ ...prev, safeVisitTimeWindows: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent" placeholder="08:00-17:00, 18:00-20:00" />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Revisit Recommended At</Label>
+                      <Input type="datetime-local" value={formData.revisitRecommendedAt} onChange={(e) => setFormData(prev => ({ ...prev, revisitRecommendedAt: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent" />
+                    </div>
+                  </div>
+                </section>
 
            <section className="space-y-5">
               <div className="flex items-center gap-2">
@@ -509,6 +848,11 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                        <ConfidenceDot level="high" />
                     </div>
                     <Input value={formData.address} onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent text-[#1A1A3D] font-medium" />
+                     {Boolean(detectedLocation && activeMission?.location?.address && detectedLocation !== activeMission.location.address) && (
+                       <p className="text-[11px] text-amber-700 font-medium italic mt-1">
+                         OCR detected location: "{detectedLocation}". Report is locked to assigned mission location.
+                       </p>
+                     )}
                  </div>
 
                  <div className="grid grid-cols-2 gap-5 items-start">
@@ -558,6 +902,8 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                  <div className="space-y-2">
                     <Label className="text-xs font-bold text-slate-500">Additional Field Notes</Label>
                     <Textarea 
+                      value={formData.notes}
+                      onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
                       placeholder="Any additional context from field worker..." 
                       className="rounded-xl bg-slate-50 border-transparent min-h-[100px] text-sm resize-none" 
                     />

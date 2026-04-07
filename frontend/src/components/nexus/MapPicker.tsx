@@ -13,6 +13,8 @@ const defaultCenter = {
   lng: 77.5946
 };
 
+const MAP_LIBRARIES: ("places")[] = ["places"];
+
 interface MapLocation {
   lat: number;
   lng: number;
@@ -30,7 +32,7 @@ export const MapPicker = ({ onLocationSelect, initialLocation }: MapPickerProps)
   const { isLoaded } = useJsApiLoader({
     id: "google-map-script",
     googleMapsApiKey: import.meta.env.VITE_GMAPS_KEY || "",
-    libraries: ["places"]
+    libraries: MAP_LIBRARIES
   });
 
   const [map, setMap] = useState<google.maps.Map | null>(null);

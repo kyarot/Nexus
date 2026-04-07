@@ -18,8 +18,23 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { MapPicker } from "@/components/nexus/MapPicker";
 import { deriveZoneInfo } from "@/lib/location-utils";
+
+const splitCsv = (value: string): string[] =>
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 
 const LanguagePill = ({ label, active, onClick }: { label: string, active: boolean, onClick: () => void }) => (
   <button
@@ -55,7 +70,10 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
   const [step, setStep] = useState<"idle" | "recording" | "processing" | "result" | "submitted">("idle");
   const [language, setLanguage] = useState("Kannada");
   const [timer, setTimer] = useState(0);
-  const [isMerged, setIsMerged] = useState(true); // Mocking for demo
+  const [isMerged, setIsMerged] = useState(false);
+  const [reportId, setReportId] = useState<string | null>(null);
+  const [missionId, setMissionId] = useState<string | null>(null);
+  const [activeMission, setActiveMission] = useState<any | null>(null);
   const languages = ["Kannada", "Hindi", "Telugu", "Tamil", "Bengali", "Marathi", "English"];
 
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
@@ -72,8 +90,54 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
     areaName: ""
   });
 
+  const [reportMeta, setReportMeta] = useState({
+    personsAffected: "0",
+    householdRef: "",
+    visitType: "first_visit",
+    verificationState: "unverified",
+    urgencyWindowHours: "24",
+    vulnerableGroups: "",
+    requiredResources: "",
+    riskFlags: "",
+    preferredResponderType: "volunteer",
+    requiredSkills: "local_language",
+    languageNeeds: "kannada",
+    safeVisitTimeWindows: "08:00-17:00",
+    estimatedEffortMinutes: "60",
+    revisitRecommendedAt: "",
+  });
+
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const token = localStorage.getItem("nexus_access_token");
+
+  useEffect(() => {
+    const fetchActiveMission = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/fieldworker/mission/active`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        const mission = data?.mission || null;
+        setActiveMission(mission);
+        if (mission) {
+          setMissionId(mission.id || null);
+          setLocation((prev) => ({
+            ...prev,
+            address: mission.location?.address || prev.address,
+            lat: mission.location?.lat ?? prev.lat,
+            lng: mission.location?.lng ?? prev.lng,
+          }));
+        }
+      } catch {
+        // keep manual location defaults if active mission fetch fails
+      }
+    };
+
+    fetchActiveMission();
+  }, [apiBaseUrl, token]);
 
   useEffect(() => {
     let interval: any;
@@ -147,6 +211,32 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
       if (data.extracted.location) {
         setLocation(prev => ({ ...prev, address: data.extracted.location }));
       }
+
+      const families = Number(data.extracted?.familiesAffected || 0);
+      const primaryIncident = Array.isArray(data.extracted?.needIncidents) && data.extracted.needIncidents.length > 0
+        ? data.extracted.needIncidents[0]
+        : null;
+
+      setReportMeta({
+        personsAffected: String(data.extracted?.personsAffected || families * 4 || 0),
+        householdRef: data.extracted?.householdRef || "",
+        visitType: data.extracted?.visitType || "first_visit",
+        verificationState: data.extracted?.verificationState || "unverified",
+        urgencyWindowHours: String(primaryIncident?.urgencyWindowHours || (data.extracted?.severity === "high" || data.extracted?.severity === "critical" ? 24 : 72)),
+        vulnerableGroups: Array.isArray(primaryIncident?.vulnerableGroups) ? primaryIncident.vulnerableGroups.join(", ") : "",
+        requiredResources: Array.isArray(primaryIncident?.requiredResources)
+          ? primaryIncident.requiredResources.map((r: any) => `${r.name}:${r.quantity}:${r.priority || "medium"}`).join(", ")
+          : "",
+        riskFlags: Array.isArray(primaryIncident?.riskFlags)
+          ? primaryIncident.riskFlags.join(", ")
+          : Array.isArray(data.extracted?.safetySignals) ? data.extracted.safetySignals.join(", ") : "",
+        preferredResponderType: data.extracted?.preferredResponderType || "volunteer",
+        requiredSkills: Array.isArray(data.extracted?.requiredSkills) ? data.extracted.requiredSkills.join(", ") : "local_language",
+        languageNeeds: Array.isArray(data.extracted?.languageNeeds) ? data.extracted.languageNeeds.join(", ") : "kannada",
+        safeVisitTimeWindows: Array.isArray(data.extracted?.safeVisitTimeWindows) ? data.extracted.safeVisitTimeWindows.join(", ") : "08:00-17:00",
+        estimatedEffortMinutes: String(data.extracted?.estimatedEffortMinutes || 60),
+        revisitRecommendedAt: data.extracted?.revisitRecommendedAt ? String(data.extracted.revisitRecommendedAt).slice(0, 16) : "",
+      });
       
       setStep("result");
     } catch (err: any) {
@@ -156,6 +246,11 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
   };
 
   const handleSubmit = async () => {
+    if (!activeMission?.id) {
+      setError("No active assigned mission found. Submit reports only from your Active Mission.");
+      return;
+    }
+
     setStep("processing");
 
     const zoneInfo = deriveZoneInfo({
@@ -166,11 +261,34 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
       areaName: location.areaName,
     });
     
+    const needType = activeMission.needType || extractedData?.needType || "General";
+    const severity = (extractedData?.severity || "medium").toLowerCase();
+    const familiesAffected = parseInt(extractedData?.familiesAffected || "0", 10) || 0;
+    const personsAffected = parseInt(reportMeta.personsAffected || "0", 10) > 0
+      ? parseInt(reportMeta.personsAffected || "0", 10)
+      : Number(extractedData?.personsAffected) > 0
+      ? Number(extractedData.personsAffected)
+      : familiesAffected * 4;
+    const safetySignals = splitCsv(reportMeta.riskFlags || "");
+    const requiredResourceName = `${String(needType).toLowerCase().replace(/\s+/g, "-")}-support`;
+    const requiredResources = splitCsv(reportMeta.requiredResources).map((item) => {
+      const [name, quantity, priority] = item.split(":").map((part) => part.trim());
+      return {
+        name: name || requiredResourceName,
+        quantity: Number(quantity) > 0 ? Number(quantity) : familiesAffected,
+        priority: ["low", "medium", "high", "critical"].includes((priority || "").toLowerCase())
+          ? (priority || "medium").toLowerCase()
+          : severity,
+      };
+    });
+
     const payload = {
-      zoneId: zoneInfo.zoneId,
-      needType: extractedData?.needType || "General",
-      severity: (extractedData?.severity || "medium").toLowerCase(),
-      familiesAffected: parseInt(extractedData?.familiesAffected || "0"),
+      missionId: activeMission.id,
+      zoneId: activeMission.zoneId || zoneInfo.zoneId,
+      needType,
+      severity,
+      familiesAffected,
+      personsAffected,
       location: {
         lat: location.lat || 12.9716,
         lng: location.lng || 77.5946,
@@ -179,12 +297,49 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
       },
       inputType: "voice",
       sourceType: "voice",
+      householdRef: reportMeta.householdRef || extractedData?.householdRef || null,
+      visitType: reportMeta.visitType || "first_visit",
+      verificationState: reportMeta.verificationState || "unverified",
+      needIncidents: (extractedData?.needIncidents && extractedData.needIncidents.length > 0)
+        ? [{
+            ...extractedData.needIncidents[0],
+            needType: String(needType).toLowerCase(),
+            severity,
+            urgencyWindowHours: parseInt(reportMeta.urgencyWindowHours || "24", 10) || 24,
+            familiesAffected,
+            personsAffected,
+            vulnerableGroups: splitCsv(reportMeta.vulnerableGroups),
+            requiredResources: requiredResources.length > 0
+              ? requiredResources
+              : extractedData.needIncidents[0]?.requiredResources || [],
+            riskFlags: safetySignals,
+          }]
+        : [{
+            needType: String(needType).toLowerCase(),
+            severity,
+            urgencyWindowHours: parseInt(reportMeta.urgencyWindowHours || "24", 10) || (severity === "high" || severity === "critical" ? 24 : 72),
+            familiesAffected,
+            personsAffected,
+            vulnerableGroups: splitCsv(reportMeta.vulnerableGroups),
+            requiredResources: requiredResources.length > 0
+              ? requiredResources
+              : familiesAffected > 0
+              ? [{ name: requiredResourceName, quantity: familiesAffected, priority: severity }]
+              : [],
+            riskFlags: safetySignals,
+          }],
+      preferredResponderType: reportMeta.preferredResponderType || "volunteer",
+      requiredSkills: splitCsv(reportMeta.requiredSkills),
+      languageNeeds: splitCsv(reportMeta.languageNeeds),
+      safeVisitTimeWindows: splitCsv(reportMeta.safeVisitTimeWindows),
+      estimatedEffortMinutes: parseInt(reportMeta.estimatedEffortMinutes || "60", 10) || 60,
+      revisitRecommendedAt: reportMeta.revisitRecommendedAt ? new Date(reportMeta.revisitRecommendedAt).toISOString() : null,
       voiceUrl: voiceUrl,
       transcript: extractedData?.transcript,
       transcriptEnglish: extractedData?.transcriptEnglish,
       extractedData: extractedData,
       confidence: extractedData?.confidence || 90,
-      safetySignals: extractedData?.safetySignals || [],
+      safetySignals,
       landmark: extractedData?.landmark || location.address || null,
       additionalNotes: extractedData?.additionalNotes || null,
       fieldConfidences: extractedData?.fieldConfidences || null
@@ -204,6 +359,8 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
 
       const data = await response.json();
       setIsMerged(data.merged);
+      setReportId(data.reportId || null);
+      setMissionId(data.missionId || null);
       setStep("submitted");
     } catch (err: any) {
       setError(err.message);
@@ -233,7 +390,7 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
                 <div className="flex gap-3">
                   <Database className="w-5 h-5 text-[#3730A3] shrink-0 mt-0.5" />
                   <p className="text-sm font-medium text-[#3730A3] leading-relaxed">
-                    Your report was automatically merged into <span className="font-bold">Mission M-045 — First Aid Supply</span> (currently active)
+                    Your report was automatically merged into <span className="font-bold">mission {missionId || "active mission"}</span>.
                   </p>
                 </div>
                 <p className="text-[11px] text-[#3730A3]/70 font-bold uppercase tracking-wider pl-8">
@@ -245,7 +402,7 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
                 <Database className="w-5 h-5 text-emerald-600" />
                 <div>
                    <p className="text-sm font-bold text-emerald-900">Syncing to Nexus...</p>
-                   <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Voice ID: #V-8821</p>
+                   <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Voice ID: {reportId || "Pending"}</p>
                 </div>
              </div>
            )}
@@ -256,7 +413,7 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
                   variant="ghost"
                   className="w-full h-14 text-[#5A57FF] font-bold border border-indigo-100 hover:bg-indigo-50 rounded-2xl"
                 >
-                  View mission M-045 →
+                  View mission {missionId || "details"} →
                 </Button>
               )}
               <Button onClick={() => setStep("idle")} className="w-full h-14 bg-[#5A57FF] rounded-2xl font-bold flex gap-2 justify-center group">
@@ -393,6 +550,82 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
                     />
                  </div>
 
+                 <div className="grid grid-cols-2 gap-4 bg-slate-50 border border-slate-100 rounded-2xl p-4 text-left">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Persons Affected</Label>
+                      <Input type="number" value={reportMeta.personsAffected} onChange={(e) => setReportMeta((prev) => ({ ...prev, personsAffected: e.target.value }))} className="h-10 rounded-xl bg-white border-slate-200" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Household Ref</Label>
+                      <Input value={reportMeta.householdRef} onChange={(e) => setReportMeta((prev) => ({ ...prev, householdRef: e.target.value }))} className="h-10 rounded-xl bg-white border-slate-200" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Visit Type</Label>
+                      <Select value={reportMeta.visitType} onValueChange={(val) => setReportMeta((prev) => ({ ...prev, visitType: val }))}>
+                        <SelectTrigger className="h-10 rounded-xl bg-white border-slate-200"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="first_visit">first_visit</SelectItem>
+                          <SelectItem value="follow_up">follow_up</SelectItem>
+                          <SelectItem value="revisit">revisit</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Verification</Label>
+                      <Select value={reportMeta.verificationState} onValueChange={(val) => setReportMeta((prev) => ({ ...prev, verificationState: val }))}>
+                        <SelectTrigger className="h-10 rounded-xl bg-white border-slate-200"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unverified">unverified</SelectItem>
+                          <SelectItem value="verified">verified</SelectItem>
+                          <SelectItem value="rejected">rejected</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Urgency Hours</Label>
+                      <Input type="number" value={reportMeta.urgencyWindowHours} onChange={(e) => setReportMeta((prev) => ({ ...prev, urgencyWindowHours: e.target.value }))} className="h-10 rounded-xl bg-white border-slate-200" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Preferred Responder</Label>
+                      <Select value={reportMeta.preferredResponderType} onValueChange={(val) => setReportMeta((prev) => ({ ...prev, preferredResponderType: val }))}>
+                        <SelectTrigger className="h-10 rounded-xl bg-white border-slate-200"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="volunteer">volunteer</SelectItem>
+                          <SelectItem value="ngo_staff">ngo_staff</SelectItem>
+                          <SelectItem value="mixed">mixed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Risk Flags</Label>
+                      <Input value={reportMeta.riskFlags} onChange={(e) => setReportMeta((prev) => ({ ...prev, riskFlags: e.target.value }))} placeholder="night_safety, road_blocked" className="h-10 rounded-xl bg-white border-slate-200" />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Required Resources (name:qty:priority)</Label>
+                      <Input value={reportMeta.requiredResources} onChange={(e) => setReportMeta((prev) => ({ ...prev, requiredResources: e.target.value }))} placeholder="rice-kit:34:high" className="h-10 rounded-xl bg-white border-slate-200" />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Required Skills</Label>
+                      <Input value={reportMeta.requiredSkills} onChange={(e) => setReportMeta((prev) => ({ ...prev, requiredSkills: e.target.value }))} placeholder="local_language, ration_distribution" className="h-10 rounded-xl bg-white border-slate-200" />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Language Needs</Label>
+                      <Input value={reportMeta.languageNeeds} onChange={(e) => setReportMeta((prev) => ({ ...prev, languageNeeds: e.target.value }))} className="h-10 rounded-xl bg-white border-slate-200" />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Safe Visit Windows</Label>
+                      <Input value={reportMeta.safeVisitTimeWindows} onChange={(e) => setReportMeta((prev) => ({ ...prev, safeVisitTimeWindows: e.target.value }))} className="h-10 rounded-xl bg-white border-slate-200" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Effort Minutes</Label>
+                      <Input type="number" value={reportMeta.estimatedEffortMinutes} onChange={(e) => setReportMeta((prev) => ({ ...prev, estimatedEffortMinutes: e.target.value }))} className="h-10 rounded-xl bg-white border-slate-200" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Revisit At</Label>
+                      <Input type="datetime-local" value={reportMeta.revisitRecommendedAt} onChange={(e) => setReportMeta((prev) => ({ ...prev, revisitRecommendedAt: e.target.value }))} className="h-10 rounded-xl bg-white border-slate-200" />
+                    </div>
+                  </div>
+
                  <div className="flex gap-4 pt-4">
                     <Button variant="outline" className="flex-1 h-14 rounded-2xl border-slate-200 font-bold text-slate-600">Edit Text</Button>
                     <Button onClick={handleSubmit} className="flex-[2] h-14 rounded-2xl bg-[#5A57FF] hover:bg-[#4845E0] font-bold shadow-xl shadow-indigo-100">
@@ -429,10 +662,10 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
            </div>
         </div>
 
-        <div className="bg-[#F3F2FF]/50 border border-indigo-100/50 rounded-[2.5rem] p-6 space-y-4">
-           <p className="text-[10px] font-black text-[#5A57FF] uppercase tracking-widest">Example Report</p>
+          <div className="bg-[#F3F2FF]/50 border border-indigo-100/50 rounded-[2.5rem] p-6 space-y-4">
+            <p className="text-[10px] font-black text-[#5A57FF] uppercase tracking-widest">Reporting Guidance</p>
            <p className="text-xs text-slate-500 font-medium italic leading-relaxed">
-              "In Hebbal near the market, around 34 families facing food shortage, situation is critical, road is accessible"
+              Record concise context: location, affected families, urgency, and any access or safety constraints.
            </p>
            <div className="flex items-center gap-2 pt-2 text-[#5A57FF]">
               <div className="w-1.5 h-1.5 rounded-full bg-[#5A57FF]" />

@@ -56,6 +56,10 @@ class ZoneDocument(BaseModel):
     riskLevel: ZoneRiskLevel = ZoneRiskLevel.low
     scoreHistory: list[dict[str, Any]] = Field(default_factory=list)
     signalCounts: SignalCounts = Field(default_factory=SignalCounts)
+    topNeeds: list[str] = Field(default_factory=list)
+    trendDirection: str = "stable"
+    terrainConfidence: float = Field(default=0, ge=0, le=100)
+    reportVolume7d: int = 0
     activeMissions: int = 0
     lastIntervention: Optional[str] = None
     forecastScore: float = Field(default=0, ge=0, le=100)

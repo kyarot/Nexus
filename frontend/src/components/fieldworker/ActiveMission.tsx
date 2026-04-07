@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
+import { MapPicker } from "@/components/nexus/MapPicker";
 
 const UpdateRow = ({ time, status, text, type }: { time: string, status: string, text: string, type: "system" | "field" }) => (
   <div className="flex gap-4 relative pb-8 group last:pb-0">
@@ -49,11 +50,20 @@ const UpdateRow = ({ time, status, text, type }: { time: string, status: string,
 export const ActiveMission = () => {
   const [activeMission, setActiveMission] = useState<any>(null);
   const [updates, setUpdates] = useState<any[]>([]);
+   const [lastMission, setLastMission] = useState<any | null>(null);
+   const [noMissionReason, setNoMissionReason] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<string>("en_route");
   const [completionNotes, setCompletionNotes] = useState("");
   const [familiesHelped, setFamiliesHelped] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+   const [missionLocation, setMissionLocation] = useState({ lat: 12.9716, lng: 77.5946 });
+   const [updateMode, setUpdateMode] = useState<"voice" | "text">("text");
+   const [updateText, setUpdateText] = useState("");
+   const [isRecording, setIsRecording] = useState(false);
+   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+   const [updateError, setUpdateError] = useState<string | null>(null);
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const token = localStorage.getItem("nexus_access_token");
@@ -66,7 +76,12 @@ export const ActiveMission = () => {
       const data = await response.json();
       setActiveMission(data.mission);
       setUpdates(data.updates || []);
+      setLastMission(data.lastMission || null);
+      setNoMissionReason(data.reason || "");
       if (data.mission) setStatus(data.mission.status);
+         if (data.mission?.location?.lat && data.mission?.location?.lng) {
+            setMissionLocation({ lat: data.mission.location.lat, lng: data.mission.location.lng });
+         }
     } catch (err) {
       console.error("Failed to fetch active mission", err);
     } finally {
@@ -146,6 +161,87 @@ export const ActiveMission = () => {
     }
   };
 
+   const handleStartRecording = async () => {
+      setUpdateError(null);
+      try {
+         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+         const recorder = new MediaRecorder(stream);
+         const chunks: BlobPart[] = [];
+         recorder.ondataavailable = (event) => chunks.push(event.data);
+         recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: "audio/wav" });
+            setRecordedBlob(blob);
+            recorder.stream.getTracks().forEach((track) => track.stop());
+         };
+         recorder.start();
+         setMediaRecorder(recorder);
+         setIsRecording(true);
+      } catch {
+         setUpdateError("Microphone permission denied or unavailable.");
+      }
+   };
+
+   const handleStopRecording = () => {
+      if (!mediaRecorder) return;
+      mediaRecorder.stop();
+      setIsRecording(false);
+   };
+
+   const submitFieldUpdate = async () => {
+      if (!activeMission?.id) return;
+      setIsSubmitting(true);
+      setUpdateError(null);
+
+      try {
+         if (updateMode === "text") {
+            if (!updateText.trim()) {
+               setUpdateError("Please enter update text before submitting.");
+               return;
+            }
+
+            const response = await fetch(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/text-update`, {
+               method: "POST",
+               headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${token}`,
+               },
+               body: JSON.stringify({ text: updateText.trim() }),
+            });
+
+            if (!response.ok) {
+               throw new Error("Failed to submit text update");
+            }
+            setUpdateText("");
+         } else {
+            if (!recordedBlob) {
+               setUpdateError("Record a voice update before submitting.");
+               return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", recordedBlob, "mission-update.wav");
+            const response = await fetch(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/voice-update`, {
+               method: "POST",
+               headers: {
+                  "Authorization": `Bearer ${token}`,
+               },
+               body: formData,
+            });
+
+            if (!response.ok) {
+               throw new Error("Failed to submit voice update");
+            }
+            setRecordedBlob(null);
+         }
+
+         await fetchActiveMission();
+      } catch (err: any) {
+         setUpdateError(err?.message || "Failed to submit update");
+      } finally {
+         setIsSubmitting(false);
+      }
+   };
+
   if (loading) return <div className="flex items-center justify-center h-64"><Sparkles className="animate-spin text-[#5A57FF]" /></div>;
   
   if (!activeMission) return (
@@ -155,6 +251,17 @@ export const ActiveMission = () => {
        </div>
        <h3 className="text-2xl font-bold text-[#1A1A3D]">No assignments yet</h3>
        <p className="text-slate-500 mt-2 max-w-xs mx-auto">Stand by for real-time mission dispatch from your coordinator.</p>
+          {noMissionReason && (
+             <p className="text-xs text-amber-600 mt-4 font-semibold">{noMissionReason}</p>
+          )}
+          {lastMission && (
+             <div className="mt-6 max-w-md mx-auto bg-slate-50 border border-slate-100 rounded-2xl p-4 text-left">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Latest Assigned Mission</p>
+                <p className="text-sm font-bold text-[#1A1A3D] mt-1">{lastMission.title || lastMission.id}</p>
+                <p className="text-xs text-slate-500 mt-1">Status: <span className="font-bold uppercase">{lastMission.status || "unknown"}</span></p>
+                <p className="text-xs text-slate-500">Updated: {lastMission.updatedAt ? new Date(lastMission.updatedAt).toLocaleString() : "N/A"}</p>
+             </div>
+          )}
     </div>
   );
 
@@ -178,17 +285,17 @@ export const ActiveMission = () => {
               <div className="space-y-3">
                  <h1 className="text-4xl font-bold tracking-tight">{activeMission.title || "Emergency Response"}</h1>
                  <p className="text-[#E0E7FF] font-medium max-w-lg leading-relaxed italic opacity-80">
-                    {activeMission.description || "Mission brief is loading..."}
+                    {activeMission.description || "Mission details unavailable."}
                  </p>
               </div>
 
               <div className="flex items-center gap-3 pt-4 border-t border-white/10">
-                 <div className="w-10 h-10 rounded-xl bg-white/20 p-1 backdrop-blur-sm">
-                    <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=facearea&facepad=2&w=80&h=80&q=80" className="w-full h-full rounded-lg object-cover" />
+                 <div className="w-10 h-10 rounded-xl bg-white/20 p-1 backdrop-blur-sm flex items-center justify-center">
+                    <User className="w-5 h-5 text-white" />
                  </div>
                  <div>
                     <p className="text-[10px] font-black uppercase tracking-widest text-[#E0E7FF]">Assigned Coordinator</p>
-                    <p className="text-sm font-bold">Nexus HQ · Live</p>
+                    <p className="text-sm font-bold">{activeMission.creatorName || "Coordinator"} · Live</p>
                  </div>
               </div>
            </div>
@@ -205,7 +312,7 @@ export const ActiveMission = () => {
                  </div>
                  <div className="space-y-0.5">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Zone Location</p>
-                    <p className="text-sm font-bold text-[#1A1A3D]">{activeMission.zoneId || "Assigned Sector"}</p>
+                    <p className="text-sm font-bold text-[#1A1A3D]">{activeMission.zoneName || activeMission.zoneId || "Assigned Sector"}</p>
                  </div>
               </div>
               <div className="flex items-center gap-3">
@@ -235,7 +342,7 @@ export const ActiveMission = () => {
                  </div>
                  <div className="space-y-0.5">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Est. Duration</p>
-                    <p className="text-sm font-bold text-[#1A1A3D]">45 Minutes</p>
+                    <p className="text-sm font-bold text-[#1A1A3D]">{activeMission.estimatedDurationMinutes || 0} Minutes</p>
                  </div>
               </div>
            </div>
@@ -250,35 +357,42 @@ export const ActiveMission = () => {
            
            <div className="space-y-6 relative z-10">
               <p className="text-lg text-slate-600 leading-relaxed font-medium italic">
-                 "Our synthesis engine suggests prioritizing families with elderly members in this zone. The community trust score is high here, so clear and friendly communication is recommended."
+                 "{activeMission.instructions || activeMission.notes || activeMission.description || "No additional mission brief available."}"
               </p>
               
               <div className="flex flex-wrap gap-4">
-                 <Badge className="bg-white text-indigo-600 border-none px-4 py-1.5 rounded-xl font-bold text-xs ring-1 ring-indigo-100">Language: Region Specific</Badge>
-                 <Badge className="bg-white text-indigo-600 border-none px-4 py-1.5 rounded-xl font-bold text-xs ring-1 ring-indigo-100 italic">Tone: Reassuring</Badge>
+                 <Badge className="bg-white text-indigo-600 border-none px-4 py-1.5 rounded-xl font-bold text-xs ring-1 ring-indigo-100">
+                   Priority: {activeMission.priority || "unknown"}
+                 </Badge>
+                 <Badge className="bg-white text-indigo-600 border-none px-4 py-1.5 rounded-xl font-bold text-xs ring-1 ring-indigo-100 italic">
+                   Audience: {activeMission.targetAudience || "fieldworker"}
+                 </Badge>
               </div>
 
-              <button className="text-[11px] font-black text-[#5A57FF] uppercase tracking-widest flex items-center gap-2 group">
-                 Read full Empathy Engine brief <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </button>
+              {activeMission.notes && (
+                <button className="text-[11px] font-black text-[#5A57FF] uppercase tracking-widest flex items-center gap-2 group">
+                   View latest mission notes <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </button>
+              )}
            </div>
            <div className="absolute -bottom-10 -right-10 w-48 h-48 bg-[#5A57FF]/5 rounded-full blur-2xl" />
         </div>
 
         {/* Navigation Card */}
         <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl shadow-indigo-500/5 p-8 flex flex-col md:flex-row gap-8 items-center">
-           <div className="w-full md:w-1/3 h-44 rounded-3xl overflow-hidden relative group shrink-0">
-              <img src="https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?auto=format&fit=crop&q=80&w=400" className="w-full h-full object-cover" />
-              <div className="absolute inset-0 bg-indigo-500/10 group-hover:bg-indigo-500/0 transition-colors" />
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                 <Navigation2 className="w-8 h-8 text-[#5A57FF] fill-current" />
-              </div>
+           <div className="w-full md:w-1/3 h-44 rounded-3xl overflow-hidden relative group shrink-0 border border-slate-100">
+             <MapPicker
+               initialLocation={missionLocation}
+               onLocationSelect={(loc) => {
+                 setMissionLocation({ lat: loc.lat, lng: loc.lng });
+               }}
+             />
            </div>
            
            <div className="flex-1 space-y-6">
               <div className="space-y-1">
                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Destination Sector</p>
-                 <p className="text-lg font-bold text-[#1A1A3D]">{activeMission.location?.address || "Hebbal North, Bangalore"}</p>
+                 <p className="text-lg font-bold text-[#1A1A3D]">{activeMission.location?.address || activeMission.zoneName || activeMission.zoneId || "Assigned destination"}</p>
               </div>
               <div className="flex items-center gap-8">
                  <div className="space-y-0.5">
@@ -288,11 +402,11 @@ export const ActiveMission = () => {
                  <div className="w-px h-10 bg-slate-100" />
                  <div className="space-y-0.5">
                     <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Need ID</p>
-                    <p className="text-xl font-black text-[#1A1A3D]">#429</p>
+                    <p className="text-xl font-black text-[#1A1A3D]">{activeMission.id ? `#${String(activeMission.id).slice(0, 8)}` : "N/A"}</p>
                  </div>
               </div>
               <Button 
-                onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${activeMission.location?.lat},${activeMission.location?.lng}`, '_blank')}
+                onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${missionLocation.lat},${missionLocation.lng}`, '_blank')}
                 className="w-full h-14 bg-[#5A57FF] hover:bg-[#4845E0] rounded-2xl font-bold flex gap-2 shadow-lg shadow-indigo-100"
               >
                  <Navigation className="w-4 h-4" /> Open in Google Maps
@@ -305,23 +419,64 @@ export const ActiveMission = () => {
            <div className="flex items-center justify-between">
               <h3 className="text-2xl font-bold text-[#1A1A3D]">Log a Field Update</h3>
               <div className="flex bg-slate-100 p-1.5 rounded-2xl">
-                 <button className="px-5 py-2.5 rounded-xl bg-white text-[#5A57FF] font-bold text-xs flex items-center gap-2 shadow-sm"><Mic className="w-3.5 h-3.5" /> Voice</button>
-                 <button className="px-5 py-2.5 rounded-xl text-slate-400 font-bold text-xs flex items-center gap-2"><FileText className="w-3.5 h-3.5" /> Text</button>
+                         <button
+                            onClick={() => setUpdateMode("voice")}
+                            className={cn(
+                               "px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2",
+                               updateMode === "voice" ? "bg-white text-[#5A57FF] shadow-sm" : "text-slate-400"
+                            )}
+                         >
+                            <Mic className="w-3.5 h-3.5" /> Voice
+                         </button>
+                         <button
+                            onClick={() => setUpdateMode("text")}
+                            className={cn(
+                               "px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2",
+                               updateMode === "text" ? "bg-white text-[#5A57FF] shadow-sm" : "text-slate-400"
+                            )}
+                         >
+                            <FileText className="w-3.5 h-3.5" /> Text
+                         </button>
               </div>
            </div>
 
-           <Textarea 
-             placeholder="What's happening on ground..." 
-             className="min-h-[140px] rounded-3xl bg-slate-50 border-transparent text-slate-600 font-medium p-8 focus:bg-white focus:ring-2 focus:ring-[#5A57FF]/10"
-           />
+                {updateMode === "text" ? (
+                   <Textarea
+                      value={updateText}
+                      onChange={(event) => setUpdateText(event.target.value)}
+                      placeholder="What's happening on ground..."
+                      className="min-h-[140px] rounded-3xl bg-slate-50 border-transparent text-slate-600 font-medium p-8 focus:bg-white focus:ring-2 focus:ring-[#5A57FF]/10"
+                   />
+                ) : (
+                   <div className="min-h-[140px] rounded-3xl bg-slate-50 border border-slate-100 text-slate-600 font-medium p-8 flex flex-col gap-4 items-start justify-center">
+                        <p className="text-sm font-bold text-[#1A1A3D]">Record a voice update for the timeline</p>
+                        <div className="flex gap-3">
+                            {!isRecording ? (
+                                 <Button onClick={handleStartRecording} className="h-11 px-5 rounded-xl bg-[#5A57FF] hover:bg-[#4845E0] text-white font-bold text-xs uppercase tracking-widest">
+                                     Start Recording
+                                 </Button>
+                            ) : (
+                                 <Button onClick={handleStopRecording} className="h-11 px-5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-xs uppercase tracking-widest">
+                                     Stop Recording
+                                 </Button>
+                            )}
+                            {recordedBlob && <span className="text-xs text-emerald-600 font-bold self-center">Voice clip ready</span>}
+                        </div>
+                   </div>
+                )}
+
+                {updateError && (
+                   <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                      {updateError}
+                   </div>
+                )}
 
            <div className="space-y-4">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Quick Status</p>
               <div className="flex flex-wrap gap-4">
                  {[
                    { label: "En Route", value: "en_route" },
-                   { label: "On Ground", value: "on_ground" },
-                   { label: "Completed", value: "completed" }
+                            { label: "On Ground", value: "on_ground" }
                  ].map((s) => (
                     <button 
                       key={s.value}
@@ -340,8 +495,12 @@ export const ActiveMission = () => {
               </div>
            </div>
 
-           <Button className="w-full h-16 bg-gradient-to-r from-[#5A57FF] to-indigo-600 rounded-[1.5rem] font-bold text-lg shadow-xl shadow-indigo-500/10">
-              Submit Intelligence Update
+           <Button
+             onClick={submitFieldUpdate}
+             disabled={isSubmitting}
+             className="w-full h-16 bg-gradient-to-r from-[#5A57FF] to-indigo-600 rounded-[1.5rem] font-bold text-lg shadow-xl shadow-indigo-500/10"
+           >
+              {isSubmitting ? "Submitting..." : "Submit Intelligence Update"}
            </Button>
         </div>
       </div>

@@ -14,3 +14,4 @@ client = genai.Client(
 # Using Gemini 2.5 Flash as requested.
 GEMINI_PRO = "gemini-2.5-flash"
 GEMINI_FLASH = "gemini-2.5-flash"
+GEMINI_VISION = "gemini-2.5-flash"

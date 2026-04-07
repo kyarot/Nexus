@@ -1,0 +1,64 @@
+NEXUS FIELD REPORT V2 (DUMMY SAMPLE)
+----------------------------------------
+This sample uses the V2 contract fields in plain text format for PDF conversion.
+
+TOP-LEVEL REPORT
+----------------------------------------
+zoneId: hebbal-north
+needType: Food Insecurity
+severity: high
+familiesAffected: 34
+personsAffected: 128
+
+LOCATION
+----------------------------------------
+lat: 12.9716
+lng: 77.5946
+address: 482 Skyline Blvd, Hebbal North, Bengaluru
+landmark: Building C
+
+SOURCE & VISIT
+----------------------------------------
+inputType: ocr
+sourceType: scan
+householdRef: HB-N-482-C4
+visitType: first_visit
+verificationState: unverified
+
+NEED INCIDENTS
+----------------------------------------
+Incident 1:
+	needType: food
+	severity: high
+	urgencyWindowHours: 24
+	familiesAffected: 34
+	personsAffected: 128
+	vulnerableGroups: children, elderly
+	requiredResources:
+		- name: rice-kit | quantity: 34 | priority: high
+		- name: baby-nutrition-pack | quantity: 12 | priority: medium
+	riskFlags: night_safety, access_blocked_after_rain
+
+ASSIGNMENT REQUIREMENT PROFILE
+----------------------------------------
+preferredResponderType: volunteer
+requiredSkills: local_language, ration_distribution
+languageNeeds: kannada, hindi
+safeVisitTimeWindows: 08:00-17:00
+estimatedEffortMinutes: 90
+revisitRecommendedAt: 2026-04-10T10:00:00Z
+
+CONFIDENCE & SAFETY
+----------------------------------------
+confidence: 87
+fieldConfidences:
+	needType: 90
+	severity: 84
+	families: 82
+	persons: 80
+	location: 86
+safetySignals: night_safety, access_blocked_after_rain
+
+ADDITIONAL NOTES
+----------------------------------------
+Road access becomes difficult after sunset.

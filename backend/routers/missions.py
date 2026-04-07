@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 from core.dependencies import role_required
 from core.firebase import db
@@ -112,6 +113,16 @@ def _serialize_mission(mission: MissionDocument) -> dict[str, Any]:
         if isinstance(value, datetime):
             payload[key] = value.isoformat()
     return payload
+
+
+def _serialize_firestore_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_serialize_firestore_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _serialize_firestore_value(item) for key, item in value.items()}
+    return value
 
 
 def _get_zone(zone_id: str, ngo_id: str) -> ZoneDocument:
@@ -232,7 +243,12 @@ async def get_mission_candidates(
     if normalized_audience not in {"fieldworker", "volunteer"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid targetAudience")
 
-    users_docs = db.collection("users").where("ngoId", "==", ngo_id).where("role", "==", normalized_audience).stream()
+    users_docs = (
+        db.collection("users")
+        .where(filter=FieldFilter("ngoId", "==", ngo_id))
+        .where(filter=FieldFilter("role", "==", normalized_audience))
+        .stream()
+    )
     candidates = []
     for doc in users_docs:
         user_data = doc.to_dict() or {}
@@ -374,3 +390,73 @@ async def get_mission_detail(
         )
 
     return MissionCreateResponse(mission=mission, matchedCandidate=best_candidate)
+
+
+@router.get("/missions/{mission_id}/source-reports", response_model=dict[str, Any])
+async def get_mission_source_reports(
+    mission_id: str,
+    user: dict[str, Any] = Depends(role_required("coordinator")),
+) -> dict[str, Any]:
+    ngo_id = _get_coordinator_ngo_id(user)
+    mission_snapshot = db.collection("missions").document(mission_id).get()
+    if not mission_snapshot.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission not found")
+
+    mission_data = mission_snapshot.to_dict() or {}
+    if str(mission_data.get("ngoId") or "") != ngo_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mission does not belong to your NGO")
+
+    source_report_ids = [str(item) for item in (mission_data.get("sourceReportIds") or []) if str(item).strip()]
+    report_docs: list[Any] = []
+
+    if source_report_ids:
+        for report_id in source_report_ids:
+            report_snapshot = db.collection("reports").document(report_id).get()
+            if report_snapshot.exists:
+                report_docs.append(report_snapshot)
+    else:
+        # Backward compatibility for old missions that do not persist sourceReportIds.
+        report_docs = list(
+            db.collection("reports")
+            .where(filter=FieldFilter("missionId", "==", mission_id))
+            .limit(50)
+            .stream()
+        )
+
+    reports: list[dict[str, Any]] = []
+    for report_doc in report_docs:
+        report_data = report_doc.to_dict() or {}
+        reports.append(
+            {
+                "id": report_doc.id,
+                "missionId": report_data.get("missionId"),
+                "submittedBy": report_data.get("submittedBy"),
+                "submittedByName": report_data.get("submittedByName"),
+                "zoneId": report_data.get("zoneId"),
+                "needType": report_data.get("needType"),
+                "severity": report_data.get("severity"),
+                "familiesAffected": report_data.get("familiesAffected"),
+                "personsAffected": report_data.get("personsAffected"),
+                "sourceType": report_data.get("sourceType"),
+                "inputType": report_data.get("inputType"),
+                "verificationState": report_data.get("verificationState"),
+                "visitType": report_data.get("visitType"),
+                "householdRef": report_data.get("householdRef"),
+                "confidence": report_data.get("confidence"),
+                "location": _serialize_firestore_value(report_data.get("location") or {}),
+                "safetySignals": _serialize_firestore_value(report_data.get("safetySignals") or []),
+                "fieldConfidences": _serialize_firestore_value(report_data.get("fieldConfidences") or {}),
+                "needIncidents": _serialize_firestore_value(report_data.get("needIncidents") or []),
+                "assignmentRequirementProfile": _serialize_firestore_value(report_data.get("assignmentRequirementProfile") or {}),
+                "additionalNotes": report_data.get("additionalNotes")
+                or ((report_data.get("extractedData") or {}).get("additionalNotes") if isinstance(report_data.get("extractedData"), dict) else None),
+                "createdAt": _serialize_firestore_value(report_data.get("createdAt")),
+                "updatedAt": _serialize_firestore_value(report_data.get("updatedAt")),
+            }
+        )
+
+    reports.sort(key=lambda item: item.get("createdAt") or "", reverse=True)
+    return {
+        "reports": reports,
+        "total": len(reports),
+    }

@@ -89,6 +89,13 @@ const FieldWorker = () => {
   // Auth User & Dashboard Content
   const [user, setUser] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
+  const [activeMission, setActiveMission] = useState<any | null>(null);
+  const [sessionStartReports, setSessionStartReports] = useState<number | null>(null);
+  const [networkInfo, setNetworkInfo] = useState({
+    online: typeof navigator !== "undefined" ? navigator.onLine : true,
+    label: "Unknown",
+  });
+  const [storageUsagePercent, setStorageUsagePercent] = useState<number>(0);
   const [stats, setStats] = useState({
     activeMissions: 0,
     pendingSyncs: 0,
@@ -127,8 +134,39 @@ const FieldWorker = () => {
         const data = await reportsRes.json();
         setLogs(data.reports.slice(0, 3));
       }
+
+      const missionRes = await fetch(`${apiBaseUrl}/fieldworker/mission/active`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (missionRes.ok) {
+        const missionData = await missionRes.json();
+        setActiveMission(missionData.mission || null);
+      }
     } catch (err) {
       console.error("Dashboard sync error:", err);
+    }
+  };
+
+  const refreshDeviceHealth = async () => {
+    const navAny = navigator as any;
+    const connection = navAny.connection || navAny.mozConnection || navAny.webkitConnection;
+    const effectiveType = connection?.effectiveType ? String(connection.effectiveType).toUpperCase() : null;
+    setNetworkInfo({
+      online: navigator.onLine,
+      label: navigator.onLine ? (effectiveType || "ONLINE") : "OFFLINE",
+    });
+
+    if (navigator.storage?.estimate) {
+      try {
+        const estimate = await navigator.storage.estimate();
+        const usage = Number(estimate.usage || 0);
+        const quota = Number(estimate.quota || 0);
+        if (quota > 0) {
+          setStorageUsagePercent(Math.min(100, Math.round((usage / quota) * 100)));
+        }
+      } catch {
+        setStorageUsagePercent(0);
+      }
     }
   };
 
@@ -138,6 +176,7 @@ const FieldWorker = () => {
     if (storedUser) setUser(JSON.parse(storedUser));
     
     fetchDashboardData();
+    refreshDeviceHealth();
 
     // Synchronization Listener
     const handleSync = () => {
@@ -152,10 +191,22 @@ const FieldWorker = () => {
       setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     }, 60000);
 
+    const onlineHandler = () => refreshDeviceHealth();
+    const offlineHandler = () => refreshDeviceHealth();
+    window.addEventListener("online", onlineHandler);
+    window.addEventListener("offline", offlineHandler);
+
+    const navAny = navigator as any;
+    const connection = navAny.connection || navAny.mozConnection || navAny.webkitConnection;
+    connection?.addEventListener?.("change", refreshDeviceHealth);
+
     return () => {
       clearInterval(timer);
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('userUpdate', handleSync);
+      window.removeEventListener("online", onlineHandler);
+      window.removeEventListener("offline", offlineHandler);
+      connection?.removeEventListener?.("change", refreshDeviceHealth);
     };
   }, []);
 
@@ -163,6 +214,8 @@ const FieldWorker = () => {
   useEffect(() => {
     if (activeTab === "Dashboard") {
       fetchDashboardData();
+      const intervalId = window.setInterval(fetchDashboardData, 15000);
+      return () => window.clearInterval(intervalId);
     }
   }, [activeTab]);
 
@@ -175,6 +228,16 @@ const FieldWorker = () => {
 
   const greeting = getGreeting();
   const firstName = user?.name?.split(" ")[0] || "there";
+  const syncRate = logs.length > 0
+    ? Math.round((logs.filter((log) => (log.status || "synced").toLowerCase() === "synced").length / logs.length) * 100)
+    : 100;
+  const reportsDelta = sessionStartReports === null ? 0 : Math.max(0, stats.totalReports - sessionStartReports);
+
+  useEffect(() => {
+    if (sessionStartReports === null && stats.totalReports >= 0) {
+      setSessionStartReports(stats.totalReports);
+    }
+  }, [stats.totalReports, sessionStartReports]);
 
   const languageOptions = [
     { code: "en", label: "English" },
@@ -284,7 +347,9 @@ const FieldWorker = () => {
                         <div className="w-px h-8 bg-slate-100" />
                         <div className="flex items-center gap-2">
                           {greeting.icon}
-                          <span className="text-sm font-bold text-[#10B981]">28°C</span>
+                          <span className={cn("text-sm font-bold", networkInfo.online ? "text-[#10B981]" : "text-red-500")}>
+                            {networkInfo.online ? "Online" : "Offline"}
+                          </span>
                         </div>
                         </div>
                      </div>
@@ -409,7 +474,7 @@ const FieldWorker = () => {
                     <div>
                        <h3 className="text-5xl font-black">{stats.points.toFixed(1)}</h3>
                        <p className="text-[11px] font-bold mt-2 text-[#10B981] flex items-center gap-1">
-                          +0.4 points since login
+                          +{reportsDelta} report{reportsDelta !== 1 ? "s" : ""} this session
                        </p>
                     </div>
                     <div className="pt-6 border-t border-white/10 flex justify-between">
@@ -419,7 +484,7 @@ const FieldWorker = () => {
                        </div>
                        <div className="text-center px-4 flex-1">
                           <p className="text-[9px] font-black opacity-40 uppercase">Sync</p>
-                          <p className="text-xl font-black">94%</p>
+                          <p className="text-xl font-black">{syncRate}%</p>
                        </div>
                     </div>
                   </div>
@@ -438,7 +503,7 @@ const FieldWorker = () => {
                         )}>
                           {stats.activeMissions > 0 ? "Active Now" : "No Mission"}
                         </Badge>
-                        <h4 className="text-xl font-bold text-[#1A1A3D]">Sector {user?.zone?.slice(-1) || "7"} Audit</h4>
+                        <h4 className="text-xl font-bold text-[#1A1A3D]">{activeMission?.title || "No Active Mission"}</h4>
                      </div>
                      <MapPin className="w-5 h-5 text-slate-300 group-hover:text-[#5A57FF] transition-colors" />
                   </div>
@@ -468,7 +533,10 @@ const FieldWorker = () => {
                      <Button className="bg-[#F3F2FF] hover:bg-[#E0E7FF] text-[#5A57FF] font-bold text-[10px] uppercase tracking-widest h-12 rounded-[1.2rem] flex items-center gap-2 border-none">
                         <Navigation className="w-3.5 h-3.5" /> Navigate
                      </Button>
-                     <Button className="bg-[#1A1A3D] hover:bg-[#2A2665] text-white font-bold text-[10px] uppercase tracking-widest h-12 rounded-[1.2rem] flex items-center gap-2 border-none">
+                     <Button
+                       onClick={() => setActiveTab(stats.activeMissions > 0 ? "Active" : "Reports")}
+                       className="bg-[#1A1A3D] hover:bg-[#2A2665] text-white font-bold text-[10px] uppercase tracking-widest h-12 rounded-[1.2rem] flex items-center gap-2 border-none"
+                     >
                          {stats.activeMissions > 0 ? "Resume" : "History"}
                      </Button>
                   </div>
@@ -481,11 +549,11 @@ const FieldWorker = () => {
                      <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                            <div className="w-11 h-11 rounded-2xl bg-[#F0FDF4] flex items-center justify-center text-[#10B981]">
-                             <Wifi className="w-5 h-5" />
+                              {networkInfo.online ? <Wifi className="w-5 h-5" /> : <WifiOff className="w-5 h-5 text-red-500" />}
                            </div>
                            <div className="space-y-0.5">
-                              <p className="text-sm font-bold text-[#1A1A3D]">Signal Boosted</p>
-                              <p className="text-[10px] font-medium text-slate-400">LTE-A 104Mb/s</p>
+                              <p className="text-sm font-bold text-[#1A1A3D]">{networkInfo.online ? "Connected" : "Offline"}</p>
+                              <p className="text-[10px] font-medium text-slate-400">{networkInfo.label}</p>
                            </div>
                         </div>
                          <div className="flex gap-0.5">
@@ -498,10 +566,10 @@ const FieldWorker = () => {
                      <div className="space-y-3 pt-6 border-t border-slate-50">
                         <div className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
                            <span>Local Storage</span>
-                           <span className="text-[#1A1A3D]">14% utilized</span>
+                          <span className="text-[#1A1A3D]">{storageUsagePercent}% utilized</span>
                         </div>
                         <div className="h-2 bg-slate-50 rounded-full overflow-hidden">
-                           <div className="h-full bg-[#5A57FF] rounded-full" style={{ width: '14%' }} />
+                          <div className="h-full bg-[#5A57FF] rounded-full" style={{ width: `${storageUsagePercent}%` }} />
                         </div>
                      </div>
                   </div>

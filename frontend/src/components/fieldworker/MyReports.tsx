@@ -126,6 +126,9 @@ const makeFormState = (report: any) => {
 
 export const MyReports = ({ onNewReport }: { onNewReport: () => void }) => {
    const [filter, setFilter] = useState("All");
+   const [searchTerm, setSearchTerm] = useState("");
+   const [zoneFilter, setZoneFilter] = useState("all");
+   const [timeFilter, setTimeFilter] = useState("7d");
    const [reports, setReports] = useState<any[]>([]);
    const [loading, setLoading] = useState(true);
    const [dialogOpen, setDialogOpen] = useState(false);
@@ -143,38 +146,67 @@ export const MyReports = ({ onNewReport }: { onNewReport: () => void }) => {
    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
    const token = localStorage.getItem("nexus_access_token");
 
-   useEffect(() => {
-      const fetchReports = async () => {
-         try {
-            const response = await fetch(`${apiBaseUrl}/fieldworker/reports`, {
-               headers: {
-                  Authorization: `Bearer ${token}`,
-               },
+   const fetchReports = async () => {
+      try {
+         const response = await fetch(`${apiBaseUrl}/fieldworker/reports`, {
+            headers: {
+               Authorization: `Bearer ${token}`,
+            },
+         });
+         if (response.ok) {
+            const data = await response.json();
+            const fetchedReports = data.reports || [];
+            setReports(fetchedReports);
+
+            setCounts({
+               synced: fetchedReports.filter((r: any) => r.status === "synced" || !r.status).length,
+               queued: fetchedReports.filter((r: any) => r.status === "queued").length,
+               processing: fetchedReports.filter((r: any) => r.status === "processing").length,
             });
-            if (response.ok) {
-               const data = await response.json();
-               const fetchedReports = data.reports || [];
-               setReports(fetchedReports);
-
-               setCounts({
-                  synced: fetchedReports.filter((r: any) => r.status === "synced" || !r.status).length,
-                  queued: fetchedReports.filter((r: any) => r.status === "queued").length,
-                  processing: fetchedReports.filter((r: any) => r.status === "processing").length,
-               });
-            }
-         } catch (err) {
-            console.error("Failed to fetch intelligence history", err);
-         } finally {
-            setLoading(false);
          }
-      };
+      } catch (err) {
+         console.error("Failed to fetch intelligence history", err);
+      } finally {
+         setLoading(false);
+      }
+   };
 
+   useEffect(() => {
       fetchReports();
+      const intervalId = window.setInterval(fetchReports, 15000);
+      return () => window.clearInterval(intervalId);
    }, [apiBaseUrl, token]);
 
-   const filteredReports = filter === "All"
-      ? reports
-      : reports.filter((r) => (r.status || "synced").toLowerCase() === filter.toLowerCase());
+   const uniqueZones = Array.from(
+      new Set(
+         reports
+            .map((report) => getCanonicalReport(report).zoneId)
+            .filter(Boolean)
+      )
+   );
+
+   const now = Date.now();
+   const filteredReports = reports.filter((report) => {
+      const canonical = getCanonicalReport(report);
+      const statusMatch = filter === "All" || (report.status || "synced").toLowerCase() === filter.toLowerCase();
+      const zoneMatch = zoneFilter === "all" || canonical.zoneId === zoneFilter;
+      const reportCreated = report.createdAt ? new Date(report.createdAt).getTime() : 0;
+      const timeMatch = timeFilter === "all"
+         ? true
+         : timeFilter === "7d"
+            ? reportCreated >= now - (7 * 24 * 60 * 60 * 1000)
+            : reportCreated >= now - (30 * 24 * 60 * 60 * 1000);
+      const query = searchTerm.trim().toLowerCase();
+      const searchMatch = !query
+         ? true
+         : [
+            String(report.id || "").toLowerCase(),
+            String(canonical.zoneId || "").toLowerCase(),
+            String(canonical.location.address || "").toLowerCase(),
+            String(canonical.needType || "").toLowerCase(),
+         ].some((value) => value.includes(query));
+      return statusMatch && zoneMatch && timeMatch && searchMatch;
+   });
 
    const openReport = (report: any, mode: "view" | "edit" = "view") => {
       setSelectedReport(report);
@@ -304,7 +336,12 @@ export const MyReports = ({ onNewReport }: { onNewReport: () => void }) => {
             <div className="flex items-center gap-4 w-full md:w-auto">
                <div className="relative flex-1 md:w-64">
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <Input placeholder="Search Report ID or Zone..." className="pl-12 h-14 rounded-2xl border-slate-100 bg-white shadow-sm focus:ring-[#5A57FF]" />
+                  <Input
+                     placeholder="Search Report ID or Zone..."
+                     value={searchTerm}
+                     onChange={(event) => setSearchTerm(event.target.value)}
+                     className="pl-12 h-14 rounded-2xl border-slate-100 bg-white shadow-sm focus:ring-[#5A57FF]"
+                  />
                </div>
                <Button onClick={onNewReport} className="h-14 px-8 rounded-2xl bg-gradient-to-r from-[#5A57FF] to-purple-600 font-bold shadow-xl shadow-indigo-100 flex gap-2 text-white">
                   New Report <Grid className="w-4 h-4" />
@@ -321,20 +358,29 @@ export const MyReports = ({ onNewReport }: { onNewReport: () => void }) => {
             <div className="h-10 w-px bg-slate-200 mx-2 hidden lg:block" />
 
             <div className="flex gap-4">
-               <Select defaultValue="all">
+               <Select value={zoneFilter} onValueChange={setZoneFilter}>
                   <SelectTrigger className="h-12 w-[160px] rounded-2xl bg-white border-slate-100 shadow-sm font-bold text-xs">
                      <SelectValue placeholder="All Zones" />
                   </SelectTrigger>
                   <SelectContent>
                      <SelectItem value="all">All Zones</SelectItem>
-                     <SelectItem value="local">Assigned Station</SelectItem>
+                     {uniqueZones.map((zone) => (
+                        <SelectItem key={zone} value={zone}>{zone}</SelectItem>
+                     ))}
                   </SelectContent>
                </Select>
-               <div className="relative">
+               <div className="relative min-w-[150px]">
                   <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                  <button className="h-12 px-10 pl-12 rounded-2xl bg-white border-slate-100 shadow-sm font-bold text-xs text-slate-500 flex items-center gap-2">
-                     Last 7 Days <ChevronDown className="w-3 h-3" />
-                  </button>
+                  <Select value={timeFilter} onValueChange={setTimeFilter}>
+                     <SelectTrigger className="h-12 px-10 pl-12 rounded-2xl bg-white border-slate-100 shadow-sm font-bold text-xs text-slate-500 flex items-center gap-2">
+                        <SelectValue />
+                     </SelectTrigger>
+                     <SelectContent>
+                        <SelectItem value="7d">Last 7 Days</SelectItem>
+                        <SelectItem value="30d">Last 30 Days</SelectItem>
+                        <SelectItem value="all">All Time</SelectItem>
+                     </SelectContent>
+                  </Select>
                </div>
             </div>
          </div>
@@ -376,25 +422,25 @@ export const MyReports = ({ onNewReport }: { onNewReport: () => void }) => {
                                        <div className="w-8 h-8 rounded-xl bg-indigo-50 flex items-center justify-center text-[#5A57FF]">
                                           <MapPin className="w-4 h-4" />
                                        </div>
-                                       <span className="font-bold text-[#1A1A3D] text-sm">{report.zoneId || report.location?.address || "Unknown"}</span>
+                                       <span className="font-bold text-[#1A1A3D] text-sm">{canonical.zoneId || canonical.location.address || "Unknown"}</span>
                                     </div>
                                  </td>
                                  <td className="p-8">
-                                    <Badge className="bg-[#F3F2FF] text-[#5A57FF] border-none px-4 py-1.5 rounded-xl font-bold text-xs uppercase">{report.needType || "General"}</Badge>
+                                    <Badge className="bg-[#F3F2FF] text-[#5A57FF] border-none px-4 py-1.5 rounded-xl font-bold text-xs uppercase">{canonical.needType || "General"}</Badge>
                                  </td>
                                  <td className="p-8 text-center">
-                                    <span className="font-black text-[#1A1A3D] text-sm">{report.familiesAffected || 0}</span>
+                                    <span className="font-black text-[#1A1A3D] text-sm">{canonical.familiesAffected || 0}</span>
                                  </td>
                                  <td className="p-8">
                                     <div className="flex items-center gap-2">
                                        <div
                                           className={cn(
                                              "w-2 h-2 rounded-full",
-                                             report.severity?.toLowerCase() === "critical"
+                                             canonical.severity?.toLowerCase() === "critical"
                                                 ? "bg-red-500 animate-pulse"
-                                                : report.severity?.toLowerCase() === "high"
+                                                : canonical.severity?.toLowerCase() === "high"
                                                    ? "bg-amber-500"
-                                                   : report.severity?.toLowerCase() === "medium"
+                                                   : canonical.severity?.toLowerCase() === "medium"
                                                       ? "bg-blue-500"
                                                       : "bg-emerald-500"
                                           )}
@@ -402,16 +448,16 @@ export const MyReports = ({ onNewReport }: { onNewReport: () => void }) => {
                                        <span
                                           className={cn(
                                              "text-xs font-black uppercase tracking-widest",
-                                             report.severity?.toLowerCase() === "critical"
+                                             canonical.severity?.toLowerCase() === "critical"
                                                 ? "text-red-500"
-                                                : report.severity?.toLowerCase() === "high"
+                                                : canonical.severity?.toLowerCase() === "high"
                                                    ? "text-amber-600"
-                                                   : report.severity?.toLowerCase() === "medium"
+                                                   : canonical.severity?.toLowerCase() === "medium"
                                                       ? "text-blue-600"
                                                       : "text-emerald-600"
                                           )}
                                        >
-                                          {report.severity || "Medium"}
+                                          {canonical.severity || "Medium"}
                                        </span>
                                     </div>
                                  </td>
@@ -476,7 +522,7 @@ export const MyReports = ({ onNewReport }: { onNewReport: () => void }) => {
 
             <div className="p-6 bg-slate-50/50 border-t border-slate-50 flex items-center justify-between">
                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">
-                  {loading ? "Counting reports..." : reports.length > 0 ? `Showing all ${reports.length} intelligence submissions` : "No submissions found"}
+                  {loading ? "Counting reports..." : filteredReports.length > 0 ? `Showing ${filteredReports.length} of ${reports.length} intelligence submissions` : "No submissions found"}
                </p>
                <div className="flex gap-2">
                   <Button variant="outline" className="h-10 px-6 rounded-xl border-slate-200 font-bold text-xs" disabled>

@@ -255,6 +255,37 @@ export interface CoordinatorMissionCreateResponse {
   matchedCandidate?: CoordinatorMissionCandidate | null;
 }
 
+export interface CoordinatorMissionSourceReport {
+  id: string;
+  missionId?: string | null;
+  submittedBy?: string | null;
+  submittedByName?: string | null;
+  zoneId?: string | null;
+  needType?: string | null;
+  severity?: string | null;
+  familiesAffected?: number | null;
+  personsAffected?: number | null;
+  sourceType?: string | null;
+  inputType?: string | null;
+  verificationState?: string | null;
+  visitType?: string | null;
+  householdRef?: string | null;
+  confidence?: number | null;
+  location?: {
+    lat?: number;
+    lng?: number;
+    address?: string;
+    landmark?: string;
+  } | null;
+  safetySignals?: string[];
+  fieldConfidences?: Record<string, number>;
+  needIncidents?: Array<Record<string, unknown>>;
+  assignmentRequirementProfile?: Record<string, unknown>;
+  additionalNotes?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
 export const getCoordinatorDashboard = () => request<CoordinatorDashboardResponse>("/coordinator/dashboard");
 
 export const getCoordinatorZones = (riskFilter?: string) => {
@@ -302,6 +333,9 @@ export const createCoordinatorMission = (payload: CoordinatorMissionCreatePayloa
 
 export const getCoordinatorMissionDetail = (missionId: string) =>
   request<CoordinatorMissionCreateResponse>(`/coordinator/missions/${missionId}`);
+
+export const getCoordinatorMissionSourceReports = (missionId: string) =>
+  request<{ reports: CoordinatorMissionSourceReport[]; total: number }>(`/coordinator/missions/${missionId}/source-reports`);
 
 export const getVolunteerMissions = (status?: string) => {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
