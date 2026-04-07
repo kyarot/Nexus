@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Camera, UserPlus, FileText, Map } from "lucide-react";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
@@ -12,13 +12,12 @@ import { ZoneRiskBadge } from "@/components/coordinator/ZoneRiskBadge";
 import { cn } from "@/lib/utils";
 import {
   getCoordinatorDashboard,
-  getCoordinatorHeatmap,
-  getCoordinatorZones,
+  getCoordinatorTerrainSnapshot,
   type CoordinatorInsight,
-  type CoordinatorZone,
+  type CoordinatorTerrainZone,
 } from "@/lib/coordinator-api";
 
-const riskPalette: Record<CoordinatorZone["riskLevel"], string> = {
+const riskPalette: Record<CoordinatorTerrainZone["riskLevel"], string> = {
   critical: "bg-destructive",
   high: "bg-warning",
   medium: "bg-primary",
@@ -59,25 +58,58 @@ const timeAgo = (value?: string) => {
 
 export default function Dashboard() {
   const token = localStorage.getItem("nexus_access_token");
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
-  const { data, isLoading } = useQuery({
+  const dashboardQuery = useQuery({
     queryKey: ["coordinator-dashboard", token],
     queryFn: async () => {
-      const [dashboard, zonesResponse, heatmap] = await Promise.all([
+      const [dashboard, terrainSnapshot] = await Promise.all([
         getCoordinatorDashboard(),
-        getCoordinatorZones(),
-        getCoordinatorHeatmap(),
+        getCoordinatorTerrainSnapshot({
+          confidenceMin: 15,
+          sinceHours: 168,
+        }),
       ]);
 
       return {
         dashboard,
-        zones: zonesResponse.zones,
-        heatmap,
+        zones: terrainSnapshot.zones,
+        heatmap: terrainSnapshot.points,
       };
     },
     enabled: Boolean(token),
-    refetchInterval: 30_000,
+    refetchInterval: 5_000,
   });
+
+  const { data, isLoading } = dashboardQuery;
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const streamUrl = `${apiBaseUrl}/coordinator/terrain/stream?token=${encodeURIComponent(token)}`;
+    const source = new EventSource(streamUrl);
+
+    source.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data || "{}");
+        if (payload?.type === "terrain_update") {
+          dashboardQuery.refetch();
+        }
+      } catch {
+        // Ignore malformed SSE events.
+      }
+    };
+
+    source.onerror = () => {
+      source.close();
+    };
+
+    return () => {
+      source.close();
+    };
+  }, [apiBaseUrl, dashboardQuery, token]);
 
   const zones = data?.zones ?? [];
   const heatmapPoints = data?.heatmap ?? [];
@@ -144,7 +176,11 @@ export default function Dashboard() {
                     <span className="flex items-center gap-1 text-[11px] text-success font-medium"><span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />Live</span>
                   </div>
                 </div>
-                <NeedTerrainMap heatmapPoints={heatmapPoints} className="h-[260px]" />
+                <NeedTerrainMap zones={zones} heatmapPoints={heatmapPoints} opacity={0.95} className="h-[260px]" />
+                {!token ? <p className="mt-2 text-[11px] text-muted-foreground">Sign in as coordinator to load live terrain hotspots.</p> : null}
+                {token && !isLoading && zones.length === 0 && heatmapPoints.length === 0 ? (
+                  <p className="mt-2 text-[11px] text-muted-foreground">Live terrain stream connected, but no recent signals are available yet.</p>
+                ) : null}
               </div>
 
               <div className="rounded-card border bg-card p-5 shadow-card">
