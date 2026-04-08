@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -10,7 +10,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from pydantic import BaseModel
 
 from core.dependencies import role_required
-from core.firebase import db
+from core.firebase import db, rtdb
 from models.mission import (
     MissionCandidate,
     MissionCreateRequest,
@@ -48,6 +48,18 @@ def _get_coordinator_ngo_id(user: dict[str, Any]) -> str:
 def _read_timestamp(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         return value
+    return None
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo else value
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+        except ValueError:
+            return None
     return None
 
 
@@ -547,4 +559,62 @@ async def get_mission_source_reports(
     return {
         "reports": reports,
         "total": len(reports),
+    }
+
+
+@router.get("/missions/{mission_id}/tracking", response_model=dict[str, Any])
+async def get_mission_tracking(
+    mission_id: str,
+    user: dict[str, Any] = Depends(role_required("coordinator")),
+) -> dict[str, Any]:
+    ngo_id = _get_coordinator_ngo_id(user)
+    mission_snapshot = db.collection("missions").document(mission_id).get()
+    if not mission_snapshot.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission not found")
+
+    mission_data = mission_snapshot.to_dict() or {}
+    if str(mission_data.get("ngoId") or "") != ngo_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mission does not belong to your NGO")
+
+    tracking_data = rtdb.child("missionTracking").child(mission_id).get() or {}
+    assigned_to = str(mission_data.get("assignedTo") or "").strip()
+    tracking_user_id = str((tracking_data or {}).get("volunteerId") or "").strip()
+    responder_id = tracking_user_id or assigned_to
+
+    responders: list[dict[str, Any]] = []
+    if responder_id:
+        user_snapshot = db.collection("users").document(responder_id).get()
+        user_data = user_snapshot.to_dict() if user_snapshot.exists else {}
+
+        tracking_location = (tracking_data or {}).get("location") if isinstance(tracking_data, dict) else {}
+        mission_location = mission_data.get("location") if isinstance(mission_data.get("location"), dict) else {}
+        lat = float((tracking_location or {}).get("lat") or mission_location.get("lat") or 0.0)
+        lng = float((tracking_location or {}).get("lng") or mission_location.get("lng") or 0.0)
+        last_update = (tracking_data or {}).get("lastUpdate") if isinstance(tracking_data, dict) else None
+        last_update_dt = _parse_iso_datetime(last_update)
+        is_online = bool(last_update_dt and (datetime.utcnow() - last_update_dt) <= timedelta(minutes=5))
+
+        responders.append(
+            {
+                "id": responder_id,
+                "name": str((user_data or {}).get("name") or mission_data.get("assignedToName") or "Responder"),
+                "role": str((user_data or {}).get("role") or mission_data.get("targetAudience") or "fieldworker"),
+                "status": str((tracking_data or {}).get("status") or mission_data.get("status") or "unknown"),
+                "online": is_online,
+                "lastUpdate": last_update,
+                "location": {
+                    "lat": lat,
+                    "lng": lng,
+                    "address": (tracking_location or {}).get("address") or mission_location.get("address"),
+                    "landmark": (tracking_location or {}).get("landmark") or mission_location.get("landmark"),
+                },
+                "avatarUrl": (user_data or {}).get("profilePhoto"),
+            }
+        )
+
+    return {
+        "missionId": mission_id,
+        "missionStatus": mission_data.get("status"),
+        "trackingAvailable": bool(tracking_data),
+        "responders": responders,
     }

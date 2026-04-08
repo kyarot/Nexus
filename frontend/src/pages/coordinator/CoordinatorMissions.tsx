@@ -1,5 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
+import { MissionResponderLiveMap } from "@/components/coordinator/MissionResponderLiveMap";
+import { MissionsLiveMap } from "@/components/coordinator/MissionsLiveMap";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -48,6 +50,7 @@ import {
   createCoordinatorMission,
   createCoordinatorZone,
   getCoordinatorMissionCandidatesForAudience,
+  getCoordinatorMissionTracking,
   getCoordinatorMissionSourceReports,
   getCoordinatorMissions,
   getCoordinatorZones,
@@ -58,6 +61,7 @@ import {
   type CoordinatorZone,
 } from "@/lib/coordinator-api";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 
 const statusLabel = (status: CoordinatorMission["status"]) => {
   switch (status) {
@@ -135,17 +139,100 @@ const CoordinatorMissions = () => {
   const [missionForm, setMissionForm] = useState<CoordinatorMissionCreatePayload>(defaultMissionForm);
   const [newZoneForm, setNewZoneForm] = useState(defaultNewZoneForm);
   const [showNewZoneForm, setShowNewZoneForm] = useState(false);
+  const [isPageVisible, setIsPageVisible] = useState(() => (typeof document === "undefined" ? true : !document.hidden));
+  const [liveMapSync, setLiveMapSync] = useState<{ connected: boolean; lastEventAt: number | null; lastRefetchAt: number | null }>({
+    connected: false,
+    lastEventAt: null,
+    lastRefetchAt: null,
+  });
+  const sseRefetchTimerRef = useRef<number | null>(null);
+  const token = localStorage.getItem("nexus_access_token");
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      setIsPageVisible(!document.hidden);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   const zonesQuery = useQuery({
     queryKey: ["coordinator-zones"],
     queryFn: () => getCoordinatorZones(),
+    refetchInterval: isPageVisible ? 15_000 : 30_000,
+    refetchIntervalInBackground: true,
   });
 
   const missionsQuery = useQuery({
     queryKey: ["coordinator-missions"],
     queryFn: () => getCoordinatorMissions(),
+    staleTime: 3_000,
+    refetchInterval: isPageVisible ? 6_000 : 20_000,
+    refetchIntervalInBackground: true,
   });
+
+  const refetchMissions = missionsQuery.refetch;
+  const refetchZones = zonesQuery.refetch;
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const streamUrl = `${apiBaseUrl}/coordinator/terrain/stream?token=${encodeURIComponent(token)}`;
+    const source = new EventSource(streamUrl);
+
+    const scheduleLiveRefetch = () => {
+      if (sseRefetchTimerRef.current !== null) {
+        return;
+      }
+
+      sseRefetchTimerRef.current = window.setTimeout(async () => {
+        sseRefetchTimerRef.current = null;
+        await Promise.all([refetchMissions(), refetchZones()]);
+        setLiveMapSync((current) => ({ ...current, lastRefetchAt: Date.now() }));
+      }, 300);
+    };
+
+    source.onopen = () => {
+      setLiveMapSync((current) => ({ ...current, connected: true }));
+    };
+
+    source.onmessage = (event) => {
+      setLiveMapSync((current) => ({ ...current, connected: true, lastEventAt: Date.now() }));
+
+      try {
+        const payload = JSON.parse(event.data || "{}");
+        if (payload?.type === "terrain_update") {
+          scheduleLiveRefetch();
+        }
+      } catch {
+        // Ignore malformed SSE payloads.
+      }
+    };
+
+    source.onerror = () => {
+      setLiveMapSync((current) => ({ ...current, connected: false }));
+    };
+
+    return () => {
+      source.close();
+      if (sseRefetchTimerRef.current !== null) {
+        window.clearTimeout(sseRefetchTimerRef.current);
+        sseRefetchTimerRef.current = null;
+      }
+    };
+  }, [apiBaseUrl, refetchMissions, refetchZones, token]);
 
   const selectedZone = useMemo(
     () => zonesQuery.data?.zones.find((zone) => zone.id === missionForm.zoneId) ?? null,
@@ -189,6 +276,14 @@ const CoordinatorMissions = () => {
     queryKey: ["coordinator-mission-source-reports", selectedMission?.id],
     queryFn: () => getCoordinatorMissionSourceReports(selectedMission!.id),
     enabled: Boolean(selectedMission?.id),
+  });
+
+  const missionTrackingQuery = useQuery({
+    queryKey: ["coordinator-mission-tracking", selectedMission?.id],
+    queryFn: () => getCoordinatorMissionTracking(selectedMission!.id),
+    enabled: Boolean(selectedMission?.id),
+    refetchInterval: selectedMission?.id ? 5_000 : false,
+    refetchIntervalInBackground: true,
   });
 
   useEffect(() => {
@@ -287,6 +382,29 @@ const CoordinatorMissions = () => {
     { label: "On Ground", value: String(missions.filter((mission) => mission.status === "on_ground").length).padStart(2, "0"), delta: "Across your zones", color: "border-[#7C3AED]" },
   ];
 
+  const mapMissions = useMemo(() => {
+    if (activeTab === "all") {
+      return missions;
+    }
+    return filteredMissions;
+  }, [activeTab, filteredMissions, missions]);
+
+  const liveMapSyncLabel = useMemo(() => {
+    const reference = liveMapSync.lastRefetchAt ?? liveMapSync.lastEventAt;
+    if (!reference) {
+      return "Waiting for first live event";
+    }
+
+    const diffSeconds = Math.max(0, Math.floor((Date.now() - reference) / 1000));
+    if (diffSeconds < 5) {
+      return "Updated just now";
+    }
+    if (diffSeconds < 60) {
+      return `Updated ${diffSeconds}s ago`;
+    }
+    return `Updated ${Math.floor(diffSeconds / 60)}m ago`;
+  }, [liveMapSync.lastEventAt, liveMapSync.lastRefetchAt]);
+
   const createMission = async () => {
     let zoneId = missionForm.zoneId;
 
@@ -326,8 +444,6 @@ const CoordinatorMissions = () => {
 
     await createMissionMutation.mutateAsync(payload);
   };
-
-  const selectedMissionZone = selectedMission ? zonesQuery.data?.zones.find((zone) => zone.id === selectedMission.zoneId) : undefined;
 
   return (
     <div className="flex flex-col min-h-screen bg-[#F8F7FF] font-['Plus_Jakarta_Sans']">
@@ -408,6 +524,7 @@ const CoordinatorMissions = () => {
                   const volunteerName = mission.assignedToName || "Unassigned";
                   const mergedReports = mission.mergedFrom?.reports ?? mission.sourceReportIds.length;
                   const mergedNGOs = mission.mergedFrom?.ngos ?? (mission.sourceNgoIds.length || 1);
+                  const missionZone = zonesQuery.data?.zones.find((zone) => zone.id === mission.zoneId);
 
                   return (
                     <div
@@ -437,7 +554,7 @@ const CoordinatorMissions = () => {
 
                       <div className="flex flex-wrap gap-2">
                         <Badge className="bg-indigo-50 text-[#4F46E5] border-none font-bold text-[11px] px-3 py-1 rounded-full">
-                          {selectedMissionZone ? `${selectedMissionZone.name}${selectedMissionZone.ward ? ` · ${selectedMissionZone.ward}` : ""}` : mission.zoneName || mission.zoneId}
+                          {missionZone ? `${missionZone.name}${missionZone.ward ? ` · ${missionZone.ward}` : ""}` : mission.zoneName || mission.zoneId}
                         </Badge>
                         <Badge className="bg-[#FFF7ED] text-[#9A3412] border-none font-bold text-[11px] px-3 py-1 rounded-full">
                           {mission.needType}
@@ -587,16 +704,34 @@ const CoordinatorMissions = () => {
                 <div className="bg-white rounded-[2rem] p-6 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100">
                   <div className="flex items-center justify-between mb-6">
                     <h3 className="text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest">LIVE MISSION MAP</h3>
-                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    <div className={cn("h-2 w-2 rounded-full", liveMapSync.connected ? "bg-green-500 animate-pulse" : "bg-amber-500")} />
                   </div>
-                  <div className="aspect-square bg-[#E0E7FF] rounded-2xl relative overflow-hidden group mb-4 flex items-center justify-center">
-                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(79,70,229,0.25),_transparent_45%),radial-gradient(circle_at_bottom_left,_rgba(16,185,129,0.18),_transparent_40%)]" />
-                    <div className="relative w-24 h-24 rounded-full bg-white/80 backdrop-blur-md flex items-center justify-center border border-white shadow-sm">
-                      <MapPin className="w-8 h-8 text-[#4F46E5]" />
-                    </div>
+                  <MissionsLiveMap
+                    className="aspect-square mb-4"
+                    missions={mapMissions}
+                    zones={zonesQuery.data?.zones ?? []}
+                    selectedMissionId={selectedMission?.id}
+                    onMissionSelect={(mission) => {
+                      setSelectedMission(mission);
+                      setDetailTab("Overview");
+                    }}
+                  />
+                  <div className="flex items-center justify-between text-[11px] font-semibold">
+                    <span className={cn(liveMapSync.connected ? "text-[#166534]" : "text-[#92400E]")}>{liveMapSync.connected ? "Live stream connected" : "Live stream reconnecting"}</span>
+                    <span className="text-slate-500">{liveMapSyncLabel}</span>
                   </div>
-                  <button className="text-xs font-bold text-[#4F46E5] hover:underline flex items-center gap-1 w-full justify-center">
-                    View full map <ChevronRight className="w-3 h-3" />
+                  <button
+                    className="mt-2 text-xs font-bold text-[#4F46E5] hover:underline flex items-center gap-1 w-full justify-center"
+                    onClick={() => {
+                      const missionToOpen = mapMissions.find((mission) => ["dispatched", "en_route", "on_ground"].includes(mission.status)) || mapMissions[0];
+                      if (!missionToOpen) {
+                        return;
+                      }
+                      setSelectedMission(missionToOpen);
+                      setDetailTab("Overview");
+                    }}
+                  >
+                    View live mission details <ChevronRight className="w-3 h-3" />
                   </button>
                 </div>
 
@@ -710,14 +845,26 @@ const CoordinatorMissions = () => {
                   <div className="p-8 space-y-8 pb-24">
                     {detailTab === "Overview" && (
                       <>
-                        <div className="h-[240px] bg-[#E0E7FF] rounded-3xl relative overflow-hidden shadow-inner border border-slate-100 flex items-center justify-center">
-                          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(79,70,229,0.24),_transparent_45%),radial-gradient(circle_at_bottom_right,_rgba(245,158,11,0.16),_transparent_35%)]" />
-                          <div className="relative w-16 h-16 rounded-full bg-white/85 backdrop-blur-md flex items-center justify-center border border-white shadow-sm">
-                            <MapPin className="w-7 h-7 text-[#4F46E5]" />
-                          </div>
-                          <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-md px-4 py-2.5 rounded-xl border border-white shadow-sm">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">CURRENT LOCATION</p>
-                            <p className="text-[13px] font-bold text-[#1A1A3D]">{selectedMission.location.address || selectedMission.zoneName}</p>
+                        <div className="space-y-3">
+                          <MissionResponderLiveMap
+                            className="h-[240px]"
+                            missionLocation={selectedMission.location}
+                            responders={missionTrackingQuery.data?.responders ?? []}
+                            onResponderClick={(responder) => {
+                              if (responder.role === "volunteer") {
+                                navigate(`/dashboard/volunteers?selected=${encodeURIComponent(responder.id)}`);
+                                return;
+                              }
+                              navigate(`/fieldworker?selected=${encodeURIComponent(responder.id)}`);
+                            }}
+                          />
+                          <div className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-4 py-2.5 text-[11px] font-semibold">
+                            <span className="text-slate-600">
+                              {missionTrackingQuery.data?.trackingAvailable
+                                ? `${missionTrackingQuery.data.responders.filter((responder) => responder.online).length} responder(s) online now`
+                                : "Live tracking pending from assigned responder"}
+                            </span>
+                            <span className="text-[#4F46E5]">{selectedMission.location.address || selectedMission.zoneName}</span>
                           </div>
                         </div>
 
@@ -758,7 +905,9 @@ const CoordinatorMissions = () => {
                                   <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedMission.assignedToName || selectedMission.assignedTo || "FieldWorker"}`} alt="avatar" />
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-[13px] font-bold text-[#1A1A3D] truncate">{selectedMission.assignedToName || "No volunteer selected"}</p>
+                                  <p className="text-[13px] font-bold text-[#1A1A3D] truncate">
+                                    {selectedMission.assignedToName || (selectedMission.targetAudience === "volunteer" ? "No volunteer selected" : "No field worker selected")}
+                                  </p>
                                   <p className="text-[11px] font-medium text-slate-400">{selectedMission.assignedVolunteerMatch || 0}% Match · {selectedMission.assignedVolunteerDistance || "Nearby"}</p>
                                 </div>
                                 <Button variant="outline" className="h-8 w-8 p-0 rounded-lg border-slate-200 text-[#4F46E5] hover:bg-white"><MessageSquare className="w-3.5 h-3.5" /></Button>
@@ -927,7 +1076,9 @@ const CoordinatorMissions = () => {
                             <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedMission.assignedToName || selectedMission.assignedTo || "FieldWorker"}`} alt="avatar" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-[13px] font-bold text-[#1A1A3D] truncate">{selectedMission.assignedToName || "No volunteer selected"}</p>
+                            <p className="text-[13px] font-bold text-[#1A1A3D] truncate">
+                              {selectedMission.assignedToName || (selectedMission.targetAudience === "volunteer" ? "No volunteer selected" : "No field worker selected")}
+                            </p>
                             <p className="text-[11px] font-medium text-slate-400">{selectedMission.assignedVolunteerReason || "Auto-assigned by zone and skill match."}</p>
                           </div>
                         </div>

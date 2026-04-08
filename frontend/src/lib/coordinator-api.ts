@@ -411,6 +411,29 @@ export interface CoordinatorMissionSourceReport {
   updatedAt?: string | null;
 }
 
+export interface CoordinatorMissionTrackedResponder {
+  id: string;
+  name: string;
+  role: "volunteer" | "fieldworker" | string;
+  status?: string;
+  online: boolean;
+  lastUpdate?: string | null;
+  location: {
+    lat: number;
+    lng: number;
+    address?: string;
+    landmark?: string;
+  };
+  avatarUrl?: string | null;
+}
+
+export interface CoordinatorMissionTrackingResponse {
+  missionId: string;
+  missionStatus?: string;
+  trackingAvailable: boolean;
+  responders: CoordinatorMissionTrackedResponder[];
+}
+
 export interface CoordinatorVolunteerScoreDimensions {
   skillMatch: number;
   proximity: number;
@@ -847,6 +870,9 @@ export const assignCoordinatorMission = (missionId: string, volunteerId: string)
 
 export const getCoordinatorMissionSourceReports = (missionId: string) =>
   request<{ reports: CoordinatorMissionSourceReport[]; total: number }>(`/coordinator/missions/${missionId}/source-reports`);
+
+export const getCoordinatorMissionTracking = (missionId: string) =>
+  request<CoordinatorMissionTrackingResponse>(`/coordinator/missions/${missionId}/tracking`);
 
 export const getCoordinatorVolunteers = (params?: {
   search?: string;
