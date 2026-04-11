@@ -1,5 +1,6 @@
 import { Outlet } from "react-router-dom";
 import { GlobalSidebar } from "@/components/nexus/GlobalSidebar";
+import { NexusCopilot } from "@/features/nexus-copilot";
 import { useSidebarStore } from "@/hooks/use-sidebar-store";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,7 @@ export function DashboardLayout({ role = "coordinator" }: DashboardLayoutProps) 
         className="flex-1 overflow-y-auto"
       >
         <Outlet />
+        {role === "coordinator" ? <NexusCopilot /> : null}
       </motion.main>
     </div>
   );

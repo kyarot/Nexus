@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 
 from core.dependencies import role_required
 from core.firebase import db
+from models.inventory import MissionResourceRequestCreatePayload
 from models.mission import MissionDocument, MissionListResponse, MissionStatus
+from services.mission_intelligence import generate_empathy_brief
 
 PREFIX = "/volunteer"
 TAGS = ["volunteer"]
@@ -183,6 +185,13 @@ class VolunteerImpactResponse(BaseModel):
     badges: list[str] = Field(default_factory=list)
     rank: VolunteerImpactRank
     share: VolunteerImpactSharePayload
+
+
+class VolunteerEmpathyResponse(BaseModel):
+    mission: dict[str, Any]
+    empathy: dict[str, Any]
+    resources: list[dict[str, Any]] = Field(default_factory=list)
+    pendingResourceRequests: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _mission_sort_key(mission: dict[str, Any]) -> tuple[int, datetime]:
@@ -765,3 +774,204 @@ async def get_volunteer_dashboard(
             badges=[str(item) for item in (user.get("badges") or []) if str(item).strip()],
         ),
     )
+
+
+def _pick_volunteer_mission(uid: str, ngo_id: str, mission_id: str | None = None) -> tuple[str, dict[str, Any]]:
+    if mission_id:
+        snapshot = db.collection("missions").document(mission_id).get()
+        if not snapshot.exists:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission not found")
+        data = snapshot.to_dict() or {}
+        if str(data.get("ngoId") or "") != ngo_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mission does not belong to your NGO")
+        if str(data.get("assignedTo") or "") != uid:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mission is not assigned to you")
+        return snapshot.id, data
+
+    docs = (
+        db.collection("missions")
+        .where("ngoId", "==", ngo_id)
+        .where("targetAudience", "==", "volunteer")
+        .where("assignedTo", "==", uid)
+        .stream()
+    )
+    rows: list[tuple[str, dict[str, Any]]] = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        rows.append((doc.id, data))
+    rows.sort(
+        key=lambda row: _read_timestamp(row[1].get("updatedAt") or row[1].get("createdAt")) or datetime.min,
+        reverse=True,
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No assigned mission found")
+    return rows[0]
+
+
+@router.get("/empathy-brief", response_model=VolunteerEmpathyResponse)
+async def get_volunteer_empathy_brief(
+    user: dict[str, Any] = Depends(role_required("volunteer")),
+    mission_id: str | None = Query(default=None, alias="missionId"),
+    regenerate: bool = Query(default=False),
+) -> VolunteerEmpathyResponse:
+    uid = str(user.get("id") or user.get("uid") or "").strip()
+    ngo_id = str(user.get("ngoId") or user.get("ngo_id") or "").strip()
+    if not uid or not ngo_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user context")
+
+    selected_mission_id, mission_data = _pick_volunteer_mission(uid, ngo_id, mission_id)
+
+    zone_data: dict[str, Any] = {}
+    zone_id = str(mission_data.get("zoneId") or "").strip()
+    if zone_id:
+        zone_snapshot = db.collection("zones").document(zone_id).get()
+        if zone_snapshot.exists:
+            zone_data = zone_snapshot.to_dict() or {}
+
+    empathy = mission_data.get("empathyBrief") if isinstance(mission_data.get("empathyBrief"), dict) else None
+    if regenerate or not empathy:
+        empathy = generate_empathy_brief(mission=mission_data, volunteer=user, zone=zone_data)
+        db.collection("missions").document(selected_mission_id).update(
+            {"empathyBrief": empathy, "updatedAt": datetime.utcnow()}
+        )
+
+    requests_docs = (
+        db.collection("missionResourceRequests")
+        .where("missionId", "==", selected_mission_id)
+        .where("volunteerId", "==", uid)
+        .stream()
+    )
+    pending_requests = []
+    for doc in requests_docs:
+        data = doc.to_dict() or {}
+        if str(data.get("status") or "") == "pending":
+            pending_requests.append({"id": doc.id, **data})
+
+    mission_payload = {"id": selected_mission_id, **mission_data}
+    for key in ["createdAt", "updatedAt", "dispatchedAt", "startedAt", "completedAt"]:
+        value = mission_payload.get(key)
+        if isinstance(value, datetime):
+            mission_payload[key] = value.isoformat()
+
+    resources = mission_data.get("resources") if isinstance(mission_data.get("resources"), list) else []
+    return VolunteerEmpathyResponse(
+        mission=mission_payload,
+        empathy=empathy or {},
+        resources=[item for item in resources if isinstance(item, dict)],
+        pendingResourceRequests=pending_requests,
+    )
+
+
+@router.post("/missions/{mission_id}/claim-resources", response_model=dict[str, Any])
+async def claim_mission_resources(
+    mission_id: str,
+    user: dict[str, Any] = Depends(role_required("volunteer")),
+) -> dict[str, Any]:
+    uid = str(user.get("id") or user.get("uid") or "").strip()
+    ngo_id = str(user.get("ngoId") or user.get("ngo_id") or "").strip()
+    selected_mission_id, mission_data = _pick_volunteer_mission(uid, ngo_id, mission_id)
+
+    resources = mission_data.get("resources") if isinstance(mission_data.get("resources"), list) else []
+    now = datetime.utcnow()
+    claimed_items = 0
+    for resource in resources:
+        if not isinstance(resource, dict):
+            continue
+        item_id = str(resource.get("itemId") or "").strip()
+        if not item_id:
+            continue
+        item_ref = db.collection("inventoryItems").document(item_id)
+        item_snapshot = item_ref.get()
+        if not item_snapshot.exists:
+            continue
+        item_data = item_snapshot.to_dict() or {}
+        try:
+            qty = float(resource.get("quantity") or 0)
+            available = float(item_data.get("availableQty") or 0)
+        except (TypeError, ValueError):
+            continue
+        if qty <= 0 or available <= 0:
+            continue
+        next_qty = max(0.0, available - qty)
+        item_ref.update({"availableQty": next_qty, "updatedAt": now})
+        claimed_items += 1
+
+    mission_ref = db.collection("missions").document(selected_mission_id)
+    mission_ref.update({"resourcesClaimed": True, "updatedAt": now})
+    mission_ref.collection("updates").add(
+        {
+            "type": "resources_claimed",
+            "timestamp": now,
+            "submittedBy": uid,
+            "count": claimed_items,
+        }
+    )
+
+    coordinator_id = str(mission_data.get("creatorId") or "")
+    if coordinator_id:
+        db.collection("notifications").add(
+            {
+                "userId": coordinator_id,
+                "type": "resources_claimed",
+                "missionId": selected_mission_id,
+                "title": "Mission resources claimed",
+                "message": f"{str(user.get('name') or 'Volunteer')} claimed mission resources.",
+                "timestamp": now,
+                "read": False,
+            }
+        )
+
+    return {"claimed": True, "itemsUpdated": claimed_items}
+
+
+@router.post("/missions/{mission_id}/resource-requests", response_model=dict[str, Any])
+async def request_extra_resources(
+    mission_id: str,
+    payload: MissionResourceRequestCreatePayload,
+    user: dict[str, Any] = Depends(role_required("volunteer")),
+) -> dict[str, Any]:
+    uid = str(user.get("id") or user.get("uid") or "").strip()
+    ngo_id = str(user.get("ngoId") or user.get("ngo_id") or "").strip()
+    selected_mission_id, mission_data = _pick_volunteer_mission(uid, ngo_id, mission_id)
+
+    now = datetime.utcnow()
+    ref = db.collection("missionResourceRequests").document()
+    data = {
+        "ngoId": ngo_id,
+        "missionId": selected_mission_id,
+        "volunteerId": uid,
+        "volunteerName": str(user.get("name") or "Volunteer"),
+        "zoneId": mission_data.get("zoneId"),
+        "warehouseId": payload.warehouseId,
+        "items": [item.model_dump() for item in payload.items],
+        "reason": payload.reason,
+        "status": "pending",
+        "decisionNote": "",
+        "createdAt": now,
+        "updatedAt": now,
+        "resolvedAt": None,
+        "resolvedBy": None,
+    }
+    ref.set(data)
+
+    coordinator_id = str(mission_data.get("creatorId") or "")
+    if coordinator_id:
+        db.collection("notifications").add(
+            {
+                "userId": coordinator_id,
+                "type": "resource_request",
+                "missionId": selected_mission_id,
+                "requestId": ref.id,
+                "title": "Extra resources requested",
+                "message": f"{str(user.get('name') or 'Volunteer')} requested additional mission resources.",
+                "timestamp": now,
+                "read": False,
+                "metadata": {
+                    "volunteerId": uid,
+                    "volunteerName": str(user.get("name") or "Volunteer"),
+                    "warehouseId": payload.warehouseId,
+                },
+            }
+        )
+
+    return {"created": True, "requestId": ref.id}

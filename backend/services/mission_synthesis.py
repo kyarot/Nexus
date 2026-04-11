@@ -10,6 +10,7 @@ from firebase_admin import firestore
 
 from core.firebase import db
 from core.gemini import GEMINI_FLASH, client
+from services.mission_intelligence import plan_resources_for_mission
 
 logger = logging.getLogger("nexus.mission_synthesis")
 
@@ -299,6 +300,14 @@ def upsert_mission_from_report(report_id: str, report_data: dict[str, Any]) -> s
 	else:
 		zone_data = zone_snapshot.to_dict() or {}
 	payload = _build_gemini_payload(report_data, zone_data)
+	resource_plan = plan_resources_for_mission(
+		ngo_id=ngo_id,
+		zone_id=zone_id,
+		need_type=need_type,
+		mission_title=str(payload.get("title") or ""),
+		mission_description=str(payload.get("description") or ""),
+		base_resources=[item for item in (payload.get("resources") or []) if isinstance(item, dict)],
+	)
 
 	mission_ref = db.collection("missions").document()
 	mission_data = {
@@ -317,7 +326,8 @@ def upsert_mission_from_report(report_id: str, report_data: dict[str, Any]) -> s
 		"status": "pending",
 		"assignedTo": None,
 		"assignedToName": None,
-		"resources": payload.get("resources") or [],
+		"resources": resource_plan.get("items") or payload.get("resources") or [],
+		"resourcePlan": resource_plan,
 		"sourceReportIds": [report_id],
 		"sourceNgoIds": [ngo_id],
 		"location": {

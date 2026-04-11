@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from core.dependencies import role_required
 from core.firebase import db
+from services.notifications_hub import notify_ngo_coordinators
 from services.insights_synthesis import synthesize_insights_for_ngo
 
 PREFIX = "/coordinator"
@@ -138,8 +139,20 @@ async def synthesize_insights(
 ) -> dict[str, Any]:
     ngo_id = _get_coordinator_ngo_id(user)
     result = synthesize_insights_for_ngo(ngo_id)
+    zones_updated = int(result.get("zonesUpdated", 0) or 0)
+    reports_added = int(result.get("reportsAdded", 0) or 0)
+
+    if zones_updated > 0:
+        notify_ngo_coordinators(
+            ngo_id,
+            type="insight_generated",
+            title="New insights generated",
+            message=f"Generated insights for {zones_updated} zone(s) from {reports_added} new report(s).",
+            metadata={"zonesUpdated": zones_updated, "reportsAdded": reports_added},
+        )
+
     return {
         "updated": True,
-        "zonesUpdated": result.get("zonesUpdated", 0),
-        "reportsAdded": result.get("reportsAdded", 0),
+        "zonesUpdated": zones_updated,
+        "reportsAdded": reports_added,
     }

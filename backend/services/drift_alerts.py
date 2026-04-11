@@ -7,6 +7,7 @@ from typing import Any
 from firebase_admin import firestore
 
 from core.firebase import db
+from services.notifications_hub import notify_ngo_coordinators
 
 logger = logging.getLogger("nexus.drift_alerts")
 
@@ -235,6 +236,9 @@ def _upsert_triggered_alert(
     alert_id = _safe_doc_id(f"{ngo_id}__{zone_id}__{rule_type}")
     alert_ref = db.collection(DRIFT_ALERTS_COLLECTION).document(alert_id)
     existing = alert_ref.get().to_dict() or {}
+    old_severity = str(existing.get("severity") or "").lower()
+    old_status = str(existing.get("status") or "").lower()
+    is_new = not bool(existing)
 
     status = str(existing.get("status") or "active").lower()
     if status == "dismissed":
@@ -281,6 +285,23 @@ def _upsert_triggered_alert(
             "createdAt": now,
         }
     )
+
+    should_notify = is_new or old_severity != severity or old_status not in {"active", "actioned"}
+    if should_notify:
+        notify_ngo_coordinators(
+            ngo_id,
+            type="drift_alert_triggered",
+            title=f"{severity.title()} alert in {zone_name}",
+            message=summary,
+            metadata={
+                "alertId": alert_id,
+                "zoneId": zone_id,
+                "zoneName": zone_name,
+                "severity": severity,
+                "ruleType": rule_type,
+            },
+            timestamp=now,
+        )
 
     return {"id": alert_id, **payload}
 

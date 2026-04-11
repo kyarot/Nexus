@@ -1,9 +1,11 @@
+import { useEffect, useState } from "react";
 import { Search, Bell, Menu } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { NotificationPanel } from "./NotificationPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { getNotificationStreamUrl, listNotifications } from "@/lib/ops-api";
 
 interface DashboardTopBarProps {
   breadcrumb?: string;
@@ -14,6 +16,36 @@ interface DashboardTopBarProps {
 }
 
 export function DashboardTopBar({ breadcrumb = "Dashboard", subtext, onMenuToggle, className, rightElement }: DashboardTopBarProps) {
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    let mounted = true;
+    const refresh = async () => {
+      try {
+        const payload = await listNotifications(false);
+        if (mounted) {
+          setUnread(payload.unread);
+        }
+      } catch {
+        if (mounted) {
+          setUnread(0);
+        }
+      }
+    };
+
+    void refresh();
+
+    const source = new EventSource(getNotificationStreamUrl());
+    source.onmessage = () => {
+      void refresh();
+    };
+
+    return () => {
+      mounted = false;
+      source.close();
+    };
+  }, []);
+
   return (
     <div className={cn("border-b bg-card", className)}>
       <div className="flex items-center justify-between px-6 py-3">
@@ -34,7 +66,7 @@ export function DashboardTopBar({ breadcrumb = "Dashboard", subtext, onMenuToggl
             <PopoverTrigger asChild>
               <button className="relative rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer outline-none">
                 <Bell className="h-5 w-5" />
-                <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-destructive" />
+                {unread > 0 ? <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-destructive" /> : null}
               </button>
             </PopoverTrigger>
             <PopoverContent className="w-[400px] p-0 rounded-xl" align="end" alignOffset={-8}>

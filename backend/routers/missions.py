@@ -21,6 +21,8 @@ from models.mission import (
     MissionStatus,
 )
 from models.zone import ZoneDocument
+from services.mission_intelligence import generate_empathy_brief, plan_resources_for_mission
+from services.notifications_hub import notify_ngo_coordinators, notify_users
 
 PREFIX = "/coordinator"
 TAGS = ["coordinator"]
@@ -312,6 +314,14 @@ async def create_mission(
     chosen_candidate = selected_candidate or best_candidate
     assigned_to = payload.assignedTo or (chosen_candidate.id if chosen_candidate and payload.allowAutoAssign else None)
     assigned_name = payload.assignedVolunteerName or (chosen_candidate.name if chosen_candidate and payload.allowAutoAssign else None)
+    resource_plan = plan_resources_for_mission(
+        ngo_id=ngo_id,
+        zone_id=payload.zoneId,
+        need_type=payload.needType,
+        mission_title=payload.title,
+        mission_description=payload.description,
+        base_resources=[resource.model_dump() for resource in payload.resources],
+    )
 
     mission_ref = db.collection("missions").document()
     now = _now()
@@ -334,7 +344,8 @@ async def create_mission(
         "assignedVolunteerMatch": chosen_candidate.matchPercent if chosen_candidate else 0,
         "assignedVolunteerDistance": chosen_candidate.distance if chosen_candidate else None,
         "assignedVolunteerReason": chosen_candidate.reason if chosen_candidate else None,
-        "resources": [resource.model_dump() for resource in payload.resources],
+        "resources": resource_plan.get("items") or [resource.model_dump() for resource in payload.resources],
+        "resourcePlan": resource_plan,
         "sourceReportIds": payload.sourceReportIds,
         "sourceNgoIds": payload.sourceNgoIds,
         "location": {
@@ -363,6 +374,15 @@ async def create_mission(
         "autoAssigned": not bool(payload.assignedTo) and bool(chosen_candidate),
     }
 
+    if assigned_to:
+        volunteer_snapshot = db.collection("users").document(assigned_to).get()
+        volunteer_data = volunteer_snapshot.to_dict() if volunteer_snapshot.exists else {}
+        mission_data["empathyBrief"] = generate_empathy_brief(
+            mission=mission_data,
+            volunteer={"id": assigned_to, "name": assigned_name, **(volunteer_data or {})},
+            zone=zone.model_dump(),
+        )
+
     mission_ref.set(mission_data)
     mission_ref.collection("updates").add({
         "type": "mission_created",
@@ -372,16 +392,31 @@ async def create_mission(
         "submittedBy": user["id"],
     })
 
+    notify_ngo_coordinators(
+        ngo_id,
+        type="mission_created",
+        title="Mission created",
+        message=f"{payload.title} created for {zone.name}.",
+        mission_id=mission_ref.id,
+        metadata={
+            "zoneId": zone.id,
+            "zoneName": zone.name,
+            "needType": payload.needType,
+            "targetAudience": payload.targetAudience,
+        },
+        timestamp=now,
+    )
+
     if assigned_to:
-        db.collection("notifications").add({
-            "userId": assigned_to,
-            "type": "mission_assigned",
-            "missionId": mission_ref.id,
-            "title": payload.title,
-            "message": f"New mission assigned in {zone.name}",
-            "timestamp": now,
-            "read": False,
-        })
+        notify_users(
+            [assigned_to],
+            type="mission_assigned",
+            mission_id=mission_ref.id,
+            title=payload.title,
+            message=f"New mission assigned in {zone.name}",
+            metadata={"zoneId": zone.id, "zoneName": zone.name},
+            timestamp=now,
+        )
 
     mission = _mission_from_doc(mission_ref.id, mission_data)
     return MissionCreateResponse(mission=mission, matchedCandidate=chosen_candidate)
@@ -467,6 +502,13 @@ async def assign_mission_volunteer(
         "autoAssigned": False,
     }
 
+    mission_preview = {**mission_data, **mission_update}
+    mission_update["empathyBrief"] = generate_empathy_brief(
+        mission=mission_preview,
+        volunteer={"id": candidate.id, **volunteer_data},
+        zone=zone.model_dump(),
+    )
+
     mission_ref.update(mission_update)
     mission_ref.collection("updates").add({
         "type": "mission_assigned",
@@ -476,15 +518,30 @@ async def assign_mission_volunteer(
         "submittedBy": user["id"],
     })
 
-    db.collection("notifications").add({
-        "userId": candidate.id,
-        "type": "mission_assigned",
-        "missionId": mission_id,
-        "title": mission_data.get("title") or "Mission assignment",
-        "message": f"New mission assigned in {zone.name}",
-        "timestamp": now,
-        "read": False,
-    })
+    notify_users(
+        [candidate.id],
+        type="mission_assigned",
+        mission_id=mission_id,
+        title=mission_data.get("title") or "Mission assignment",
+        message=f"New mission assigned in {zone.name}",
+        metadata={"zoneId": zone.id, "zoneName": zone.name},
+        timestamp=now,
+    )
+
+    notify_ngo_coordinators(
+        ngo_id,
+        type="mission_assignment_updated",
+        mission_id=mission_id,
+        title="Volunteer assigned",
+        message=f"{candidate.name} assigned to mission {mission_data.get('title') or mission_id}.",
+        metadata={
+            "volunteerId": candidate.id,
+            "volunteerName": candidate.name,
+            "zoneId": zone.id,
+            "zoneName": zone.name,
+        },
+        timestamp=now,
+    )
 
     mission_data.update(mission_update)
     mission_data["id"] = mission_id

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -113,6 +114,7 @@ const progressForStatus = (status: CoordinatorMission["status"]) => {
 };
 
 const VolunteerMissions = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("all");
   const [subTab, setSubTab] = useState("upcoming");
   const [selectedMission, setSelectedMission] = useState<CoordinatorMission | null>(null);
@@ -174,6 +176,15 @@ const VolunteerMissions = () => {
 
   const activeMission = heroMission && ACTIVE_STATUSES.includes(heroMission.status) ? heroMission : null;
   const heroMissionProgress = heroMission ? progressForStatus(heroMission.status) : 0;
+
+  const openMissionBrief = (mission?: CoordinatorMission | null) => {
+    if (!mission?.id) {
+      navigate("/volunteer/empathy");
+      return;
+    }
+
+    navigate(`/volunteer/empathy?missionId=${encodeURIComponent(mission.id)}`);
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-[#F8F7FF] font-['Plus_Jakarta_Sans']">
@@ -255,7 +266,11 @@ const VolunteerMissions = () => {
                     <Button variant="outline" className="border-white/40 hover:bg-white/10 text-white font-bold px-6 py-6 rounded-2xl flex gap-2 bg-white/5">
                       <Mic className="w-4 h-4" /> Log Update
                     </Button>
-                    <Button variant="outline" className="border-white/40 hover:bg-white/10 text-white font-bold px-6 py-6 rounded-2xl flex gap-2 bg-white/5">
+                    <Button
+                      variant="outline"
+                      className="border-white/40 hover:bg-white/10 text-white font-bold px-6 py-6 rounded-2xl flex gap-2 bg-white/5"
+                      onClick={() => openMissionBrief(heroMission)}
+                    >
                       <FileText className="w-4 h-4" /> View Brief
                     </Button>
                   </div>
@@ -330,7 +345,12 @@ const VolunteerMissions = () => {
               <div className="space-y-4">
                 {upcomingMissions.length ? (
                   upcomingMissions.map((mission) => (
-                    <MissionRow key={mission.id} mission={mission} onOpen={() => setSelectedMission(mission)} />
+                    <MissionRow
+                      key={mission.id}
+                      mission={mission}
+                      onOpen={() => setSelectedMission(mission)}
+                      onViewBrief={() => openMissionBrief(mission)}
+                    />
                   ))
                 ) : (
                   <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
@@ -353,7 +373,12 @@ const VolunteerMissions = () => {
               <div className="space-y-4">
                 {completedMissions.length ? (
                   completedMissions.map((mission) => (
-                    <CompletedMissionCard key={mission.id} mission={mission} onOpen={() => setSelectedMission(mission)} />
+                    <CompletedMissionCard
+                      key={mission.id}
+                      mission={mission}
+                      onOpen={() => setSelectedMission(mission)}
+                      onViewBrief={() => openMissionBrief(mission)}
+                    />
                   ))
                 ) : (
                   <EmptyMissionState title="No completed missions" description="Finished missions will appear here after you close them out." />
@@ -365,7 +390,12 @@ const VolunteerMissions = () => {
               <div className="space-y-4">
                 {declinedMissions.length ? (
                   declinedMissions.map((mission) => (
-                    <DeclinedMissionCard key={mission.id} mission={mission} onOpen={() => setSelectedMission(mission)} />
+                    <DeclinedMissionCard
+                      key={mission.id}
+                      mission={mission}
+                      onOpen={() => setSelectedMission(mission)}
+                      onViewBrief={() => openMissionBrief(mission)}
+                    />
                   ))
                 ) : (
                   <EmptyMissionState title="No declined missions" description="Cancelled or failed missions will show up here." />
@@ -557,7 +587,15 @@ const VolunteerMissions = () => {
   );
 };
 
-const MissionRow = ({ mission, onOpen }: { mission: CoordinatorMission; onOpen: () => void }) => {
+const MissionRow = ({
+  mission,
+  onOpen,
+  onViewBrief,
+}: {
+  mission: CoordinatorMission;
+  onOpen: () => void;
+  onViewBrief: () => void;
+}) => {
   return (
     <div className="group">
       <div
@@ -609,13 +647,31 @@ const MissionRow = ({ mission, onOpen }: { mission: CoordinatorMission; onOpen: 
           >
             <ChevronRight className="w-5 h-5" />
           </div>
+          <Button
+            variant="ghost"
+            className="text-[#4F46E5] font-bold text-xs px-3"
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewBrief();
+            }}
+          >
+            <FileText className="w-4 h-4 mr-1" /> Brief
+          </Button>
         </div>
       </div>
     </div>
   );
 };
 
-const CompletedMissionCard = ({ mission, onOpen }: { mission: CoordinatorMission; onOpen: () => void }) => {
+const CompletedMissionCard = ({
+  mission,
+  onOpen,
+  onViewBrief,
+}: {
+  mission: CoordinatorMission;
+  onOpen: () => void;
+  onViewBrief: () => void;
+}) => {
   return (
     <div className="group">
       <div
@@ -664,13 +720,31 @@ const CompletedMissionCard = ({ mission, onOpen }: { mission: CoordinatorMission
           >
             <ChevronRight className="w-5 h-5" />
           </div>
+          <Button
+            variant="ghost"
+            className="text-[#4F46E5] font-bold text-xs px-3"
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewBrief();
+            }}
+          >
+            <FileText className="w-4 h-4 mr-1" /> Brief
+          </Button>
         </div>
       </div>
     </div>
   );
 };
 
-const DeclinedMissionCard = ({ mission, onOpen }: { mission: CoordinatorMission; onOpen: () => void }) => {
+const DeclinedMissionCard = ({
+  mission,
+  onOpen,
+  onViewBrief,
+}: {
+  mission: CoordinatorMission;
+  onOpen: () => void;
+  onViewBrief: () => void;
+}) => {
   return (
     <div className="bg-white rounded-[1.25rem] border border-slate-100 p-6 flex items-center justify-between opacity-70 grayscale-[0.5]">
       <div className="space-y-3">
@@ -692,6 +766,16 @@ const DeclinedMissionCard = ({ mission, onOpen }: { mission: CoordinatorMission;
         >
           <ChevronRight className="w-5 h-5" />
         </div>
+        <Button
+          variant="ghost"
+          className="text-[#4F46E5] font-bold text-xs px-3"
+          onClick={(e) => {
+            e.stopPropagation();
+            onViewBrief();
+          }}
+        >
+          <FileText className="w-4 h-4 mr-1" /> Brief
+        </Button>
       </div>
     </div>
   );

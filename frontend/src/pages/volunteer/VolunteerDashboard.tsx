@@ -21,6 +21,7 @@ import {
   Languages,
   Leaf,
   Loader2,
+  FileText,
   MapPin,
   Navigation,
   Target,
@@ -58,6 +59,15 @@ export default function VolunteerDashboard() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  
+  const openMissionBrief = (missionId?: string) => {
+    if (!missionId) {
+      navigate("/volunteer/empathy");
+      return;
+    }
+  
+    navigate(`/volunteer/empathy?missionId=${encodeURIComponent(missionId)}`);
+  };
 
   const dashboardQuery = useQuery({
     queryKey: ["volunteer-dashboard"],
@@ -170,7 +180,7 @@ export default function VolunteerDashboard() {
                 </div>
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex gap-3 flex-wrap">
                 <Button
                   className="flex-1 bg-[#5A57FF] hover:bg-[#4845E0] text-white font-bold py-5 rounded-xl shadow-lg shadow-indigo-50"
                   onClick={() => navigate("/volunteer/missions")}
@@ -178,8 +188,15 @@ export default function VolunteerDashboard() {
                   View Details
                 </Button>
                 <Button
-                  variant="secondary"
-                  className="bg-slate-50 text-slate-400 font-bold py-5 px-8 rounded-xl border-none hover:bg-slate-100 italic"
+                  variant="outline"
+                  className="border-white/40 hover:bg-white/10 text-white font-bold px-6 py-6 rounded-2xl flex gap-2 bg-white/5"
+                  onClick={() => openMissionBrief(dashboard.activeMission?.id)}
+                >
+                  <FileText className="w-4 h-4" /> View Brief
+                </Button>
+                <Button
+                  variant="outline"
+                  className="border-white/40 hover:bg-white/10 text-white font-bold px-6 py-6 rounded-2xl flex gap-2 bg-white/5"
                   onClick={() => navigate("/volunteer/missions")}
                 >
                   Open Missions

@@ -30,6 +30,7 @@ const coordinatorNav: NavSection[] = [
   { items: [
     { id: "dash", label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
     { id: "intelligence", label: "Intelligence Hub", icon: Hexagon, path: "/dashboard/intelligence" },
+    { id: "copilot", label: "Nexus Copilot", icon: Sparkles, path: "/dashboard" },
   ]},
   { items: [
     { id: "terrain", label: "Need Terrain Map", icon: Map, path: "/dashboard/terrain" },
@@ -44,7 +45,6 @@ const coordinatorNav: NavSection[] = [
 
   { items: [
     { id: "org", label: "Organisation", icon: Building2, path: "/dashboard/organisation" },
-    { id: "team", label: "Team", icon: UserCog, path: "/dashboard/team" },
   ]},
 ];
 

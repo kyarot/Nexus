@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,117 +39,134 @@ import {
   SheetClose
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import { createInventoryItem, listInventoryItems, listWarehouses, patchInventoryItem } from "@/lib/ops-api";
+import { useToast } from "@/hooks/use-toast";
 
-// Mock Data
-const initialResources = [
-  {
-    id: "RES-001",
-    name: "Food packets",
-    category: "Food",
-    quantity: 24,
-    unit: "food packets",
-    threshold: 10,
-    location: "Asha warehouse",
-    distance: "1.2km from Zone 4",
-    contact: "Rajan Kumar",
-    phone: "+91 98765-43210",
-    zones: ["Zone 4", "Zone 7"],
-    status: "Available",
-    color: "bg-amber-500"
-  },
-  {
-    id: "RES-002",
-    name: "First aid kits",
-    category: "Medical",
-    quantity: 4,
-    unit: "kits",
-    threshold: 10,
-    location: "Central Clinic Hub",
-    distance: "0.4km from Zone 2",
-    contact: "Dr. Meena S.",
-    phone: "+91 98765-11223",
-    zones: ["Zone 2"],
-    status: "Low stock",
-    color: "bg-red-500"
-  },
-  {
-    id: "RES-003",
-    name: "Tarpaulins (Heavy)",
-    category: "Shelter",
-    quantity: 85,
-    unit: "sheets",
-    threshold: 20,
-    location: "Metro Godown 4",
-    distance: "4.5km from Zone 12",
-    contact: "Suresh P.",
-    phone: "+91 98765-99887",
-    zones: ["Zone 12", "Zone 9"],
-    status: "Available",
-    color: "bg-blue-500"
-  },
-  {
-    id: "RES-004",
-    name: "NGO Vehicle (SUV)",
-    category: "Transport",
-    quantity: 2,
-    unit: "active",
-    threshold: 1,
-    location: "HQ Parking Annex",
-    distance: "0.0km - On Base",
-    contact: "Driver Satish",
-    phone: "+91 98765-66778",
-    zones: ["Global"],
-    status: "Available",
-    color: "bg-green-500"
-  },
-  {
-    id: "RES-005",
-    name: "ORS Sachets",
-    category: "Medical",
-    quantity: 450,
-    unit: "in stock",
-    threshold: 100,
-    location: "Asha warehouse",
-    distance: "1.2km from Zone 4",
-    contact: "Rajan Kumar",
-    phone: "+91 98765-43210",
-    zones: ["Zone 4"],
-    status: "Available",
-    color: "bg-red-500"
-  },
-  {
-    id: "RES-006",
-    name: "Mosquito Nets",
-    category: "Shelter",
-    quantity: 0,
-    unit: "stock",
-    threshold: 20,
-    location: "Metro Godown 1",
-    distance: "3.2km from Zone 7",
-    contact: "Suresh P.",
-    phone: "+91 98765-99887",
-    zones: ["Zone 7", "Zone 11"],
-    status: "Unavailable",
-    color: "bg-blue-500"
-  }
-];
+const categories = ["All", "Food", "Medical", "Shelter", "Transport", "Equipment"];
 
 const ResourceInventory = () => {
+   const { toast } = useToast();
   const [viewMode, setViewMode] = useState<"grid" | "list" | "map">("grid");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [showAddResource, setShowAddResource] = useState(false);
   const [logUsageRes, setLogUsageRes] = useState<any>(null);
-  const [resources, setResources] = useState(initialResources);
+   const [resources, setResources] = useState<any[]>([]);
+   const [isAddingResource, setIsAddingResource] = useState(false);
+   const [addResourceForm, setAddResourceForm] = useState({
+      name: "",
+      category: categories[1],
+      unit: "units",
+      quantity: 0,
+      threshold: 5,
+      warehouseId: "",
+   });
 
-  const stats = [
-    { label: "Total Resources", value: "12", sub: "TYPES", color: "border-indigo-500", icon: Package },
-    { label: "Available Now", value: "08", sub: "TYPES", color: "border-green-500", icon: Shield },
-    { label: "Low Stock", value: "03", sub: "ITEMS", color: "border-amber-500", icon: AlertTriangle },
-    { label: "Zones Covered", value: "06", sub: "ZONES", color: "border-purple-500", icon: MapPin },
-  ];
+   const warehouseQuery = useQuery({
+      queryKey: ["coordinator-warehouses"],
+      queryFn: listWarehouses,
+      refetchInterval: 15000,
+   });
 
-  const categories = ["All", "Food", "Medical", "Shelter", "Transport", "Equipment"];
+   const inventoryQuery = useQuery({
+      queryKey: ["coordinator-inventory-items"],
+      queryFn: () => listInventoryItems(),
+      refetchInterval: 12000,
+   });
+
+   useEffect(() => {
+      if (!inventoryQuery.data) {
+         return;
+      }
+      const warehouseMap = new Map((warehouseQuery.data?.warehouses || []).map((item) => [item.id, item]));
+      const mapped = inventoryQuery.data.items.map((item, index) => {
+         const warehouse = warehouseMap.get(item.warehouseId);
+         const quantity = Number(item.availableQty || 0);
+         return {
+            id: item.id,
+            name: item.name,
+            category: item.category || "General",
+            quantity,
+            unit: item.unit || "units",
+            threshold: Number(item.thresholdQty || 0),
+            location: warehouse?.name || "Warehouse",
+            distance: warehouse?.zoneId ? `Zone ${warehouse.zoneId}` : "Assigned zone",
+            contact: warehouse?.managerName || "Coordinator",
+            phone: warehouse?.phone || "N/A",
+            zones: warehouse?.zoneId ? [warehouse.zoneId] : [item.zoneId],
+            status: quantity <= 0 ? "Unavailable" : quantity <= Number(item.thresholdQty || 0) ? "Low stock" : "Available",
+            color: index % 4 === 0 ? "bg-amber-500" : index % 4 === 1 ? "bg-red-500" : index % 4 === 2 ? "bg-blue-500" : "bg-green-500",
+         };
+      });
+      setResources(mapped);
+   }, [inventoryQuery.data, warehouseQuery.data]);
+
+   useEffect(() => {
+      if (addResourceForm.warehouseId || !warehouseQuery.data?.warehouses?.length) {
+         return;
+      }
+      setAddResourceForm((prev) => ({
+         ...prev,
+         warehouseId: warehouseQuery.data?.warehouses?.[0]?.id || "",
+      }));
+   }, [addResourceForm.warehouseId, warehouseQuery.data]);
+
+   const handleAddResource = async () => {
+      if (!addResourceForm.name.trim()) {
+         toast({ title: "Resource name required", description: "Please enter a resource name.", variant: "destructive" });
+         return;
+      }
+      if (!addResourceForm.warehouseId) {
+         toast({ title: "Warehouse required", description: "Please select a warehouse before adding resource.", variant: "destructive" });
+         return;
+      }
+
+      const selectedWarehouse = warehouseQuery.data?.warehouses?.find((item) => item.id === addResourceForm.warehouseId);
+      const zoneId = selectedWarehouse?.zoneId || "";
+      if (!zoneId) {
+         toast({ title: "Invalid warehouse", description: "Selected warehouse has no linked zone.", variant: "destructive" });
+         return;
+      }
+
+      setIsAddingResource(true);
+      try {
+         await createInventoryItem({
+            warehouseId: addResourceForm.warehouseId,
+            zoneId,
+            name: addResourceForm.name.trim(),
+            category: addResourceForm.category,
+            unit: addResourceForm.unit.trim() || "units",
+            availableQty: Number(addResourceForm.quantity) || 0,
+            thresholdQty: Number(addResourceForm.threshold) || 0,
+         });
+         await inventoryQuery.refetch();
+         toast({ title: "Resource added", description: "Inventory has been updated." });
+         setShowAddResource(false);
+         setAddResourceForm((prev) => ({
+            ...prev,
+            name: "",
+            unit: "units",
+            quantity: 0,
+            threshold: 5,
+         }));
+      } catch (error) {
+         toast({ title: "Add failed", description: error instanceof Error ? error.message : "Unknown error", variant: "destructive" });
+      } finally {
+         setIsAddingResource(false);
+      }
+   };
+
+   const stats = useMemo(() => {
+      const lowStock = resources.filter((item) => item.quantity > 0 && item.quantity <= item.threshold).length;
+      const available = resources.filter((item) => item.quantity > 0).length;
+      const zones = new Set(resources.flatMap((item) => item.zones));
+      return [
+         { label: "Total Resources", value: String(resources.length).padStart(2, "0"), sub: "TYPES", color: "border-indigo-500", icon: Package },
+         { label: "Available Now", value: String(available).padStart(2, "0"), sub: "TYPES", color: "border-green-500", icon: Shield },
+         { label: "Low Stock", value: String(lowStock).padStart(2, "0"), sub: "ITEMS", color: "border-amber-500", icon: AlertTriangle },
+         { label: "Zones Covered", value: String(zones.size).padStart(2, "0"), sub: "ZONES", color: "border-purple-500", icon: MapPin },
+      ];
+   }, [resources]);
 
   const filteredResources = resources.filter(res => {
     const matchesCategory = selectedCategory === "All" || res.category === selectedCategory;
@@ -447,30 +465,54 @@ const ResourceInventory = () => {
            <div className="flex-1 overflow-y-auto p-8 space-y-6">
               <div className="space-y-2">
                  <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">RESOURCE NAME</label>
-                 <Input placeholder="e.g., Heavy Tarpaulin sheets" className="h-12 bg-slate-50/50 border-slate-200 rounded-xl font-bold" />
+                 <Input
+                   placeholder="e.g., Heavy Tarpaulin sheets"
+                   className="h-12 bg-slate-50/50 border-slate-200 rounded-xl font-bold"
+                   value={addResourceForm.name}
+                   onChange={(event) => setAddResourceForm((prev) => ({ ...prev, name: event.target.value }))}
+                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                  <div className="space-y-2">
                     <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">CATEGORY</label>
-                    <select className="flex h-12 w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 text-sm font-bold shadow-sm outline-none">
+                    <select
+                      className="flex h-12 w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 text-sm font-bold shadow-sm outline-none"
+                      value={addResourceForm.category}
+                      onChange={(event) => setAddResourceForm((prev) => ({ ...prev, category: event.target.value }))}
+                    >
                        {categories.slice(1).map(c => <option key={c}>{c}</option>)}
                     </select>
                  </div>
                  <div className="space-y-2">
                     <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">UNIT TYPE</label>
-                    <Input placeholder="e.g., Packets / Kits" className="h-12 bg-slate-50/50 border-slate-200 rounded-xl font-bold" />
+                    <Input
+                      placeholder="e.g., Packets / Kits"
+                      className="h-12 bg-slate-50/50 border-slate-200 rounded-xl font-bold"
+                      value={addResourceForm.unit}
+                      onChange={(event) => setAddResourceForm((prev) => ({ ...prev, unit: event.target.value }))}
+                    />
                  </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                  <div className="space-y-2">
                     <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">INITIAL QUANTITY</label>
-                    <Input type="number" defaultValue={0} className="h-12 bg-slate-50/50 border-slate-200 rounded-xl font-bold" />
+                    <Input
+                      type="number"
+                      value={String(addResourceForm.quantity)}
+                      onChange={(event) => setAddResourceForm((prev) => ({ ...prev, quantity: Number(event.target.value || 0) }))}
+                      className="h-12 bg-slate-50/50 border-slate-200 rounded-xl font-bold"
+                    />
                  </div>
                  <div className="space-y-2">
                     <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">ALERT THRESHOLD</label>
-                    <Input type="number" defaultValue={5} className="h-12 bg-slate-50/50 border-slate-200 rounded-xl font-bold" />
+                    <Input
+                      type="number"
+                      value={String(addResourceForm.threshold)}
+                      onChange={(event) => setAddResourceForm((prev) => ({ ...prev, threshold: Number(event.target.value || 0) }))}
+                      className="h-12 bg-slate-50/50 border-slate-200 rounded-xl font-bold"
+                    />
                  </div>
               </div>
 
@@ -479,7 +521,18 @@ const ResourceInventory = () => {
                     <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">STORAGE LOCATION</label>
                     <button className="text-[10px] font-bold text-[#4F46E5] flex items-center gap-1"><MapIcon className="w-3 h-3" /> Select on map</button>
                  </div>
-                 <Input placeholder="Warehouse name / Area" className="h-12 bg-slate-50/50 border-slate-200 rounded-xl font-bold" />
+                         <select
+                            className="flex h-12 w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2 text-sm font-bold shadow-sm outline-none"
+                            value={addResourceForm.warehouseId}
+                            onChange={(event) => setAddResourceForm((prev) => ({ ...prev, warehouseId: event.target.value }))}
+                         >
+                            <option value="">Select warehouse</option>
+                            {(warehouseQuery.data?.warehouses || []).map((warehouse) => (
+                               <option key={warehouse.id} value={warehouse.id}>
+                                  {warehouse.name} ({warehouse.zoneId})
+                               </option>
+                            ))}
+                         </select>
               </div>
 
               <div className="space-y-4">
@@ -521,7 +574,9 @@ const ResourceInventory = () => {
 
            <div className="p-8 border-t border-slate-50 bg-white/80 backdrop-blur-md flex gap-4">
               <Button onClick={() => setShowAddResource(false)} variant="ghost" className="flex-1 py-7 rounded-2xl text-slate-500 font-bold border border-slate-100">Cancel</Button>
-              <Button onClick={() => setShowAddResource(false)} className="flex-1 py-7 rounded-2xl bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] text-white font-bold shadow-xl shadow-indigo-100">Add Resource</Button>
+              <Button disabled={isAddingResource} onClick={handleAddResource} className="flex-1 py-7 rounded-2xl bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] text-white font-bold shadow-xl shadow-indigo-100">
+                {isAddingResource ? "Adding..." : "Add Resource"}
+              </Button>
            </div>
         </SheetContent>
       </Sheet>
@@ -582,9 +637,16 @@ const ResourceInventory = () => {
 
            <div className="p-8 border-t border-slate-50">
               <Button 
-                onClick={() => {
-                   setResources(prev => prev.map(r => r.id === logUsageRes.id ? {...r, quantity: Math.max(0, r.quantity - 1)} : r));
-                   setLogUsageRes(null);
+                        onClick={async () => {
+                            const nextQty = Math.max(0, Number(logUsageRes?.quantity || 0) - 1);
+                            try {
+                               await patchInventoryItem(String(logUsageRes?.id || ""), { availableQty: nextQty });
+                               setResources(prev => prev.map(r => r.id === logUsageRes.id ? {...r, quantity: nextQty} : r));
+                               toast({ title: "Inventory updated", description: "Resource usage logged successfully." });
+                            } catch (error) {
+                               toast({ title: "Update failed", description: error instanceof Error ? error.message : "Unknown error", variant: "destructive" });
+                            }
+                            setLogUsageRes(null);
                 }}
                 className="w-full py-7 rounded-2xl bg-[#1E1B4B] text-white font-bold text-sm shadow-xl flex items-center justify-center gap-3"
               >

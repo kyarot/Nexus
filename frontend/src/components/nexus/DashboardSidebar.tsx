@@ -37,7 +37,6 @@ const coordinatorNav: NavSection[] = [
   { title: "SETTINGS", items: [
     { label: "Organization", icon: Building2, path: "/dashboard/organisation" },
     { label: "Integrations", icon: Plug, path: "/dashboard/integrations" },
-    { label: "Team", icon: UserCog, path: "/dashboard/team" },
   ]},
 ];
 
