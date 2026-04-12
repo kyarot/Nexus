@@ -56,6 +56,11 @@ class SignInRequest(BaseModel):
 class NGOCreateRequest(BaseModel):
     name: str
     city: str
+    publicDiscoverable: bool = False
+    description: str | None = None
+    website: str | None = None
+    primaryEmail: str | None = None
+    logoUrl: str | None = None
     zones: list[str] = Field(default_factory=list)
     needCategories: list[str] = Field(default_factory=list)
     dataChannels: list[str] = Field(default_factory=list)
@@ -66,6 +71,11 @@ class NGOUpdateRequest(BaseModel):
 
     name: str | None = None
     city: str | None = None
+    publicDiscoverable: bool | None = None
+    description: str | None = None
+    website: str | None = None
+    primaryEmail: str | None = None
+    logoUrl: str | None = None
     zones: list[str] | None = None
     needCategories: list[str] | None = None
     dataChannels: list[str] | None = None
@@ -158,11 +168,21 @@ def _ngo_payload(
     zones: list[str],
     need_categories: list[str],
     data_channels: list[str],
+    public_discoverable: bool = False,
+    description: str | None = None,
+    website: str | None = None,
+    primary_email: str | None = None,
+    logo_url: str | None = None,
 ) -> dict[str, Any]:
     return {
         "id": ngo_id,
         "name": name,
         "city": city,
+        "publicDiscoverable": public_discoverable,
+        "description": description,
+        "website": website,
+        "primaryEmail": primary_email,
+        "logoUrl": logo_url,
         "zones": zones,
         "needCategories": need_categories,
         "dataChannels": data_channels,
@@ -635,6 +655,11 @@ async def create_ngo(
         ngo_id=ngo_id,
         name=payload.name,
         city=payload.city,
+        public_discoverable=payload.publicDiscoverable,
+        description=payload.description,
+        website=payload.website,
+        primary_email=payload.primaryEmail,
+        logo_url=payload.logoUrl,
         zones=payload.zones,
         need_categories=payload.needCategories,
         data_channels=payload.dataChannels,

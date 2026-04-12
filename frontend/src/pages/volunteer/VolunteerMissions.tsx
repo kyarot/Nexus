@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { DirectionsRenderer, GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +28,9 @@ import {
   Mic,
   Navigation,
   Plus,
+  ExternalLink,
+  LocateFixed,
+  Route,
   X,
 } from "lucide-react";
 
@@ -113,12 +117,35 @@ const progressForStatus = (status: CoordinatorMission["status"]) => {
   }
 };
 
+const toNumber = (value: unknown, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const toString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
+
+const isValidCoordinate = (value: number) => Number.isFinite(value) && Math.abs(value) <= 180;
+const gmapLibraries: ("visualization")[] = ["visualization"];
+
 const VolunteerMissions = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("all");
   const [subTab, setSubTab] = useState("upcoming");
   const [selectedMission, setSelectedMission] = useState<CoordinatorMission | null>(null);
   const [activeDetailTab, setActiveDetailTab] = useState("overview");
+  const [navigationMission, setNavigationMission] = useState<CoordinatorMission | null>(null);
+  const [isNavOpen, setIsNavOpen] = useState(false);
+  const [currentPosition, setCurrentPosition] = useState<{ lat: number; lng: number } | null>(null);
+  const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
+  const [isRouteLoading, setIsRouteLoading] = useState(false);
+  const [routeMeta, setRouteMeta] = useState<{ distance: string; duration: string } | null>(null);
+  const mapsApiKey = import.meta.env.VITE_GMAPS_KEY || "";
+
+  const { isLoaded: isMapLoaded } = useJsApiLoader({
+    id: "volunteer-missions-navigation",
+    googleMapsApiKey: mapsApiKey,
+    libraries: gmapLibraries,
+  });
 
   const missionsQuery = useQuery({
     queryKey: ["volunteer-missions"],
@@ -177,6 +204,19 @@ const VolunteerMissions = () => {
   const activeMission = heroMission && ACTIVE_STATUSES.includes(heroMission.status) ? heroMission : null;
   const heroMissionProgress = heroMission ? progressForStatus(heroMission.status) : 0;
 
+  const navigationLocation = (navigationMission?.location && typeof navigationMission.location === "object"
+    ? navigationMission.location
+    : {}) as Record<string, unknown>;
+  const destination = {
+    lat: toNumber(navigationLocation.lat, NaN),
+    lng: toNumber(navigationLocation.lng, NaN),
+  };
+  const hasDestination = isValidCoordinate(destination.lat) && isValidCoordinate(destination.lng);
+  const destinationAddress = toString(
+    navigationLocation.address,
+    navigationMission?.zoneName || navigationMission?.zoneId || "Mission area"
+  );
+
   const openMissionBrief = (mission?: CoordinatorMission | null) => {
     if (!mission?.id) {
       navigate("/volunteer/empathy");
@@ -184,6 +224,69 @@ const VolunteerMissions = () => {
     }
 
     navigate(`/volunteer/empathy?missionId=${encodeURIComponent(mission.id)}`);
+  };
+
+  useEffect(() => {
+    if (!isNavOpen || !navigator.geolocation) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setCurrentPosition({ lat: position.coords.latitude, lng: position.coords.longitude });
+      },
+      () => {
+        // Keep panel visible and allow external map fallback even if browser location is blocked.
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [isNavOpen]);
+
+  useEffect(() => {
+    if (!isNavOpen || !isMapLoaded || !currentPosition || !hasDestination || !window.google?.maps) return;
+
+    setIsRouteLoading(true);
+    const service = new window.google.maps.DirectionsService();
+    service.route(
+      {
+        origin: currentPosition,
+        destination,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+        provideRouteAlternatives: false,
+      },
+      (result, status) => {
+        setIsRouteLoading(false);
+        if (status === window.google.maps.DirectionsStatus.OK && result) {
+          setDirections(result);
+          const leg = result.routes[0]?.legs?.[0];
+          setRouteMeta({ distance: leg?.distance?.text || "-", duration: leg?.duration?.text || "-" });
+          return;
+        }
+        setDirections(null);
+        setRouteMeta(null);
+      }
+    );
+  }, [isNavOpen, isMapLoaded, currentPosition, hasDestination, destination.lat, destination.lng]);
+
+  const openNavigationForMission = (mission?: CoordinatorMission | null) => {
+    if (!mission) return;
+    const location = (mission.location && typeof mission.location === "object" ? mission.location : {}) as Record<string, unknown>;
+    const lat = toNumber(location.lat, NaN);
+    const lng = toNumber(location.lng, NaN);
+    if (!isValidCoordinate(lat) || !isValidCoordinate(lng)) {
+      return;
+    }
+    setNavigationMission(mission);
+    setIsNavOpen(true);
+    setDirections(null);
+    setRouteMeta(null);
+  };
+
+  const openInGoogleMaps = () => {
+    if (!hasDestination) return;
+    const origin = currentPosition ? `${currentPosition.lat},${currentPosition.lng}` : "Current+Location";
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(`${destination.lat},${destination.lng}`)}&travelmode=driving`;
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -260,7 +363,11 @@ const VolunteerMissions = () => {
                   </div>
 
                   <div className="flex flex-wrap gap-4 pt-4">
-                    <Button className="bg-white text-[#4F46E5] hover:bg-slate-50 font-bold px-6 py-6 rounded-2xl flex gap-2">
+                    <Button
+                      className="bg-white text-[#4F46E5] hover:bg-slate-50 font-bold px-6 py-6 rounded-2xl flex gap-2"
+                      onClick={() => openNavigationForMission(heroMission)}
+                      disabled={!heroMission || !isValidCoordinate(toNumber(heroMission.location?.lat, NaN)) || !isValidCoordinate(toNumber(heroMission.location?.lng, NaN))}
+                    >
                       <Navigation className="w-4 h-4" /> Navigate
                     </Button>
                     <Button variant="outline" className="border-white/40 hover:bg-white/10 text-white font-bold px-6 py-6 rounded-2xl flex gap-2 bg-white/5">
@@ -583,6 +690,89 @@ const VolunteerMissions = () => {
           )}
         </SheetContent>
       </Sheet>
+
+      {isNavOpen && navigationMission ? (
+        <div className="fixed right-5 bottom-5 z-50 w-[min(92vw,420px)] rounded-3xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+            <div className="flex items-center gap-2 min-w-0">
+              <Route className="w-4 h-4 text-[#4F46E5]" />
+              <div className="min-w-0">
+                <p className="text-xs font-black uppercase tracking-wider text-slate-500">Live Navigation</p>
+                <p className="text-sm font-bold text-[#1A1A3D] truncate">{destinationAddress}</p>
+              </div>
+            </div>
+            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setIsNavOpen(false)}>
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+
+          <div className="h-60 bg-slate-100">
+            {!mapsApiKey ? (
+              <div className="h-full w-full flex items-center justify-center px-4 text-center text-sm text-slate-500">
+                Add VITE_GMAPS_KEY to enable in-app map preview.
+              </div>
+            ) : !isMapLoaded ? (
+              <div className="h-full w-full flex items-center justify-center gap-2 text-sm text-slate-500">
+                <Clock className="h-4 w-4" /> Loading map...
+              </div>
+            ) : !hasDestination ? (
+              <div className="h-full w-full flex items-center justify-center px-4 text-center text-sm text-slate-500">
+                Mission location coordinates are unavailable.
+              </div>
+            ) : (
+              <GoogleMap
+                mapContainerStyle={{ width: "100%", height: "100%" }}
+                center={currentPosition || destination}
+                zoom={14}
+                options={{ disableDefaultUI: true, zoomControl: true, fullscreenControl: false, streetViewControl: false }}
+              >
+                <MarkerF position={destination} />
+                {currentPosition ? (
+                  <MarkerF
+                    position={currentPosition}
+                    options={{
+                      icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        fillColor: "#2563eb",
+                        fillOpacity: 1,
+                        strokeColor: "#ffffff",
+                        strokeWeight: 2,
+                        scale: 7,
+                      },
+                    }}
+                  />
+                ) : null}
+                {directions ? (
+                  <DirectionsRenderer
+                    directions={directions}
+                    options={{ suppressMarkers: true, polylineOptions: { strokeColor: "#4F46E5", strokeWeight: 5, strokeOpacity: 0.9 } }}
+                  />
+                ) : null}
+              </GoogleMap>
+            )}
+          </div>
+
+          <div className="px-4 py-3 space-y-3 bg-white">
+            <div className="flex items-center gap-3 text-xs">
+              <div className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 text-indigo-700 px-2 py-1 font-bold">
+                <LocateFixed className="w-3.5 h-3.5" /> Live
+              </div>
+              <span className="text-slate-500 font-medium">
+                {isRouteLoading ? "Calculating best route..." : routeMeta ? `${routeMeta.distance} • ${routeMeta.duration}` : "Waiting for GPS route"}
+              </span>
+            </div>
+
+            <div className="flex gap-2">
+              <Button onClick={openInGoogleMaps} className="flex-1 rounded-xl bg-[#4F46E5] hover:bg-[#4338CA]">
+                <ExternalLink className="w-4 h-4 mr-2" /> Open in GMaps
+              </Button>
+              <Button variant="outline" className="rounded-xl" onClick={() => setDirections(null)}>
+                Refresh
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

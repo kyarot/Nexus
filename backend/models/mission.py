@@ -82,6 +82,10 @@ class MissionCandidate(BaseModel):
     reason: str = ""
     zoneFamiliarity: bool = False
     travelRadius: int = 0
+    sourceNgoId: str | None = None
+    sourceNgoName: str | None = None
+    isPartnerSupport: bool = False
+    scoreSharePercent: int = 0
 
 
 class MissionDocument(BaseModel):
@@ -104,6 +108,10 @@ class MissionDocument(BaseModel):
     assignedVolunteerMatch: int = 0
     assignedVolunteerDistance: str | None = None
     assignedVolunteerReason: str | None = None
+    assignedVolunteerNgoId: str | None = None
+    assignedVolunteerNgoName: str | None = None
+    supportActivated: bool = False
+    scoreSharePercent: int = 0
     resources: list[MissionResource] = Field(default_factory=list)
     sourceReportIds: list[str] = Field(default_factory=list)
     sourceNgoIds: list[str] = Field(default_factory=list)

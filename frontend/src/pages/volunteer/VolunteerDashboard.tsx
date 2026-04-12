@@ -189,14 +189,14 @@ export default function VolunteerDashboard() {
                 </Button>
                 <Button
                   variant="outline"
-                  className="border-white/40 hover:bg-white/10 text-white font-bold px-6 py-6 rounded-2xl flex gap-2 bg-white/5"
+                  className="border-slate-200 hover:bg-slate-50 text-[#1A1A3D] font-bold px-6 py-6 rounded-2xl flex gap-2"
                   onClick={() => openMissionBrief(dashboard.activeMission?.id)}
                 >
                   <FileText className="w-4 h-4" /> View Brief
                 </Button>
                 <Button
                   variant="outline"
-                  className="border-white/40 hover:bg-white/10 text-white font-bold px-6 py-6 rounded-2xl flex gap-2 bg-white/5"
+                  className="border-slate-200 hover:bg-slate-50 text-[#1A1A3D] font-bold px-6 py-6 rounded-2xl flex gap-2"
                   onClick={() => navigate("/volunteer/missions")}
                 >
                   Open Missions

@@ -874,6 +874,58 @@ async def update_zone(
 
     updates: dict[str, Any] = {}
 
+    if "name" in update_data:
+        name = str(update_data.get("name") or "").strip()
+        if not name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Zone name cannot be empty",
+            )
+        updates["name"] = name
+
+    if "ward" in update_data:
+        updates["ward"] = str(update_data.get("ward") or "").strip()
+
+    if "city" in update_data:
+        updates["city"] = str(update_data.get("city") or "").strip()
+
+    if "lat" in update_data:
+        try:
+            updates["lat"] = float(update_data.get("lat") or 0.0)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid lat value",
+            )
+
+    if "lng" in update_data:
+        try:
+            updates["lng"] = float(update_data.get("lng") or 0.0)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid lng value",
+            )
+
+    if "currentScore" in update_data:
+        try:
+            score = float(update_data.get("currentScore") or 0.0)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid currentScore value",
+            )
+        updates["currentScore"] = max(0.0, min(100.0, score))
+
+    if "topNeeds" in update_data:
+        needs = update_data.get("topNeeds")
+        if not isinstance(needs, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="topNeeds must be a list",
+            )
+        updates["topNeeds"] = [str(item).strip() for item in needs if str(item).strip()]
+
     if "riskLevel" in update_data:
         risk_level = update_data["riskLevel"]
         if risk_level not in [level.value for level in ZoneRiskLevel]:

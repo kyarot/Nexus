@@ -121,6 +121,7 @@ export interface CoordinatorZone {
     actual?: number | null;
   }>;
   signalCounts: CoordinatorSignalCounts;
+  topNeeds?: string[];
   activeMissions: number;
   lastIntervention?: string | null;
   forecastScore: number;
@@ -277,6 +278,52 @@ export interface CoordinatorZoneCreatePayload {
   geometry?: Record<string, unknown> | null;
 }
 
+export interface CoordinatorZoneUpdatePayload {
+  name?: string;
+  ward?: string;
+  city?: string;
+  lat?: number;
+  lng?: number;
+  currentScore?: number;
+  riskLevel?: CoordinatorZone["riskLevel"];
+  topNeeds?: string[];
+}
+
+export interface NgoProfile {
+  id: string;
+  name: string;
+  city: string;
+  publicDiscoverable?: boolean;
+  description?: string;
+  website?: string;
+  primaryEmail?: string;
+  logoUrl?: string;
+  zones: string[];
+  needCategories: string[];
+  dataChannels?: string[];
+  trustScore?: number;
+  trustTier?: string;
+  partnerNgoIds?: string[];
+  collaborationSuggestions?: string[];
+}
+
+export interface NgoProfilePatchPayload {
+  name?: string;
+  city?: string;
+  publicDiscoverable?: boolean;
+  description?: string;
+  website?: string;
+  primaryEmail?: string;
+  logoUrl?: string;
+  zones?: string[];
+  needCategories?: string[];
+  dataChannels?: string[];
+  trustScore?: number;
+  trustTier?: string;
+  partnerNgoIds?: string[];
+  collaborationSuggestions?: string[];
+}
+
 export interface CoordinatorMissionResource {
   name: string;
   quantity?: string | number | null;
@@ -296,6 +343,38 @@ export interface CoordinatorMissionCandidate {
   reason: string;
   zoneFamiliarity: boolean;
   travelRadius: number;
+  sourceNgoId?: string | null;
+  sourceNgoName?: string | null;
+  isPartnerSupport?: boolean;
+  scoreSharePercent?: number;
+}
+
+export interface CollaborationNgo {
+  id: string;
+  name: string;
+  city: string;
+  description?: string;
+  website?: string;
+  primaryEmail?: string;
+  logoUrl?: string;
+  needCategories?: string[];
+  isPartner?: boolean;
+  publicDiscoverable?: boolean;
+}
+
+export interface CollaborationRequestItem {
+  id: string;
+  fromNgoId: string;
+  toNgoId: string;
+  fromNgoName: string;
+  toNgoName: string;
+  status: "pending" | "accepted" | "rejected";
+  message?: string;
+  createdBy?: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  decidedAt?: string | null;
+  decisionNote?: string;
 }
 
 export interface CoordinatorMissionLocation {
@@ -831,6 +910,42 @@ export const getCoordinatorZoneHistory = (zoneId: string) =>
 
 export const createCoordinatorZone = (payload: CoordinatorZoneCreatePayload) =>
   request<CoordinatorZone>("/coordinator/zones", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+export const updateCoordinatorZone = (zoneId: string, payload: CoordinatorZoneUpdatePayload) =>
+  request<{ updated: boolean }>(`/coordinator/zones/${zoneId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+
+export const getNgoProfile = (ngoId: string) =>
+  request<NgoProfile>(`/auth/ngo/${encodeURIComponent(ngoId)}`);
+
+export const patchNgoProfile = (ngoId: string, payload: NgoProfilePatchPayload) =>
+  request<{ updated: boolean }>(`/auth/ngo/${encodeURIComponent(ngoId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+
+export const listDiscoverableNgos = (search?: string) =>
+  request<{ ngos: CollaborationNgo[]; total: number }>(`/coordinator/collaboration/discoverable-ngos${search?.trim() ? `?search=${encodeURIComponent(search.trim())}` : ""}`);
+
+export const listCollaborationPartners = () =>
+  request<{ partners: CollaborationNgo[]; total: number }>("/coordinator/collaboration/partners");
+
+export const listCollaborationRequests = (direction: "incoming" | "outgoing" | "all" = "all", status: "pending" | "accepted" | "rejected" | "all" = "all") =>
+  request<{ requests: CollaborationRequestItem[]; total: number }>(`/coordinator/collaboration/requests?direction=${encodeURIComponent(direction)}&status=${encodeURIComponent(status)}`);
+
+export const createCollaborationRequest = (payload: { targetNgoId: string; message?: string }) =>
+  request<{ created: boolean; request: CollaborationRequestItem }>("/coordinator/collaboration/requests", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+export const decideCollaborationRequest = (requestId: string, payload: { decision: "accepted" | "rejected"; note?: string }) =>
+  request<{ updated: boolean; request: CollaborationRequestItem }>(`/coordinator/collaboration/requests/${encodeURIComponent(requestId)}/decision`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

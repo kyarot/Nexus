@@ -167,6 +167,11 @@ class NGODocument(BaseModel):
     id: str
     name: str
     city: str
+    publicDiscoverable: bool = False
+    description: str | None = None
+    website: str | None = None
+    primaryEmail: str | None = None
+    logoUrl: str | None = None
     zones: list[str] = Field(default_factory=list)
     needCategories: list[str] = Field(default_factory=list)
     dataChannels: list[str] = Field(default_factory=list)

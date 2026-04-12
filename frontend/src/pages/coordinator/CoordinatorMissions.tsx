@@ -1336,6 +1336,13 @@ const CoordinatorMissions = () => {
                             <p className="text-base font-bold text-[#1A1A3D] truncate">{candidate.name}</p>
                             <span className="text-sm font-black text-[#4F46E5]">{candidate.matchPercent}% match</span>
                           </div>
+                          {candidate.isPartnerSupport && (
+                            <div className="mt-1">
+                              <Badge className="bg-amber-100 text-amber-800 border-none text-[10px] font-bold uppercase">
+                                Partner Support · {candidate.sourceNgoName || "Partner NGO"}
+                              </Badge>
+                            </div>
+                          )}
                           <div className="h-1.5 w-full bg-indigo-100 rounded-full overflow-hidden">
                             <div className="h-full bg-[#4F46E5] rounded-full" style={{ width: `${candidate.matchPercent}%` }} />
                           </div>
@@ -1681,6 +1688,9 @@ const CoordinatorMissions = () => {
                           <span className="text-sm font-bold text-[#1A1A3D]">{candidate.name}</span>
                           {index === 0 && (
                             <Badge className="bg-[#EEF2FF] text-[#3730A3] border-none text-[10px] font-bold">BEST MATCH</Badge>
+                          )}
+                          {candidate.isPartnerSupport && (
+                            <Badge className="bg-amber-100 text-amber-800 border-none text-[10px] font-bold">PARTNER SUPPORT</Badge>
                           )}
                         </div>
                         <p className="text-[11px] text-slate-500 font-medium">{candidate.reason}</p>

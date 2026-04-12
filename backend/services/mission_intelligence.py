@@ -219,6 +219,75 @@ def plan_resources_for_mission(
         return fallback
 
 
+def rank_candidate_support_with_gemini(
+    *,
+    ngo_id: str,
+    zone: dict[str, Any],
+    need_type: str,
+    mission_title: str,
+    mission_description: str,
+    candidates: list[dict[str, Any]],
+) -> list[str]:
+    if not candidates:
+        return []
+
+    fallback_order = [str(candidate.get("id") or "").strip() for candidate in candidates if str(candidate.get("id") or "").strip()]
+    if not fallback_order:
+        return []
+
+    prompt = (
+        "Rank partner NGO support candidates for worst-case mission fallback. Return ONLY valid JSON with keys: "
+        "orderedCandidateIds (array of strings), rationale (string). "
+        "Do not introduce candidates that are not in the provided list. Prioritize availability, skill fit, zone familiarity, "
+        "burnout safety, and mission urgency. This ranking only applies when local staffing is exhausted and partner NGOs are collaborating.\n\n"
+        f"HostNGOId: {ngo_id}\n"
+        f"Zone: {_safe_json(zone)}\n"
+        f"NeedType: {need_type}\n"
+        f"MissionTitle: {mission_title}\n"
+        f"MissionDescription: {mission_description}\n"
+        f"Candidates: {_safe_json(candidates)}\n"
+        f"FallbackOrder: {_safe_json(fallback_order)}\n"
+    )
+
+    try:
+        response = client.models.generate_content(
+            model=GEMINI_FLASH,
+            contents=[{"role": "user", "parts": [{"text": prompt}]}],
+        )
+        raw = _strip_json_fences(getattr(response, "text", "") or "")
+        if not raw:
+            return fallback_order
+
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            return fallback_order
+
+        ordered_ids = parsed.get("orderedCandidateIds")
+        if not isinstance(ordered_ids, list):
+            return fallback_order
+
+        normalized = []
+        seen: set[str] = set()
+        allowed = set(fallback_order)
+        for item in ordered_ids:
+            candidate_id = str(item or "").strip()
+            if candidate_id and candidate_id in allowed and candidate_id not in seen:
+                normalized.append(candidate_id)
+                seen.add(candidate_id)
+
+        if not normalized:
+            return fallback_order
+
+        for candidate_id in fallback_order:
+            if candidate_id not in seen:
+                normalized.append(candidate_id)
+
+        return normalized
+    except Exception as exc:
+        logger.warning("Partner candidate ranking fallback used: %s", exc)
+        return fallback_order
+
+
 def generate_empathy_brief(mission: dict[str, Any], volunteer: dict[str, Any], zone: dict[str, Any] | None = None) -> dict[str, Any]:
     zone = zone or {}
     default_payload = {

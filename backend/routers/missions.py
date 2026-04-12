@@ -21,7 +21,7 @@ from models.mission import (
     MissionStatus,
 )
 from models.zone import ZoneDocument
-from services.mission_intelligence import generate_empathy_brief, plan_resources_for_mission
+from services.mission_intelligence import generate_empathy_brief, plan_resources_for_mission, rank_candidate_support_with_gemini
 from services.notifications_hub import notify_ngo_coordinators, notify_users
 
 PREFIX = "/coordinator"
@@ -45,6 +45,29 @@ def _get_coordinator_ngo_id(user: dict[str, Any]) -> str:
     if not ngo_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User does not have an associated NGO")
     return ngo_id
+
+
+def _get_partner_ngo_ids(ngo_id: str) -> list[str]:
+    snapshot = db.collection("ngos").document(ngo_id).get()
+    if not snapshot.exists:
+        return []
+    data = snapshot.to_dict() or {}
+    return [str(item) for item in (data.get("partnerNgoIds") or []) if str(item).strip()]
+
+
+def _get_ngo_name(ngo_id: str) -> str:
+    snapshot = db.collection("ngos").document(ngo_id).get()
+    if not snapshot.exists:
+        return "Partner NGO"
+    data = snapshot.to_dict() or {}
+    return str(data.get("name") or "Partner NGO")
+
+
+def _are_ngos_collaborating(ngo_a: str, ngo_b: str) -> bool:
+    if not ngo_a or not ngo_b:
+        return False
+    partners = set(_get_partner_ngo_ids(ngo_a))
+    return ngo_b in partners
 
 
 def _read_timestamp(value: Any) -> datetime | None:
@@ -103,6 +126,10 @@ def _mission_from_doc(doc_id: str, data: dict[str, Any]) -> MissionDocument:
         assignedVolunteerMatch=int(data.get("assignedVolunteerMatch") or 0),
         assignedVolunteerDistance=data.get("assignedVolunteerDistance"),
         assignedVolunteerReason=data.get("assignedVolunteerReason"),
+        assignedVolunteerNgoId=data.get("assignedVolunteerNgoId"),
+        assignedVolunteerNgoName=data.get("assignedVolunteerNgoName"),
+        supportActivated=bool(data.get("supportActivated") or False),
+        scoreSharePercent=int(data.get("scoreSharePercent") or 0),
         resources=resources,
         sourceReportIds=list(data.get("sourceReportIds") or []),
         sourceNgoIds=list(data.get("sourceNgoIds") or []),
@@ -158,7 +185,14 @@ def _get_zone(zone_id: str, ngo_id: str) -> ZoneDocument:
     return ZoneDocument.model_validate(zone_data)
 
 
-def _score_candidate(user_data: dict[str, Any], zone: ZoneDocument, need_type: str) -> MissionCandidate:
+def _score_candidate(
+    user_data: dict[str, Any],
+    zone: ZoneDocument,
+    need_type: str,
+    *,
+    source_ngo_id: str | None = None,
+    source_ngo_name: str | None = None,
+) -> MissionCandidate:
     user_id = str(user_data.get("id") or "")
     name = str(user_data.get("name") or "Field Worker")
     initials = "".join([part[0] for part in name.split()[:2]]).upper() or name[:2].upper()
@@ -206,6 +240,10 @@ def _score_candidate(user_data: dict[str, Any], zone: ZoneDocument, need_type: s
         reason=reason,
         zoneFamiliarity=zone_familiarity,
         travelRadius=travel_radius,
+        sourceNgoId=source_ngo_id,
+        sourceNgoName=source_ngo_name,
+        isPartnerSupport=bool(source_ngo_id),
+        scoreSharePercent=50 if source_ngo_id else 0,
     )
 
 
@@ -213,6 +251,37 @@ def _pick_best_candidate(candidates: list[MissionCandidate]) -> MissionCandidate
     if not candidates:
         return None
     return sorted(candidates, key=lambda candidate: (candidate.matchPercent, candidate.successRate), reverse=True)[0]
+
+
+def _reorder_partner_candidates_with_gemini(
+    *,
+    ngo_id: str,
+    zone: ZoneDocument,
+    need_type: str,
+    mission_title: str,
+    mission_description: str,
+    candidates: list[MissionCandidate],
+) -> list[MissionCandidate]:
+    if not candidates:
+        return []
+
+    candidate_rows = [candidate.model_dump() for candidate in candidates]
+    ordered_ids = rank_candidate_support_with_gemini(
+        ngo_id=ngo_id,
+        zone=zone.model_dump(),
+        need_type=need_type,
+        mission_title=mission_title,
+        mission_description=mission_description,
+        candidates=candidate_rows,
+    )
+    if not ordered_ids:
+        return sorted(candidates, key=lambda candidate: (candidate.matchPercent, candidate.successRate), reverse=True)
+
+    by_id = {candidate.id: candidate for candidate in candidates}
+    ordered: list[MissionCandidate] = [by_id[candidate_id] for candidate_id in ordered_ids if candidate_id in by_id]
+    remaining = [candidate for candidate in candidates if candidate.id not in ordered_ids]
+    remaining.sort(key=lambda candidate: (candidate.matchPercent, candidate.successRate), reverse=True)
+    return ordered + remaining
 
 
 @router.get("/missions", response_model=MissionListResponse)
@@ -259,6 +328,7 @@ async def get_mission_candidates(
     zone = _get_zone(zone_id, ngo_id)
 
     normalized_audience = target_audience.lower().strip()
+    used_partner_fallback = False
     if normalized_audience not in {"fieldworker", "volunteer"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid targetAudience")
 
@@ -268,7 +338,7 @@ async def get_mission_candidates(
         .where(filter=FieldFilter("role", "==", normalized_audience))
         .stream()
     )
-    candidates = []
+    candidates: list[MissionCandidate] = []
     for doc in users_docs:
         user_data = doc.to_dict() or {}
         user_data["id"] = doc.id
@@ -284,7 +354,53 @@ async def get_mission_candidates(
             continue
         candidates.append(_score_candidate(user_data, zone, need_type))
 
-    candidates.sort(key=lambda candidate: (candidate.matchPercent, candidate.successRate), reverse=True)
+    # Worst-case fallback: use partner NGO members only when local candidates are exhausted.
+    if not candidates:
+        partner_ids = _get_partner_ngo_ids(ngo_id)
+        for partner_ngo_id in partner_ids:
+            partner_ngo_name = _get_ngo_name(partner_ngo_id)
+            partner_users_docs = (
+                db.collection("users")
+                .where(filter=FieldFilter("ngoId", "==", partner_ngo_id))
+                .where(filter=FieldFilter("role", "==", normalized_audience))
+                .stream()
+            )
+            for doc in partner_users_docs:
+                user_data = doc.to_dict() or {}
+                user_data["id"] = doc.id
+                if str(user_data.get("availability") or "available").lower() not in {"available", "online"}:
+                    continue
+                assigned_snapshot = (
+                    db.collection("missions")
+                    .where(filter=FieldFilter("assignedTo", "==", user_data["id"]))
+                    .limit(5)
+                    .get()
+                )
+                if any(str(mission.to_dict().get("status") or "").lower() in ACTIVE_MISSION_STATUSES for mission in assigned_snapshot):
+                    continue
+                candidates.append(
+                    _score_candidate(
+                        user_data,
+                        zone,
+                        need_type,
+                        source_ngo_id=partner_ngo_id,
+                        source_ngo_name=partner_ngo_name,
+                    )
+                )
+
+        if candidates:
+            used_partner_fallback = True
+            candidates = _reorder_partner_candidates_with_gemini(
+                ngo_id=ngo_id,
+                zone=zone,
+                need_type=need_type,
+                mission_title=f"{need_type} support",
+                mission_description=f"Partner support fallback for {zone.name}",
+                candidates=candidates,
+            )
+
+    if not used_partner_fallback:
+        candidates.sort(key=lambda candidate: (candidate.matchPercent, candidate.successRate), reverse=True)
     return candidates[:6]
 
 
@@ -344,6 +460,10 @@ async def create_mission(
         "assignedVolunteerMatch": chosen_candidate.matchPercent if chosen_candidate else 0,
         "assignedVolunteerDistance": chosen_candidate.distance if chosen_candidate else None,
         "assignedVolunteerReason": chosen_candidate.reason if chosen_candidate else None,
+        "assignedVolunteerNgoId": chosen_candidate.sourceNgoId if chosen_candidate else ngo_id,
+        "assignedVolunteerNgoName": chosen_candidate.sourceNgoName if chosen_candidate and chosen_candidate.sourceNgoId else _get_ngo_name(ngo_id),
+        "supportActivated": bool(chosen_candidate and chosen_candidate.isPartnerSupport),
+        "scoreSharePercent": chosen_candidate.scoreSharePercent if chosen_candidate else 0,
         "resources": resource_plan.get("items") or [resource.model_dump() for resource in payload.resources],
         "resourcePlan": resource_plan,
         "sourceReportIds": payload.sourceReportIds,
@@ -447,6 +567,10 @@ async def get_mission_detail(
             matchPercent=mission.assignedVolunteerMatch,
             distance=mission.assignedVolunteerDistance or "Nearby",
             reason=mission.assignedVolunteerReason or "Assigned",
+            sourceNgoId=mission.assignedVolunteerNgoId,
+            sourceNgoName=mission.assignedVolunteerNgoName,
+            isPartnerSupport=mission.supportActivated,
+            scoreSharePercent=mission.scoreSharePercent,
         )
 
     return MissionCreateResponse(mission=mission, matchedCandidate=best_candidate)
@@ -480,14 +604,37 @@ async def assign_mission_volunteer(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Volunteer not found")
 
     volunteer_data = volunteer_snapshot.to_dict() or {}
-    if str(volunteer_data.get("ngoId") or "") != ngo_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Volunteer does not belong to your NGO")
+    volunteer_ngo_id = str(volunteer_data.get("ngoId") or "").strip()
+    is_partner_support = volunteer_ngo_id != ngo_id
+    if not volunteer_ngo_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Volunteer is not mapped to an NGO")
+
+    if is_partner_support:
+        if not _are_ngos_collaborating(ngo_id, volunteer_ngo_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Volunteer NGO is not an active collaboration partner")
+        local_candidates = await get_mission_candidates(
+            user=user,
+            zone_id=zone.id,
+            need_type=str(mission_data.get("needType") or ""),
+            target_audience="volunteer",
+        )
+        if any(not candidate.isPartnerSupport for candidate in local_candidates):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Partner support is allowed only when no local volunteers are available",
+            )
 
     role = str(volunteer_data.get("role") or "").lower().strip()
     if role != "volunteer":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected user is not a volunteer")
 
-    candidate = _score_candidate(volunteer_data | {"id": volunteer_id}, zone, str(mission_data.get("needType") or ""))
+    candidate = _score_candidate(
+        volunteer_data | {"id": volunteer_id},
+        zone,
+        str(mission_data.get("needType") or ""),
+        source_ngo_id=volunteer_ngo_id if is_partner_support else None,
+        source_ngo_name=_get_ngo_name(volunteer_ngo_id) if is_partner_support else None,
+    )
     now = _now()
     mission_update = {
         "assignedTo": candidate.id,
@@ -495,6 +642,10 @@ async def assign_mission_volunteer(
         "assignedVolunteerMatch": candidate.matchPercent,
         "assignedVolunteerDistance": candidate.distance,
         "assignedVolunteerReason": candidate.reason,
+        "assignedVolunteerNgoId": volunteer_ngo_id,
+        "assignedVolunteerNgoName": candidate.sourceNgoName if is_partner_support else _get_ngo_name(ngo_id),
+        "supportActivated": is_partner_support,
+        "scoreSharePercent": 50 if is_partner_support else 0,
         "status": MissionStatus.dispatched.value,
         "statusText": "Volunteer en route",
         "updatedAt": now,
@@ -542,6 +693,21 @@ async def assign_mission_volunteer(
         },
         timestamp=now,
     )
+
+    if is_partner_support:
+        notify_ngo_coordinators(
+            volunteer_ngo_id,
+            type="collaboration_support_activated",
+            mission_id=mission_id,
+            title="Partner support activated",
+            message=f"{candidate.name} was assigned to support partner mission {mission_data.get('title') or mission_id}.",
+            metadata={
+                "hostNgoId": ngo_id,
+                "supportNgoId": volunteer_ngo_id,
+                "scoreSharePercent": 50,
+            },
+            timestamp=now,
+        )
 
     mission_data.update(mission_update)
     mission_data["id"] = mission_id
