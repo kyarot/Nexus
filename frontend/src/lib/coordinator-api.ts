@@ -326,6 +326,56 @@ export interface NgoProfilePatchPayload {
   collaborationSuggestions?: string[];
 }
 
+export interface ImpactReportExport {
+  generatedAt: string;
+  reportType?: "grant" | "policy_brief";
+  organization: {
+    id: string;
+    name?: string | null;
+  };
+  summary: {
+    missions: number;
+    completedMissions: number;
+    zones: number;
+    ngos: number;
+    reports: number;
+  };
+  metrics: {
+    missionSuccessRate: number;
+    familiesReached: number;
+    avgNeedReduction: number;
+  };
+  ledger: Array<{
+    mission?: string;
+    zone?: string;
+    type?: string;
+    before: number;
+    after: number;
+    change: number;
+    volunteer?: string;
+    date?: string | null;
+  }>;
+  chart: {
+    zoneId?: string | null;
+    zoneName?: string | null;
+    series: Array<{
+      label: string;
+      score: number;
+    }>;
+  };
+  policyBrief: {
+    sourceInsightId?: string | null;
+    generatedAt?: string | null;
+    items: string[];
+  };
+}
+
+export interface ImpactPolicyBriefSendResponse {
+  queued: boolean;
+  reportId?: string | null;
+  payload?: ImpactReportExport;
+}
+
 export interface CoordinatorMissionResource {
   name: string;
   quantity?: string | number | null;
@@ -930,6 +980,23 @@ export const patchNgoProfile = (ngoId: string, payload: NgoProfilePatchPayload) 
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+
+export const getImpactReportSummary = (period: string) =>
+  request<ImpactReportExport>(`/coordinator/impact-reports/summary?period=${encodeURIComponent(period)}`);
+
+export const downloadImpactGrantReport = (period: string) =>
+  request<ImpactReportExport>(`/coordinator/impact-reports/grant?period=${encodeURIComponent(period)}`);
+
+export const downloadImpactPolicyBrief = (period: string) =>
+  request<ImpactReportExport>(`/coordinator/impact-reports/policy-brief?period=${encodeURIComponent(period)}`);
+
+export const sendImpactPolicyBrief = (period: string, payload?: { recipient?: string; channel?: string }) =>
+  request<ImpactPolicyBriefSendResponse>(`/coordinator/impact-reports/policy-brief/send?period=${encodeURIComponent(period)}`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+    }
+  );
 
 export const listDiscoverableNgos = (search?: string) =>
   request<{ ngos: CollaborationNgo[]; total: number }>(`/coordinator/collaboration/discoverable-ngos${search?.trim() ? `?search=${encodeURIComponent(search.trim())}` : ""}`);
