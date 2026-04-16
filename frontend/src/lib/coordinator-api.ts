@@ -61,6 +61,7 @@ export interface GeminiInsightItem {
   zoneId?: string | null;
   zoneName?: string | null;
   summary?: string | null;
+  recommendedAction?: string | null;
   signals?: Array<{ label: string; variant: "danger" | "warning" | "info" | "success" }>;
   severity?: "critical" | "high" | "watch" | "resolved";
   status?: string | null;
@@ -124,6 +125,7 @@ export interface CoordinatorZone {
   topNeeds?: string[];
   activeMissions: number;
   lastIntervention?: string | null;
+  trendDirection?: "up" | "down" | "stable";
   forecastScore: number;
   forecastConfidence: number;
   generationalCohort?: string;
