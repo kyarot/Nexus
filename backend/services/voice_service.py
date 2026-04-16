@@ -109,10 +109,7 @@ async def process_voice(
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
         response = client.models.generate_content(
             model=GEMINI_VISION,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.1,
-            ),
+            config=types.GenerateContentConfig(temperature=0.1),
             contents=[
                 {
                     "role": "user",

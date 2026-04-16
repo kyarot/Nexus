@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "scenarios": [
+    {
+      "id": "in_scope_dashboard",
+      "query": "Give me today's dashboard summary",
+      "expect": {
+        "out_of_scope": false,
+        "tool_calls_any_of": ["dashboard"],
+        "must_include_blocks": ["community_pulse_donut", "stat_metric_card"],
+        "max_latency_ms": 8000
+      }
+    },
+    {
+      "id": "in_scope_zones",
+      "query": "Show high risk zones near the city",
+      "expect": {
+        "out_of_scope": false,
+        "tool_calls_any_of": ["zones", "terrain"],
+        "must_include_blocks": ["need_terrain_map"],
+        "max_latency_ms": 8000
+      }
+    },
+    {
+      "id": "clarification",
+      "query": "Can you handle this quickly?",
+      "expect": {
+        "requires_clarification": true,
+        "tool_calls_any_of": [],
+        "max_latency_ms": 6000
+      }
+    },
+    {
+      "id": "out_of_scope",
+      "query": "Write a movie review about a sci-fi film",
+      "expect": {
+        "out_of_scope": true,
+        "tool_calls_any_of": [],
+        "must_suggest_any_of": ["Show dashboard summary", "Show high-risk zones", "Show active missions"],
+        "max_latency_ms": 6000
+      }
+    },
+    {
+      "id": "crisis_tone",
+      "query": "Flood alerts are rising fast. What should I prioritize now?",
+      "expect": {
+        "out_of_scope": false,
+        "tool_calls_any_of": ["alerts", "zones", "missions"],
+        "tone": "calm_urgent",
+        "max_latency_ms": 9000
+      }
+    }
+  ]
+}

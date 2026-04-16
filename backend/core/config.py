@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRES_MINUTES: int = 1440
 
+    COPILOT_PLANNER_ENABLED: bool = True
+    COPILOT_CACHE_ENABLED: bool = True
+    COPILOT_CACHE_TTL_SECONDS: int = 45
+    COPILOT_VOICE_COALESCE_ENABLED: bool = True
+    COPILOT_VOICE_BURST_WINDOW_MS: int = 850
+
     @property
     def origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
