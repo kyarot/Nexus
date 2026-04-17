@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import { GoogleMap, useJsApiLoader, Marker } from "@react-google-maps/api";
+import { GoogleMap, Marker } from "@react-google-maps/api";
 import { MapPin, Navigation, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
 
 const containerStyle = {
   width: "100%",
@@ -12,8 +13,6 @@ const defaultCenter = {
   lat: 12.9716,
   lng: 77.5946
 };
-
-const MAP_LIBRARIES: ("places")[] = ["places"];
 
 interface MapLocation {
   lat: number;
@@ -29,11 +28,7 @@ interface MapPickerProps {
 }
 
 export const MapPicker = ({ onLocationSelect, initialLocation }: MapPickerProps) => {
-  const { isLoaded } = useJsApiLoader({
-    id: "google-map-script",
-    googleMapsApiKey: import.meta.env.VITE_GMAPS_KEY || "",
-    libraries: MAP_LIBRARIES
-  });
+  const { isLoaded } = useNexusGoogleMapsLoader();
 
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [markerPosition, setMarkerPosition] = useState(initialLocation || defaultCenter);

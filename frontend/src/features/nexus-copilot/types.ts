@@ -82,6 +82,18 @@ export type CopilotUiBlock =
         className?: string;
       };
     }
+  | {
+      component: "action_card";
+      props: {
+        actionId: string;
+        title: string;
+        summary: string;
+        impact?: string;
+        confirmLabel?: string;
+        cancelLabel?: string;
+        severity?: "low" | "medium" | "high";
+      };
+    }
 ;
 
 export interface CopilotQueryResponse {

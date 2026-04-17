@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { DirectionsRenderer, GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { DirectionsRenderer, GoogleMap, MarkerF } from "@react-google-maps/api";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
 import {
   claimMissionResources,
   getVolunteerEmpathyBrief,
@@ -45,8 +46,6 @@ const toString = (value: unknown, fallback = "") => {
 };
 
 const isValidCoordinate = (value: number) => Number.isFinite(value) && Math.abs(value) <= 180;
-const gmapLibraries: ("visualization")[] = ["visualization"];
-
 export default function EmpathyEngine() {
   const { toast } = useToast();
   const [searchParams] = useSearchParams();
@@ -61,11 +60,7 @@ export default function EmpathyEngine() {
   const missionIdFromQuery = searchParams.get("missionId") || undefined;
   const mapsApiKey = import.meta.env.VITE_GMAPS_KEY || "";
 
-  const { isLoaded: isMapLoaded } = useJsApiLoader({
-    id: "volunteer-empathy-navigation",
-    googleMapsApiKey: mapsApiKey,
-    libraries: gmapLibraries,
-  });
+  const { isLoaded: isMapLoaded } = useNexusGoogleMapsLoader();
 
   const empathyQuery = useQuery<VolunteerEmpathyResponse>({
     queryKey: ["volunteer-empathy-brief", missionIdFromQuery],

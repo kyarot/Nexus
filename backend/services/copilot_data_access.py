@@ -259,6 +259,32 @@ class CoordinatorReadLayer:
             )
         return items
 
+    def get_resource_requests(self, status_filter: str = "pending") -> list[dict[str, Any]]:
+        docs = db.collection("missionResourceRequests").where(filter=FieldFilter("ngoId", "==", self.ngo_id)).stream()
+        requests: list[dict[str, Any]] = []
+        normalized_filter = self._safe_str(status_filter or "", "").lower()
+        for doc in docs:
+            data = doc.to_dict() or {}
+            status = self._safe_str(data.get("status") or "pending", "pending").lower()
+            if normalized_filter and normalized_filter != "all" and status != normalized_filter:
+                continue
+            requests.append(
+                {
+                    "id": doc.id,
+                    "status": status,
+                    "missionId": data.get("missionId"),
+                    "missionTitle": self._safe_str(data.get("missionTitle") or "Mission", "Mission"),
+                    "volunteerId": data.get("volunteerId"),
+                    "volunteerName": self._safe_str(data.get("volunteerName") or "Volunteer", "Volunteer"),
+                    "items": data.get("items") or [],
+                    "note": self._safe_str(data.get("note") or ""),
+                    "createdAt": self._serialize_value(data.get("createdAt")),
+                    "updatedAt": self._serialize_value(data.get("updatedAt")),
+                }
+            )
+        requests.sort(key=lambda item: self._coerce_datetime(item.get("createdAt")) or datetime.min, reverse=True)
+        return requests
+
     def get_collaboration(self) -> dict[str, Any]:
         ngo_snapshot = db.collection("ngos").document(self.ngo_id).get()
         ngo_data = ngo_snapshot.to_dict() or {}
@@ -340,3 +366,148 @@ class CoordinatorReadLayer:
     @staticmethod
     def summarize_alert_severity(alerts: list[dict[str, Any]]) -> Counter:
         return Counter(str(alert.get("severity") or "watch") for alert in alerts)
+
+
+class CoordinatorWriteLayer:
+    """Coordinator write access for Copilot-approved actions."""
+
+    def __init__(self, ngo_id: str, user_id: str, role: str) -> None:
+        self.ngo_id = str(ngo_id or "").strip()
+        self.user_id = str(user_id or "").strip()
+        self.role = str(role or "").strip().lower()
+        if not self.ngo_id:
+            raise ValueError("Missing NGO scope")
+        if self.role != "coordinator":
+            raise PermissionError("Coordinator role required")
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.utcnow()
+
+    def approve_resource_request(self, request_id: str, decision: str, note: str = "") -> dict[str, Any]:
+        normalized = str(decision or "").strip().lower()
+        if normalized not in {"approved", "rejected"}:
+            raise ValueError("Decision must be approved or rejected")
+
+        req_ref = db.collection("missionResourceRequests").document(request_id)
+        req_snap = req_ref.get()
+        if not req_snap.exists:
+            raise ValueError("Request not found")
+        req_data = req_snap.to_dict() or {}
+        if str(req_data.get("ngoId") or "") != self.ngo_id:
+            raise PermissionError("Request does not belong to your NGO")
+        if str(req_data.get("status") or "pending") != "pending":
+            raise ValueError("Request already resolved")
+
+        now = self._now()
+        if normalized == "approved":
+            for item in req_data.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                item_id = str(item.get("itemId") or "").strip()
+                if not item_id:
+                    continue
+                item_ref = db.collection("inventoryItems").document(item_id)
+                item_snap = item_ref.get()
+                if not item_snap.exists:
+                    continue
+                item_data = item_snap.to_dict() or {}
+                try:
+                    requested_qty = float(item.get("requestedQty") or 0)
+                    current_qty = float(item_data.get("availableQty") or 0)
+                except (TypeError, ValueError):
+                    continue
+                next_qty = max(0.0, current_qty - max(0.0, requested_qty))
+                item_ref.update({"availableQty": next_qty, "updatedAt": now})
+
+        req_ref.update(
+            {
+                "status": normalized,
+                "decisionNote": note,
+                "resolvedAt": now,
+                "resolvedBy": self.user_id,
+                "updatedAt": now,
+            }
+        )
+
+        volunteer_id = str(req_data.get("volunteerId") or "")
+        if volunteer_id:
+            db.collection("notifications").add(
+                {
+                    "userId": volunteer_id,
+                    "type": "resource_request_decision",
+                    "missionId": req_data.get("missionId"),
+                    "requestId": request_id,
+                    "title": "Resource request updated",
+                    "message": "Coordinator approved your request." if normalized == "approved" else "Coordinator rejected your request.",
+                    "timestamp": now,
+                    "read": False,
+                    "metadata": {"decision": normalized, "note": note},
+                }
+            )
+
+        return {"updated": True, "decision": normalized}
+
+    def dispatch_mission(self, mission_id: str, volunteer_id: str, note: str = "") -> dict[str, Any]:
+        mission_ref = db.collection("missions").document(mission_id)
+        mission_snap = mission_ref.get()
+        if not mission_snap.exists:
+            raise ValueError("Mission not found")
+        mission = mission_snap.to_dict() or {}
+        if str(mission.get("ngoId") or "") != self.ngo_id:
+            raise PermissionError("Mission does not belong to your NGO")
+
+        volunteer_ref = db.collection("users").document(volunteer_id)
+        volunteer_snap = volunteer_ref.get()
+        if not volunteer_snap.exists:
+            raise ValueError("Volunteer not found")
+        volunteer = volunteer_snap.to_dict() or {}
+
+        now = self._now()
+        update = {
+            "status": "dispatched",
+            "assignedTo": volunteer_id,
+            "assignedToName": str(volunteer.get("name") or "Volunteer"),
+            "assignedVolunteerMatch": int(volunteer.get("matchPercent") or 0),
+            "assignedVolunteerDistance": volunteer.get("distance") or volunteer.get("travelRadius"),
+            "assignedVolunteerReason": note or "Assigned by coordinator Copilot",
+            "dispatchedAt": now,
+            "updatedAt": now,
+            "statusText": "Dispatched by Copilot",
+        }
+        mission_ref.update(update)
+
+        db.collection("notifications").add(
+            {
+                "userId": volunteer_id,
+                "type": "mission_assigned",
+                "missionId": mission_id,
+                "title": "Mission dispatched",
+                "message": "A coordinator dispatched a mission to you. Please review the details.",
+                "timestamp": now,
+                "read": False,
+                "metadata": {"missionId": mission_id},
+            }
+        )
+
+        return {"updated": True, "missionId": mission_id, "volunteerId": volunteer_id}
+
+    def add_volunteer(self, name: str, phone: str = "", skills: list[str] | None = None, availability: str = "available") -> dict[str, Any]:
+        normalized_name = str(name or "").strip()
+        if not normalized_name:
+            raise ValueError("Volunteer name is required")
+        now = self._now()
+        payload = {
+            "name": normalized_name,
+            "phone": str(phone or "").strip(),
+            "skills": [str(skill).strip() for skill in (skills or []) if str(skill).strip()],
+            "availability": str(availability or "available"),
+            "role": "volunteer",
+            "ngoId": self.ngo_id,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        doc_ref = db.collection("users").document()
+        doc_ref.set(payload)
+        payload["id"] = doc_ref.id
+        return payload

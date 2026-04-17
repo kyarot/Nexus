@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, InfoWindowF, MarkerF } from "@react-google-maps/api";
 
 import { cn } from "@/lib/utils";
+import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
 import type { CoordinatorMissionLocation, CoordinatorMissionTrackedResponder } from "@/lib/coordinator-api";
 
 interface MissionResponderLiveMapProps {
@@ -12,8 +13,6 @@ interface MissionResponderLiveMapProps {
 }
 
 const defaultCenter = { lat: 12.9716, lng: 77.5946 };
-const libraries: ("visualization")[] = ["visualization"];
-
 const statusColor = {
   online: "#10b981",
   offline: "#94a3b8",
@@ -21,11 +20,7 @@ const statusColor = {
 
 export function MissionResponderLiveMap({ responders, missionLocation, onResponderClick, className }: MissionResponderLiveMapProps) {
   const apiKey = import.meta.env.VITE_GMAPS_KEY || "";
-  const { isLoaded } = useJsApiLoader({
-    id: "missions-live-map-script",
-    googleMapsApiKey: apiKey,
-    libraries,
-  });
+  const { isLoaded } = useNexusGoogleMapsLoader();
 
   const [activeResponderId, setActiveResponderId] = useState<string | null>(null);
 

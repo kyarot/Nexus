@@ -37,6 +37,11 @@ ALLOWED_TOOLS = {
     "inventory",
     "collaboration",
     "settings",
+    "resource_requests",
+    "dispatch_mission",
+    "approve_resource_request",
+    "reject_resource_request",
+    "add_volunteer",
 }
 
 HEURISTIC_KEYWORDS: list[tuple[str, list[str]]] = [
@@ -48,8 +53,28 @@ HEURISTIC_KEYWORDS: list[tuple[str, list[str]]] = [
     ("volunteers", ["volunteer", "volunteers", "fieldworker", "responder", "coverage"]),
     ("alerts", ["alert", "alerts", "drift", "escalat", "critical"]),
     ("inventory", ["inventory", "warehouse", "stock", "supplies"]),
+    ("resource_requests", ["resource request", "resource requests", "pending requests", "requests pending", "resource approvals"]),
     ("collaboration", ["collaboration", "partner", "partnership"]),
     ("settings", ["settings", "profile", "organization", "org"]),
+]
+
+ACTION_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("approve_resource_request", ["approve request", "approve resource", "approve resources", "approve requisition", "approve"]),
+    ("reject_resource_request", ["reject request", "reject resource", "reject resources", "reject requisition", "reject"]),
+    ("dispatch_mission", ["dispatch mission", "assign mission", "send volunteer", "dispatch"]),
+    ("add_volunteer", ["add volunteer", "create volunteer", "invite volunteer", "new volunteer"]),
+]
+
+CONVERSATION_KEYWORDS = [
+    "hello",
+    "hi",
+    "hey",
+    "thanks",
+    "thank you",
+    "how are you",
+    "good morning",
+    "good evening",
+    "good afternoon",
 ]
 
 COPILOT_SYSTEM_PROMPT = """
@@ -62,10 +87,11 @@ You are an AI planner first:
 - Produce natural, professional, human-like responses.
 
 Scope and boundaries:
-- In scope: dashboard, insights, zones, terrain, missions, volunteers, alerts, inventory, collaboration, settings.
+- In scope: dashboard, insights, zones, terrain, missions, volunteers, alerts, inventory, resource requests, collaboration, settings.
 - Out of scope: politely explain boundary and offer in-scope alternatives.
 - Never fabricate metrics or actions.
 - If context is ambiguous, ask one concise clarification question.
+- Conversation intent is allowed, but do not fabricate operational data.
 
 Tone policy:
 - Calm, concise, collaborator tone.
@@ -76,17 +102,35 @@ Special behaviors:
 - Greeting on open should be warm and brief.
 - Clarifications should be one question only.
 - Suggestions must be contextual and actionable.
+- For actions, request explicit confirmation before executing.
 """.strip()
 
 
 class ToolCall(BaseModel):
-    tool: Literal["dashboard", "insights", "zones", "terrain", "missions", "volunteers", "alerts", "inventory", "collaboration", "settings"]
+    tool: Literal[
+        "dashboard",
+        "insights",
+        "zones",
+        "terrain",
+        "missions",
+        "volunteers",
+        "alerts",
+        "inventory",
+        "collaboration",
+        "settings",
+        "resource_requests",
+        "dispatch_mission",
+        "approve_resource_request",
+        "reject_resource_request",
+        "add_volunteer",
+    ]
     args: dict[str, Any] = Field(default_factory=dict)
     reason: str = ""
 
 
 class CopilotPlan(BaseModel):
     plan_summary: str = ""
+    intent: Literal["data", "action", "conversation"] = "data"
     requires_clarification: bool = False
     clarification_question: str = ""
     out_of_scope: bool = False
@@ -133,6 +177,15 @@ def _extract_json_block(text: str) -> dict[str, Any] | None:
         return None
 
 
+def _detect_intent(query: str) -> Literal["data", "action", "conversation"]:
+    normalized = " ".join(str(query or "").lower().split())
+    if any(keyword in normalized for keyword in CONVERSATION_KEYWORDS):
+        return "conversation"
+    if any(keyword in normalized for _, keywords in ACTION_KEYWORDS for keyword in keywords):
+        return "action"
+    return "data"
+
+
 def generate_text_with_retry(prompt: str, retry_policy: RetryPolicy | None = None) -> str:
     policy = retry_policy or RetryPolicy()
     for attempt in range(policy.retries + 1):
@@ -175,11 +228,12 @@ Conversation memory:
 Return JSON only with this schema:
 {{
   "plan_summary": "short internal summary",
+    "intent": "data|action|conversation",
   "requires_clarification": false,
   "clarification_question": "",
   "out_of_scope": false,
   "tool_calls": [
-    {{ "tool": "dashboard|insights|zones|terrain|missions|volunteers|alerts|inventory|collaboration|settings", "args": {{}}, "reason": "why" }}
+        {{ "tool": "dashboard|insights|zones|terrain|missions|volunteers|alerts|inventory|collaboration|settings|resource_requests|dispatch_mission|approve_resource_request|reject_resource_request|add_volunteer", "args": {{}}, "reason": "why" }}
   ]
 }}
 
@@ -209,6 +263,7 @@ Use grounded context only.
 
 Query: {query}
 Plan summary: {plan.plan_summary}
+Intent: {plan.intent}
 Out of scope: {plan.out_of_scope}
 Needs clarification: {plan.requires_clarification}
 Clarification question: {plan.clarification_question}
@@ -234,13 +289,39 @@ def _heuristic_plan(query: str) -> CopilotPlan:
     normalized = " ".join(str(query or "").lower().split())
     matched_tools: list[str] = []
 
+    intent = _detect_intent(normalized)
+
+    if intent == "action":
+        for tool_name, keywords in ACTION_KEYWORDS:
+            if any(keyword in normalized for keyword in keywords):
+                matched_tools.append(tool_name)
+
+        if matched_tools:
+            return CopilotPlan(
+                plan_summary=f"Action route for {', '.join(matched_tools[:2])}",
+                intent="action",
+                requires_clarification=False,
+                out_of_scope=False,
+                tool_calls=[ToolCall(tool=tool_name, args={}, reason="heuristic action routing") for tool_name in matched_tools[:2]],
+            )
+
     for tool_name, keywords in HEURISTIC_KEYWORDS:
         if any(keyword in normalized for keyword in keywords):
             matched_tools.append(tool_name)
 
+    if not matched_tools and intent == "conversation":
+        return CopilotPlan(
+            plan_summary="Conversation intent",
+            intent="conversation",
+            requires_clarification=False,
+            out_of_scope=False,
+            tool_calls=[],
+        )
+
     if not matched_tools:
         return CopilotPlan(
             plan_summary="No reliable in-scope match from heuristic router",
+            intent="data",
             requires_clarification=False,
             out_of_scope=True,
             tool_calls=[],
@@ -269,7 +350,7 @@ def _heuristic_plan(query: str) -> CopilotPlan:
     else:
         summary = f"Heuristic in-scope route for {', '.join(matched_tools[:3])}"
 
-    return CopilotPlan(plan_summary=summary, tool_calls=tool_calls, out_of_scope=False)
+    return CopilotPlan(plan_summary=summary, intent="data", tool_calls=tool_calls, out_of_scope=False)
 
 
 def generate_plan(query: str, memory: list[dict[str, str]]) -> PlannerResult:
@@ -285,6 +366,9 @@ def generate_plan(query: str, memory: list[dict[str, str]]) -> PlannerResult:
         plan = CopilotPlan.model_validate(parsed)
         plan.tool_calls = [call for call in plan.tool_calls if call.tool in ALLOWED_TOOLS]
 
+        if plan.intent not in {"data", "action", "conversation"}:
+            plan.intent = _detect_intent(query)
+
         heuristic = _heuristic_plan(query)
         if heuristic.tool_calls and (plan.out_of_scope or not plan.tool_calls):
             # Prefer a deterministic in-scope route when the model rejects an obviously in-scope request.
@@ -296,6 +380,9 @@ def generate_plan(query: str, memory: list[dict[str, str]]) -> PlannerResult:
 
         if not plan.out_of_scope and not plan.tool_calls:
             plan = heuristic if heuristic.tool_calls else plan
+
+        if plan.intent == "conversation" and plan.out_of_scope:
+            plan.out_of_scope = False
 
         return PlannerResult(plan=plan, raw_text=raw, degraded=False)
     except ValidationError:

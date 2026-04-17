@@ -1,7 +1,8 @@
 import { useMemo } from "react";
-import { CircleF, GoogleMap, HeatmapLayerF, PolygonF, useJsApiLoader } from "@react-google-maps/api";
+import { CircleF, GoogleMap, HeatmapLayerF, PolygonF } from "@react-google-maps/api";
 
 import { cn } from "@/lib/utils";
+import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
 
 export interface TerrainZoneMapItem {
   id: string;
@@ -35,7 +36,6 @@ interface NeedTerrainMapProps {
   showLegend?: boolean;
 }
 
-const libraries: ("visualization")[] = ["visualization"];
 const defaultCenter = { lat: 12.9716, lng: 77.5946 };
 
 const zoneStroke: Record<string, string> = {
@@ -85,11 +85,7 @@ const getGeometryPaths = (geometry?: TerrainZoneMapItem["geometry"]): google.map
 
 export function NeedTerrainMap({ zones = [], heatmapPoints = [], opacity = 0.7, onZoneClick, className, showLegend = true }: NeedTerrainMapProps) {
   const apiKey = import.meta.env.VITE_GMAPS_KEY || "";
-  const { isLoaded } = useJsApiLoader({
-    id: "terrain-map-script",
-    googleMapsApiKey: apiKey,
-    libraries,
-  });
+  const { isLoaded } = useNexusGoogleMapsLoader();
 
   const center = useMemo(() => {
     if (zones.length > 0) {
@@ -105,19 +101,36 @@ export function NeedTerrainMap({ zones = [], heatmapPoints = [], opacity = 0.7, 
     return defaultCenter;
   }, [zones, heatmapPoints]);
 
+  const displayHeatmapPoints = useMemo(() => {
+    if (heatmapPoints.length > 0) {
+      return heatmapPoints;
+    }
+
+    return zones
+      .filter((zone) => Number.isFinite(zone.lat) && Number.isFinite(zone.lng) && (zone.lat !== 0 || zone.lng !== 0))
+      .map((zone) => ({
+        zoneId: zone.id,
+        lat: zone.lat,
+        lng: zone.lng,
+        weight: Math.max(1, Math.round(zone.currentScore || 0)),
+        riskLevel: zone.riskLevel,
+        needType: (zone as TerrainZoneMapItem).name,
+      }));
+  }, [heatmapPoints, zones]);
+
   const weightedPoints = useMemo(() => {
-    if (!(globalThis as any).google?.maps) {
+    if (!isLoaded || !(globalThis as any).google?.maps) {
       return [];
     }
-    const maxWeight = Math.max(...heatmapPoints.map((point) => Number(point.weight) || 0), 0);
+    const maxWeight = Math.max(...displayHeatmapPoints.map((point) => Number(point.weight) || 0), 0);
     const safeMax = maxWeight > 0 ? maxWeight : 1;
 
-    return heatmapPoints.map((point) => ({
+    return displayHeatmapPoints.map((point) => ({
       location: new google.maps.LatLng(point.lat, point.lng),
       // Normalize to improve visibility when live point weights are very small.
-      weight: Math.max(0.8, Math.min(5, ((Number(point.weight) || 0) / safeMax) * 5)),
+      weight: Math.max(1.2, Math.min(8, ((Number(point.weight) || 0) / safeMax) * 8)),
     }));
-  }, [heatmapPoints]);
+  }, [displayHeatmapPoints, isLoaded]);
 
   if (!apiKey) {
     return (
@@ -149,14 +162,14 @@ export function NeedTerrainMap({ zones = [], heatmapPoints = [], opacity = 0.7, 
           <HeatmapLayerF
             data={weightedPoints}
             options={{
-              radius: 50,
-              opacity: Math.max(0.1, Math.min(1, opacity)),
+              radius: 64,
+              opacity: Math.max(0.35, Math.min(0.95, opacity)),
               gradient: [
-                "rgba(34,197,94,0)",
-                "rgba(34,197,94,0.6)",
-                "rgba(59,130,246,0.7)",
-                "rgba(245,158,11,0.8)",
-                "rgba(239,68,68,0.9)",
+                "rgba(16,185,129,0)",
+                "rgba(16,185,129,0.75)",
+                "rgba(59,130,246,0.85)",
+                "rgba(245,158,11,0.92)",
+                "rgba(239,68,68,1)",
               ],
             }}
           />

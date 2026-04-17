@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CircleF, GoogleMap, InfoWindowF, MarkerClustererF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { CircleF, GoogleMap, InfoWindowF, MarkerClustererF, MarkerF } from "@react-google-maps/api";
 
 import { cn } from "@/lib/utils";
+import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
 import type { CoordinatorMission, CoordinatorZone } from "@/lib/coordinator-api";
 
 interface MissionsLiveMapProps {
@@ -31,8 +32,6 @@ const priorityStroke: Record<CoordinatorMission["priority"], string> = {
   critical: "#ef4444",
 };
 
-const libraries: ("visualization")[] = ["visualization"];
-
 const activeStatuses = new Set<CoordinatorMission["status"]>(["dispatched", "en_route", "on_ground"]);
 
 const zoneStroke: Record<CoordinatorZone["riskLevel"], string> = {
@@ -51,11 +50,7 @@ const zoneFill: Record<CoordinatorZone["riskLevel"], string> = {
 
 export function MissionsLiveMap({ missions, zones, selectedMissionId, onMissionSelect, className }: MissionsLiveMapProps) {
   const apiKey = import.meta.env.VITE_GMAPS_KEY || "";
-  const { isLoaded } = useJsApiLoader({
-    id: "missions-live-map-script",
-    googleMapsApiKey: apiKey,
-    libraries,
-  });
+  const { isLoaded } = useNexusGoogleMapsLoader();
 
   const mapRef = useRef<google.maps.Map | null>(null);
   const [focusedMissionId, setFocusedMissionId] = useState<string | null>(null);

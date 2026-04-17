@@ -16,6 +16,25 @@ import type { CopilotQueryResponse, CopilotUiBlock, CopilotVoiceResponse, Copilo
 
 type OverlayPhase = "closed" | "opening" | "intro" | "active" | "closing";
 
+type CopilotSessionStartPayload = {
+  session_id: string;
+  message?: string;
+  ui_blocks?: CopilotUiBlock[];
+  suggestions?: string[];
+  audio_base64?: string;
+  audio_mime_type?: string;
+  voice_name?: string;
+};
+
+type CopilotActionConfirmResponse = {
+  session_id: string;
+  action_id: string;
+  confirmed: boolean;
+  text: string;
+  ui_blocks: CopilotUiBlock[];
+  suggestions: string[];
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 const DEFAULT_SUGGESTIONS: string[] = [];
 const VOICE_SILENCE_DELAY_MS = 2200;
@@ -220,34 +239,28 @@ export function NexusCopilot() {
           },
         });
 
-        const payload = await response.json();
+        const payload = (await response.json()) as CopilotSessionStartPayload | { detail?: string };
         if (!response.ok) {
-          throw new Error(payload?.detail || "Failed to initialize copilot session");
+          throw new Error((payload as { detail?: string })?.detail || "Failed to initialize copilot session");
         }
 
-        setSessionId(payload.session_id);
-        if (payload?.message) {
-          setResponseText(String(payload.message));
+        const sessionPayload = payload as CopilotSessionStartPayload;
+        setSessionId(sessionPayload.session_id);
+        if (sessionPayload?.message) {
+          setResponseText(String(sessionPayload.message));
         }
 
-        if (payload?.audio_base64 && isSpeakerEnabled && !isMuted) {
+        if (Array.isArray(sessionPayload.ui_blocks)) {
+          setUiBlocks(sessionPayload.ui_blocks);
+        }
+
+        if (Array.isArray(sessionPayload.suggestions)) {
+          setSuggestions(sessionPayload.suggestions);
+        }
+
+        if (sessionPayload?.audio_base64) {
           stopRecognition();
-          setVoiceState("speaking");
-          const audio = new Audio(`data:${payload.audio_mime_type || "audio/mpeg"};base64,${payload.audio_base64}`);
-          audioRef.current = audio;
-          try {
-            await audio.play();
-          } catch {
-            setVoiceState("idle");
-          }
-
-          audio.onended = () => {
-            audioRef.current = null;
-            setVoiceState("idle");
-            if (!isMuted && isOpen) {
-              maybeRestartRecognition();
-            }
-          };
+          await playSpeech(sessionPayload.audio_base64, sessionPayload.audio_mime_type);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to initialize copilot";
@@ -285,26 +298,14 @@ export function NexusCopilot() {
     }, 320);
   };
 
-  const applyQueryResult = async (result: CopilotQueryResponse, spokenQuery?: string) => {
-    setResponseText(result.text || "No response available.");
-    setUiBlocks(Array.isArray(result.ui_blocks) ? result.ui_blocks : []);
-    setSuggestions(result.suggestions?.length ? result.suggestions : []);
-    setLastQuery(spokenQuery || result.text || "");
-    setQuery("");
-
-    if (!isSpeakerEnabled || isMuted) {
-      setVoiceState("idle");
-      return;
-    }
-
-    const voiceResponse = result as CopilotVoiceResponse;
-    if (!voiceResponse.audio_base64) {
+  const playSpeech = async (audioBase64?: string, audioMimeType?: string) => {
+    if (!audioBase64 || !isSpeakerEnabled || isMuted) {
       setVoiceState("idle");
       return;
     }
 
     setVoiceState("speaking");
-    const audio = new Audio(`data:${voiceResponse.audio_mime_type || "audio/mpeg"};base64,${voiceResponse.audio_base64}`);
+    const audio = new Audio(`data:${audioMimeType || "audio/mpeg"};base64,${audioBase64}`);
     audioRef.current = audio;
     try {
       await audio.play();
@@ -319,6 +320,17 @@ export function NexusCopilot() {
         maybeRestartRecognition();
       }
     };
+  };
+
+  const applyQueryResult = async (result: CopilotQueryResponse, spokenQuery?: string) => {
+    setResponseText(result.text || "No response available.");
+    setUiBlocks(Array.isArray(result.ui_blocks) ? result.ui_blocks : []);
+    setSuggestions(result.suggestions?.length ? result.suggestions : []);
+    setLastQuery(spokenQuery || result.text || "");
+    setQuery("");
+
+    const voiceResponse = result as CopilotVoiceResponse;
+    await playSpeech(voiceResponse.audio_base64, voiceResponse.audio_mime_type);
   };
 
   const submitVoiceBlob = async (blob: Blob) => {
@@ -409,38 +421,103 @@ export function NexusCopilot() {
     };
   }, [isOpen]);
 
+  const submitQueryStream = async (input: string) => {
+    if (!sessionId || isQueryLoading) return;
+
+    queryAbortRef.current?.abort();
+    queryAbortRef.current = new AbortController();
+    setIsQueryLoading(true);
+    setVoiceState("thinking");
+    setError(null);
+    setLastQuery(input);
+
+    const response = await fetch(`${API_BASE_URL}/copilot/query/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      signal: queryAbortRef.current.signal,
+      body: JSON.stringify({
+        session_id: sessionId,
+        query: input,
+      }),
+    });
+
+    if (!response.ok || !response.body) {
+      const payload = (await response.json()) as { detail?: string } | null;
+      throw new Error(payload?.detail || "Failed to run copilot query");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let streamed = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() || "";
+
+      for (const part of parts) {
+        const lines = part.split("\n");
+        let eventName = "";
+        let dataPayload = "";
+        for (const line of lines) {
+          if (line.startsWith("event:")) {
+            eventName = line.replace("event:", "").trim();
+          }
+          if (line.startsWith("data:")) {
+            dataPayload += line.replace("data:", "").trim();
+          }
+        }
+
+        if (!eventName) continue;
+
+        if (eventName === "token") {
+          streamed = `${streamed} ${dataPayload}`.trim();
+          setResponseText(streamed);
+        }
+
+        if (eventName === "ui_blocks") {
+          try {
+            const blocks = JSON.parse(dataPayload) as CopilotUiBlock[];
+            setUiBlocks(Array.isArray(blocks) ? blocks : []);
+          } catch {
+            setUiBlocks([]);
+          }
+        }
+
+        if (eventName === "suggestions") {
+          try {
+            const chips = JSON.parse(dataPayload) as string[];
+            setSuggestions(Array.isArray(chips) ? chips : []);
+          } catch {
+            setSuggestions([]);
+          }
+        }
+
+        if (eventName === "done") {
+          try {
+            const payload = JSON.parse(dataPayload) as CopilotVoiceResponse;
+            await applyQueryResult(payload, input);
+          } catch {
+            setVoiceState("idle");
+          }
+        }
+      }
+    }
+  };
+
   const submitQuery = async (input: string) => {
     const trimmed = input.trim();
     if (!trimmed || !sessionId || isQueryLoading) return;
 
     try {
-      queryAbortRef.current?.abort();
-      queryAbortRef.current = new AbortController();
-      setIsQueryLoading(true);
-      setVoiceState("thinking");
-      setError(null);
-      setLastQuery(trimmed);
-
-      const response = await fetch(`${API_BASE_URL}/copilot/query`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`,
-        },
-        signal: queryAbortRef.current.signal,
-        body: JSON.stringify({
-          session_id: sessionId,
-          query: trimmed,
-        }),
-      });
-
-      const payload = (await response.json()) as CopilotQueryResponse | { detail?: string };
-      if (!response.ok) {
-        throw new Error((payload as { detail?: string }).detail || "Failed to run copilot query");
-      }
-
-      const result = payload as CopilotQueryResponse;
-      await applyQueryResult(result, trimmed);
+      await submitQueryStream(trimmed);
     } catch (err) {
       const message = err instanceof DOMException && err.name === "AbortError"
         ? INTERRUPT_COPY
@@ -491,6 +568,46 @@ export function NexusCopilot() {
     }
   };
 
+  const confirmCopilotAction = async (actionId: string, decision: "confirm" | "cancel") => {
+    if (!sessionId || isQueryLoading) return;
+
+    try {
+      setIsQueryLoading(true);
+      setVoiceState("thinking");
+      setError(null);
+
+      const response = await fetch(`${API_BASE_URL}/copilot/action/confirm`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          action_id: actionId,
+          decision,
+        }),
+      });
+
+      const payload = (await response.json()) as CopilotActionConfirmResponse | { detail?: string };
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string }).detail || "Failed to confirm action");
+      }
+
+      const actionPayload = payload as CopilotActionConfirmResponse;
+      setResponseText(actionPayload.text || "Action completed.");
+      setUiBlocks(Array.isArray(actionPayload.ui_blocks) ? actionPayload.ui_blocks : []);
+      setSuggestions(Array.isArray(actionPayload.suggestions) ? actionPayload.suggestions : []);
+      setVoiceState("idle");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to confirm action";
+      setError(message);
+      setVoiceState("idle");
+    } finally {
+      setIsQueryLoading(false);
+    }
+  };
+
   const renderUiBlock = (block: CopilotUiBlock, index: number) => {
     if (block.component === "gemini_insight_card") {
       return <GeminiInsightCard key={`insight-${index}`} {...block.props} />;
@@ -534,6 +651,38 @@ export function NexusCopilot() {
 
     if (block.component === "volunteer_avatar_card") {
       return <VolunteerAvatarCard key={`volunteer-${index}`} {...block.props} />;
+    }
+
+    if (block.component === "action_card") {
+      const severityTone = block.props.severity === "high" ? "border-destructive/30 bg-destructive/5" : block.props.severity === "medium" ? "border-warning/30 bg-warning/5" : "border-primary/20 bg-primary/5";
+      return (
+        <div key={`action-${index}`} className={`rounded-card border p-4 shadow-card ${severityTone}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">{block.props.title}</p>
+              <p className="text-xs text-muted-foreground mt-1">{block.props.summary}</p>
+              {block.props.impact ? <p className="text-xs text-muted-foreground mt-2">{block.props.impact}</p> : null}
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              onClick={() => void confirmCopilotAction(block.props.actionId, "confirm")}
+              disabled={isQueryLoading}
+            >
+              {block.props.confirmLabel || "Confirm"}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void confirmCopilotAction(block.props.actionId, "cancel")}
+              disabled={isQueryLoading}
+            >
+              {block.props.cancelLabel || "Cancel"}
+            </Button>
+          </div>
+        </div>
+      );
     }
 
     return null;

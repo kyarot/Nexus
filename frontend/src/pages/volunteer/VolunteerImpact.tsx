@@ -6,8 +6,9 @@ import { useQuery } from "@tanstack/react-query";
 import { getVolunteerImpact } from "@/lib/coordinator-api";
 import { Download, Trophy, ChevronRight, Lock, Linkedin, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
 import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, MarkerF } from "@react-google-maps/api";
 
 type TimeRange = "month" | "3m" | "6m" | "all";
 
@@ -64,10 +65,7 @@ export default function MyImpact() {
   const badgeStyle = riskBadge(wellbeing?.risk || "low");
 
   const gmapsApiKey = import.meta.env.VITE_GMAPS_KEY || "";
-  const { isLoaded: isImpactMapLoaded } = useJsApiLoader({
-    id: "volunteer-impact-map",
-    googleMapsApiKey: gmapsApiKey,
-  });
+  const { isLoaded: isImpactMapLoaded } = useNexusGoogleMapsLoader();
 
   const impactedZones = useMemo(
     () =>

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { DirectionsRenderer, GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { DirectionsRenderer, GoogleMap, MarkerF } from "@react-google-maps/api";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
 import {
   getVolunteerMissions,
   type CoordinatorMission,
@@ -125,8 +126,6 @@ const toNumber = (value: unknown, fallback = 0) => {
 const toString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
 
 const isValidCoordinate = (value: number) => Number.isFinite(value) && Math.abs(value) <= 180;
-const gmapLibraries: ("visualization")[] = ["visualization"];
-
 const VolunteerMissions = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("all");
@@ -141,11 +140,7 @@ const VolunteerMissions = () => {
   const [routeMeta, setRouteMeta] = useState<{ distance: string; duration: string } | null>(null);
   const mapsApiKey = import.meta.env.VITE_GMAPS_KEY || "";
 
-  const { isLoaded: isMapLoaded } = useJsApiLoader({
-    id: "volunteer-missions-navigation",
-    googleMapsApiKey: mapsApiKey,
-    libraries: gmapLibraries,
-  });
+  const { isLoaded: isMapLoaded } = useNexusGoogleMapsLoader();
 
   const missionsQuery = useQuery({
     queryKey: ["volunteer-missions"],
