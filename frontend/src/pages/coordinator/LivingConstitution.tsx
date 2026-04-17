@@ -1,35 +1,222 @@
-import React, { useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  FileText, 
-  Sparkles, 
-  CheckCircle2, 
-  Building2, 
-  ArrowRight, 
-  RefreshCw, 
-  ChevronDown, 
-  Send, 
-  Download, 
-  Eye, 
-  Plus, 
-  LayoutDashboard,
-  Shield,
-  Clock,
-  ExternalLink,
-  ChevronRight,
-  History,
-  Target,
-  Calendar,
-  TrendingDown
+import {
+   FileText,
+   Sparkles,
+   CheckCircle2,
+   Building2,
+   ArrowRight,
+   RefreshCw,
+   Send,
+   Plus,
+   LayoutDashboard,
+   Shield,
+   Clock,
+   ChevronRight,
+   Calendar,
+   TrendingDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Switch } from "@/components/ui/switch";
+import { useToast } from "@/hooks/use-toast";
+import {
+   getCoordinatorInsights,
+   getImpactReportSummary,
+   sendImpactPolicyBrief,
+} from "@/lib/coordinator-api";
+
+const parseDate = (value?: string | null) => {
+   if (!value) {
+      return null;
+   }
+   const parsed = new Date(value);
+   return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatMonthYear = (value?: string | null) => {
+   const parsed = parseDate(value);
+   if (!parsed) {
+      return "Latest";
+   }
+   return parsed.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+};
+
+const formatShortDate = (value?: string | null) => {
+   const parsed = parseDate(value);
+   if (!parsed) {
+      return "--";
+   }
+   return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+};
+
+const PERIOD_LABELS: Record<string, string> = {
+   "1m": "Last 30 days",
+   "3m": "Last 3 months",
+   "6m": "Last 6 months",
+   "1y": "Last 12 months",
+};
 
 const LivingConstitution = () => {
   const [tone, setTone] = useState("formal");
   const [language, setLanguage] = useState("English");
+   const [deliveryMethod, setDeliveryMethod] = useState("Email");
+   const [sending, setSending] = useState(false);
+   const token = localStorage.getItem("nexus_access_token");
+   const { toast } = useToast();
+   const period = "3m";
+
+   const reportQuery = useQuery({
+      queryKey: ["living-constitution-report", token, period],
+      enabled: Boolean(token),
+      refetchInterval: 20_000,
+      queryFn: () => getImpactReportSummary(period),
+   });
+
+   const insightsQuery = useQuery({
+      queryKey: ["living-constitution-insights", token],
+      enabled: Boolean(token),
+      refetchInterval: 30_000,
+      queryFn: () => getCoordinatorInsights(),
+   });
+
+   const report = reportQuery.data;
+   const summary = report?.summary;
+   const metrics = report?.metrics;
+   const insights = insightsQuery.data?.insights ?? [];
+   const policyBriefItems = report?.policyBrief?.items ?? [];
+
+   const briefGeneratedAt = report?.policyBrief?.generatedAt;
+   const briefTitle = `${formatMonthYear(briefGeneratedAt)} Policy Brief`;
+   const briefPeriodLabel = PERIOD_LABELS[period] ?? "Recent period";
+   const briefStatusLabel = briefGeneratedAt
+      ? `${formatMonthYear(briefGeneratedAt)} brief generated`
+      : "No policy brief generated yet";
+   const refId = report?.policyBrief?.sourceInsightId
+      ? report.policyBrief.sourceInsightId.slice(0, 12).toUpperCase()
+      : "NEX-AUTO";
+   const priorityLabel = insights[0]?.severity === "critical"
+      ? "Critical"
+      : insights[0]?.severity === "high"
+         ? "High"
+         : "Standard";
+   const orgName = report?.organization?.name || "NGO Partner";
+
+   const topNeeds = useMemo(() => {
+      return insights.slice(0, 3).map((insight, index) => {
+         const signalLabel = insight.signals?.[0]?.label;
+         const zoneLabel = insight.zoneName || "priority zone";
+         const title = signalLabel ? `${signalLabel} in ${zoneLabel}` : `Escalation in ${zoneLabel}`;
+         const desc = insight.summary || "No summary available yet.";
+         return {
+            id: String(index + 1).padStart(2, "0"),
+            title,
+            desc,
+         };
+      });
+   }, [insights]);
+
+   const recommendedActions = useMemo(() => {
+      return policyBriefItems.slice(0, 4);
+   }, [policyBriefItems]);
+
+   const intelligenceItems = useMemo(() => {
+      const items: string[] = [];
+      insights.forEach((insight) => {
+         if (insight.summary) {
+            items.push(insight.summary);
+         }
+         insight.signals?.forEach((signal) => {
+            if (signal?.label) {
+               items.push(signal.label);
+            }
+         });
+      });
+      return items.filter(Boolean).slice(0, 5);
+   }, [insights]);
+
+   const outcomeHistory = useMemo(() => {
+      const rows = report?.ledger ?? [];
+      return rows.slice(0, 2).map((row) => {
+         const change = typeof row.change === "number" ? row.change : 0;
+         const delta = Math.abs(change);
+         const direction = change < 0 ? "reduced" : "increased";
+         const zone = row.zone || "Zone";
+         const mission = row.mission ? String(row.mission).slice(0, 6) : "mission";
+         return `${zone} need score ${direction} by ${delta} points after mission ${mission}.`;
+      });
+   }, [report]);
+
+   const pastBriefs = useMemo(() => {
+      const seen = new Set<string>();
+      const items = [] as Array<{ month: string; date: string; status: string }>;
+      insights.forEach((insight) => {
+         const generatedAt = parseDate(insight.generatedAt || null);
+         if (!generatedAt) {
+            return;
+         }
+         const key = `${generatedAt.getFullYear()}-${generatedAt.getMonth()}`;
+         if (seen.has(key)) {
+            return;
+         }
+         seen.add(key);
+         items.push({
+            month: generatedAt.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+            date: formatShortDate(generatedAt.toISOString()),
+            status: (insight.status || "auto").toUpperCase(),
+         });
+      });
+      return items.slice(0, 3);
+   }, [insights]);
+
+   const sdgBadges = useMemo(() => {
+      const text = insights
+         .map((insight) => [insight.summary, ...(insight.signals?.map((signal) => signal.label) || [])].join(" "))
+         .join(" ")
+         .toLowerCase();
+
+      const library = [
+         { label: "SDG 2: Zero Hunger", color: "bg-[#DDA63A]", keywords: ["food", "hunger", "nutrition"] },
+         { label: "SDG 3: Good Health", color: "bg-[#4C9F38]", keywords: ["health", "clinic", "medical"] },
+         { label: "SDG 4: Quality Education", color: "bg-[#C5192D]", keywords: ["school", "education", "literacy"] },
+         { label: "SDG 6: Clean Water", color: "bg-[#26BDE2]", keywords: ["water", "sanitation"] },
+         { label: "SDG 11: Sustainable Cities", color: "bg-[#FD9D24]", keywords: ["shelter", "housing", "eviction"] },
+         { label: "SDG 16: Peace & Justice", color: "bg-[#00689D]", keywords: ["safety", "violence", "crime"] },
+      ];
+
+      return library.filter((item) => item.keywords.some((keyword) => text.includes(keyword))).slice(0, 5);
+   }, [insights]);
+
+   const trustScore = typeof metrics?.missionSuccessRate === "number"
+      ? `${Math.round(metrics.missionSuccessRate)}%`
+      : "--";
+
+   const handleRefresh = () => {
+      reportQuery.refetch();
+      insightsQuery.refetch();
+      toast({ title: "Brief refreshed", description: "Latest policy signals loaded." });
+   };
+
+   const handleSendBrief = async () => {
+      if (sending) {
+         return;
+      }
+      setSending(true);
+      try {
+         const channel = deliveryMethod === "API Pull" ? "api_pull" : deliveryMethod.toLowerCase();
+         await sendImpactPolicyBrief(period, {
+            recipient: "district_collector",
+            channel,
+         });
+         toast({ title: "Policy brief queued", description: "Delivery request sent to the district collector." });
+      } catch (error) {
+         const message = error instanceof Error ? error.message : "Unable to send policy brief.";
+         toast({ title: "Send failed", description: message, variant: "destructive" });
+      } finally {
+         setSending(false);
+      }
+   };
 
   return (
     <div className="flex flex-col min-h-screen bg-[#F8F7FF] font-['Plus_Jakarta_Sans']">
@@ -54,13 +241,17 @@ const LivingConstitution = () => {
               <div className="flex items-center justify-between px-4 py-3 bg-[#F0FDF4] rounded-xl border border-[#DCFCE7] text-[#166534] text-sm font-bold shadow-sm">
                 <div className="flex items-center gap-2">
                   <Shield className="w-4 h-4" />
-                  March 2026 brief acknowledged by DC Office ✓
+                           {briefStatusLabel}
                 </div>
-                <span className="text-[10px] font-black opacity-40 font-mono tracking-tighter">REF ID: NEX-2026-83-ACK</span>
+                        <span className="text-[10px] font-black opacity-40 font-mono tracking-tighter">REF ID: {refId}</span>
               </div>
             </div>
             
-            <Button className="bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] hover:opacity-90 text-white font-bold h-12 px-6 rounded-xl shadow-lg shadow-indigo-200">
+                  <Button
+                     className="bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] hover:opacity-90 text-white font-bold h-12 px-6 rounded-xl shadow-lg shadow-indigo-200"
+                     disabled={sending}
+                     onClick={handleSendBrief}
+                  >
                <Building2 className="w-4 h-4 mr-2" /> Send to District Collector →
             </Button>
           </div>
@@ -98,19 +289,28 @@ const LivingConstitution = () => {
                <div className="bg-white rounded-[2rem] p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-8">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-50">
                      <div className="space-y-1">
-                        <h3 className="text-lg font-bold text-[#1A1A3D]">March 2026 Policy Brief</h3>
+                        <h3 className="text-lg font-bold text-[#1A1A3D]">{briefTitle}</h3>
                         <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                           <Calendar className="w-3.5 h-3.5" /> Period: March 1 - March 21
+                           <Calendar className="w-3.5 h-3.5" /> Period: {briefPeriodLabel}
                         </div>
                      </div>
                      <div className="flex items-center gap-3">
-                        <Button variant="ghost" className="h-9 px-3 rounded-lg text-[#4F46E5] hover:bg-indigo-50 font-bold text-xs">
+                        <Button
+                          variant="ghost"
+                          className="h-9 px-3 rounded-lg text-[#4F46E5] hover:bg-indigo-50 font-bold text-xs"
+                          onClick={handleRefresh}
+                          disabled={reportQuery.isFetching || insightsQuery.isFetching}
+                        >
                            <RefreshCw className="w-3.5 h-3.5 mr-2" /> Regenerate
                         </Button>
-                        <select className="h-9 bg-slate-50 border-none rounded-lg px-3 text-xs font-bold text-slate-600 focus:ring-1 ring-indigo-100">
-                           <option>English</option>
-                           <option>Hindi</option>
-                           <option>Kannada</option>
+                        <select
+                          className="h-9 bg-slate-50 border-none rounded-lg px-3 text-xs font-bold text-slate-600 focus:ring-1 ring-indigo-100"
+                          value={language}
+                          onChange={(event) => setLanguage(event.target.value)}
+                        >
+                           <option value="English">English</option>
+                           <option value="Hindi">Hindi</option>
+                           <option value="Kannada">Kannada</option>
                         </select>
                      </div>
                   </div>
@@ -142,12 +342,12 @@ const LivingConstitution = () => {
                            <Building2 className="w-32 h-32" />
                         </div>
                         <div className="space-y-1 relative z-10">
-                           <p className="text-[10px] font-black opacity-60 uppercase tracking-[0.2em]">OFFICIAL POLICY BRIEF • NEX-2026-03</p>
+                           <p className="text-[10px] font-black opacity-60 uppercase tracking-[0.2em]">OFFICIAL POLICY BRIEF • {refId}</p>
                            <h2 className="text-3xl font-black">Executive Summary</h2>
                         </div>
                         <div className="flex gap-3 relative z-10">
-                           <Badge className="bg-white/10 hover:bg-white/10 text-white border-white/20 font-bold px-3 py-1">Priority: High</Badge>
-                           <Badge className="bg-white/10 hover:bg-white/10 text-white border-white/20 font-bold px-3 py-1">District: Bengaluru Urban</Badge>
+                           <Badge className="bg-white/10 hover:bg-white/10 text-white border-white/20 font-bold px-3 py-1">Priority: {priorityLabel}</Badge>
+                           <Badge className="bg-white/10 hover:bg-white/10 text-white border-white/20 font-bold px-3 py-1">Organization: {orgName}</Badge>
                         </div>
                      </div>
 
@@ -156,19 +356,19 @@ const LivingConstitution = () => {
                         <div className="space-y-6">
                            <h4 className="text-[12px] font-black text-[#4F46E5] uppercase tracking-[0.2em] border-b border-indigo-50 pb-2">TOP 10 UNMET NEEDS</h4>
                            <div className="space-y-8">
-                              {[
-                                { id: "01", title: "Potable Water Access in Hebbal Slum", desc: "Over 1,200 households reporting inconsistent supply despite infrastructure presence." },
-                                { id: "02", title: "Delayed Primary Healthcare Payments", desc: "Community health workers (ASHAs) reporting 3-month backlog in basic stipends." },
-                                { id: "03", title: "Digital Literacy for Street Vendors", desc: "Difficulty accessing PMSVANidhi benefits due to platform complexity." }
-                              ].map(need => (
-                                <div key={need.id} className="flex gap-6 group">
-                                   <span className="text-2xl font-black text-slate-100 group-hover:text-indigo-100 transition-colors font-mono">{need.id}</span>
-                                   <div className="space-y-2">
-                                      <h5 className="font-bold text-[#1A1A3D] text-[15px]">{need.title}</h5>
-                                      <p className="text-sm text-slate-500 leading-relaxed font-medium">{need.desc}</p>
-                                   </div>
-                               </div>
-                              ))}
+                              {topNeeds.length ? (
+                                topNeeds.map((need) => (
+                                  <div key={need.id} className="flex gap-6 group">
+                                     <span className="text-2xl font-black text-slate-100 group-hover:text-indigo-100 transition-colors font-mono">{need.id}</span>
+                                     <div className="space-y-2">
+                                        <h5 className="font-bold text-[#1A1A3D] text-[15px]">{need.title}</h5>
+                                        <p className="text-sm text-slate-500 leading-relaxed font-medium">{need.desc}</p>
+                                     </div>
+                                 </div>
+                                ))
+                              ) : (
+                                <p className="text-sm text-slate-400 font-medium">No priority needs detected yet.</p>
+                              )}
                            </div>
                         </div>
 
@@ -177,16 +377,16 @@ const LivingConstitution = () => {
                            <h4 className="text-[12px] font-black text-[#4F46E5] uppercase tracking-[0.2em] border-b border-indigo-50 pb-2">RECOMMENDED ACTIONS</h4>
                            <div className="bg-indigo-50/30 rounded-2xl p-6 border border-indigo-50/50 space-y-4">
                               <ul className="space-y-4">
-                                 {[
-                                   "Immediate deployment of 4 mobile water tankers to Zone 7.",
-                                   "Direct audit of health department payroll for the Q1 period.",
-                                   "Setup of 5 localized \"Help Desks\" at KR Puram Market."
-                                 ].map((action, i) => (
-                                   <li key={i} className="flex gap-3 items-start text-sm font-bold text-[#1E1B4B]">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-[#4F46E5] mt-1.5 shrink-0" />
-                                      {action}
-                                   </li>
-                                 ))}
+                                                 {recommendedActions.length ? (
+                                                    recommendedActions.map((action, i) => (
+                                                       <li key={i} className="flex gap-3 items-start text-sm font-bold text-[#1E1B4B]">
+                                                            <div className="w-1.5 h-1.5 rounded-full bg-[#4F46E5] mt-1.5 shrink-0" />
+                                                            {action}
+                                                       </li>
+                                                    ))
+                                                 ) : (
+                                                    <li className="text-sm text-slate-400 font-medium">No recommended actions yet.</li>
+                                                 )}
                               </ul>
                            </div>
                         </div>
@@ -194,9 +394,19 @@ const LivingConstitution = () => {
                         {/* Section 3 - Stats */}
                         <div className="space-y-6">
                            <h4 className="text-[12px] font-black text-[#4F46E5] uppercase tracking-[0.2em] border-b border-indigo-50 pb-2">SUPPORTING DATA</h4>
-                           <div className="aspect-[2/1] bg-slate-50 rounded-2xl border-2 border-dashed border-slate-100 flex flex-col items-center justify-center text-slate-300 gap-4">
-                              <LayoutDashboard className="w-8 h-8 opacity-20" />
-                              <span className="text-[10px] font-black uppercase tracking-widest leading-none">Impact Latency Visualization Active</span>
+                           <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                              <div className="space-y-1">
+                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Completed Missions</p>
+                                 <p className="text-xl font-black text-[#1A1A3D]">{summary?.completedMissions ?? 0}</p>
+                              </div>
+                              <div className="space-y-1">
+                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Families Reached</p>
+                                 <p className="text-xl font-black text-[#1A1A3D]">{metrics?.familiesReached ?? 0}</p>
+                              </div>
+                              <div className="space-y-1">
+                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Need Score Shift</p>
+                                 <p className="text-xl font-black text-[#1A1A3D]">-{metrics?.avgNeedReduction ?? 0}%</p>
+                              </div>
                            </div>
                         </div>
 
@@ -208,12 +418,12 @@ const LivingConstitution = () => {
                               </div>
                               <div className="space-y-0.5">
                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">TRUST FABRIC SCORE</p>
-                                 <p className="text-lg font-black text-[#1A1A3D]">98.4%</p>
+                                 <p className="text-lg font-black text-[#1A1A3D]">{trustScore}</p>
                               </div>
                            </div>
                            <div className="text-right space-y-0.5">
                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">NGO VERIFICATION</p>
-                              <p className="text-sm font-black text-indigo-600">Nexus Community Verified</p>
+                              <p className="text-sm font-black text-indigo-600">{orgName} Verified</p>
                            </div>
                         </div>
                      </div>
@@ -256,15 +466,29 @@ const LivingConstitution = () => {
                      <div className="space-y-3">
                         <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">DELIVERY METHOD</label>
                         <div className="grid grid-cols-3 gap-2">
-                           {["Email", "API Pull", "Post"].map(m => (
-                              <button key={m} className={cn("py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all", m === "Email" ? "bg-white text-[#4F46E5] border-indigo-100 shadow-sm" : "bg-transparent text-slate-400 border-slate-50")}>
-                                 {m}
+                           {["Email", "API Pull", "Post"].map((method) => (
+                              <button
+                                key={method}
+                                type="button"
+                                onClick={() => setDeliveryMethod(method)}
+                                className={cn(
+                                  "py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all",
+                                  deliveryMethod === method
+                                    ? "bg-white text-[#4F46E5] border-indigo-100 shadow-sm"
+                                    : "bg-transparent text-slate-400 border-slate-50"
+                                )}
+                              >
+                                 {method}
                               </button>
                            ))}
                         </div>
                      </div>
 
-                     <Button className="w-full bg-[#4F46E5] hover:bg-[#4338CA] text-white font-black py-7 rounded-2xl shadow-xl shadow-indigo-100 flex items-center justify-center gap-3 group transition-all active:scale-[0.98]">
+                     <Button
+                       className="w-full bg-[#4F46E5] hover:bg-[#4338CA] text-white font-black py-7 rounded-2xl shadow-xl shadow-indigo-100 flex items-center justify-center gap-3 group transition-all active:scale-[0.98]"
+                       disabled={sending || reportQuery.isFetching}
+                       onClick={handleSendBrief}
+                     >
                         Send Policy Brief Now <Send className="w-4 h-4 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                      </Button>
                   </div>
@@ -276,18 +500,16 @@ const LivingConstitution = () => {
                      <h3 className="text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest flex items-center gap-2">Gemini Intelligence <Sparkles className="w-4 h-4 text-indigo-400" /></h3>
                   </div>
                   <div className="space-y-4">
-                     {[
-                       "Food insecurity in Hebbal affects 34% more families than Feb.",
-                       "Cross-district water migration detected in southern wards.",
-                       "Healthcare accessibility drop correlated with monsoon prep.",
-                       "Sanitation grievance volume has reached \"Intervention\" threshold.",
-                       "Urban education subsidy awareness is at a record 12-month low."
-                     ].map((insight, i) => (
-                        <div key={i} className="flex gap-3">
-                           <div className="w-1 h-1 rounded-full bg-[#4F46E5] mt-1.5 shrink-0" />
-                           <p className="text-[13px] text-slate-600 font-bold leading-relaxed">{insight}</p>
-                        </div>
-                     ))}
+                     {intelligenceItems.length ? (
+                       intelligenceItems.map((insight, i) => (
+                          <div key={i} className="flex gap-3">
+                             <div className="w-1 h-1 rounded-full bg-[#4F46E5] mt-1.5 shrink-0" />
+                             <p className="text-[13px] text-slate-600 font-bold leading-relaxed">{insight}</p>
+                          </div>
+                       ))
+                     ) : (
+                       <p className="text-[13px] text-slate-400 font-bold">No new intelligence yet.</p>
+                     )}
                   </div>
                </div>
 
@@ -295,26 +517,39 @@ const LivingConstitution = () => {
                <div className="bg-white rounded-[2rem] p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-6">
                   <h3 className="text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest">Outcome History</h3>
                   <div className="space-y-4">
-                     <div className="p-5 bg-green-50/50 rounded-2xl border border-green-100 border-l-[3px] border-l-green-500 space-y-2">
-                        <div className="flex items-center gap-2">
-                           <TrendingDown className="w-3.5 h-3.5 text-green-600" />
-                           <span className="text-[9px] font-black text-green-700 uppercase tracking-widest">JAN 2026 BRIEF IMPACT</span>
-                        </div>
-                        <p className="text-[13px] font-bold text-[#166534]">Government allocated ₹2.4L for water purification in Kadugodi.</p>
-                     </div>
+                     {outcomeHistory.length ? (
+                       outcomeHistory.map((outcome, index) => (
+                         <div key={`${outcome}-${index}`} className="p-5 bg-green-50/50 rounded-2xl border border-green-100 border-l-[3px] border-l-green-500 space-y-2">
+                            <div className="flex items-center gap-2">
+                               <TrendingDown className="w-3.5 h-3.5 text-green-600" />
+                               <span className="text-[9px] font-black text-green-700 uppercase tracking-widest">RECENT OUTCOME</span>
+                            </div>
+                            <p className="text-[13px] font-bold text-[#166534]">{outcome}</p>
+                         </div>
+                       ))
+                     ) : (
+                       <p className="text-[13px] font-bold text-slate-400">No verified outcomes yet.</p>
+                     )}
                   </div>
                </div>
 
                {/* SDG Alignment */}
                <div className="bg-white rounded-[2rem] p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-6">
                   <h3 className="text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest">Global Alignment</h3>
-                  <div className="flex flex-wrap gap-2">
-                     <Badge className="bg-[#E5243B] hover:bg-[#E5243B] text-white border-none font-bold text-[9px] uppercase px-3 py-1">SDG 1: No Poverty</Badge>
-                     <Badge className="bg-[#4C9F38] hover:bg-[#4C9F38] text-white border-none font-bold text-[9px] uppercase px-3 py-1">SDG 3: Good Health</Badge>
-                     <Badge className="bg-[#DD1367] hover:bg-[#DD1367] text-white border-none font-bold text-[9px] uppercase px-3 py-1">SDG 10: Reduced Inequality</Badge>
-                     <Badge className="bg-[#00689D] hover:bg-[#00689D] text-white border-none font-bold text-[9px] uppercase px-3 py-1">SDG 16: Peace & Justice</Badge>
-                     <Badge className="bg-[#19486A] hover:bg-[#19486A] text-white border-none font-bold text-[9px] uppercase px-3 py-1">SDG 17: Partnerships</Badge>
-                  </div>
+                           <div className="flex flex-wrap gap-2">
+                               {sdgBadges.length ? (
+                                  sdgBadges.map((badge) => (
+                                     <Badge
+                                        key={badge.label}
+                                        className={`${badge.color} text-white border-none font-bold text-[9px] uppercase px-3 py-1`}
+                                     >
+                                        {badge.label}
+                                     </Badge>
+                                  ))
+                               ) : (
+                                  <p className="text-[11px] font-bold text-slate-400">No SDG alignment generated yet.</p>
+                               )}
+                           </div>
                </div>
 
                {/* Past Briefs List */}
@@ -324,26 +559,26 @@ const LivingConstitution = () => {
                      <button className="text-[10px] font-black text-[#4F46E5] uppercase tracking-widest hover:underline">View All</button>
                   </div>
                   <div className="space-y-4">
-                     {[
-                       { month: "February 2026", date: "Feb 1, 2026", status: "SENT" },
-                       { month: "January 2026", date: "Jan 3, 2026", status: "SENT" },
-                       { month: "December 2025", date: "Dec 2, 2025", status: "DRAFT" }
-                     ].map((brief, i) => (
-                        <div key={i} className="flex items-center justify-between p-4 rounded-2xl border border-slate-100 hover:shadow-sm transition-all group cursor-pointer">
-                           <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-indigo-50 group-hover:text-[#4F46E5] transition-colors">
-                                 {brief.status === "SENT" ? <FileText className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
-                              </div>
-                              <div className="space-y-0.5">
-                                 <p className="text-sm font-bold text-[#1A1A3D]">{brief.month}</p>
-                                 <p className="text-[10px] font-medium text-slate-400">{brief.date}</p>
-                              </div>
-                           </div>
-                           <Badge className={cn("text-[9px] font-black border-none px-2", brief.status === "SENT" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-400")}>
-                             {brief.status}
-                           </Badge>
-                        </div>
-                     ))}
+                     {pastBriefs.length ? (
+                       pastBriefs.map((brief, i) => (
+                          <div key={`${brief.month}-${i}`} className="flex items-center justify-between p-4 rounded-2xl border border-slate-100 hover:shadow-sm transition-all group cursor-pointer">
+                             <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-indigo-50 group-hover:text-[#4F46E5] transition-colors">
+                                   {brief.status === "SENT" ? <FileText className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
+                                </div>
+                                <div className="space-y-0.5">
+                                   <p className="text-sm font-bold text-[#1A1A3D]">{brief.month}</p>
+                                   <p className="text-[10px] font-medium text-slate-400">{brief.date}</p>
+                                </div>
+                             </div>
+                             <Badge className={cn("text-[9px] font-black border-none px-2", brief.status === "SENT" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-400")}>
+                               {brief.status}
+                             </Badge>
+                          </div>
+                       ))
+                     ) : (
+                       <p className="text-[11px] font-bold text-slate-400">No past briefs found.</p>
+                     )}
                   </div>
                </div>
             </div>
