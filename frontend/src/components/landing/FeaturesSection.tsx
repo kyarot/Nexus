@@ -1,3 +1,4 @@
+import ScrollReveal from "@/components/ui/ScrollReveal";
 import {
   Camera, Map, Sparkles, Users, Activity, BarChart3,
   Radio, Heart, Shield, FileText, Moon, Clock,
@@ -26,19 +27,21 @@ export function FeaturesSection() {
     <section id="features" className="py-24 px-page bg-[hsl(243,54%,12%)]">
       <div className="max-w-content mx-auto">
         <div className="text-center mb-16">
-          <h2 className="text-3xl md:text-[2.5rem] font-bold text-white mb-3">
+          <ScrollReveal as="h2" className="text-3xl md:text-[2.5rem] font-bold text-white mb-3">
             14 features built for the last mile
-          </h2>
-          <p className="text-[hsl(226,60%,76%)] max-w-xl mx-auto">
+          </ScrollReveal>
+          <ScrollReveal as="p" className="text-[hsl(226,60%,76%)] max-w-xl mx-auto" delay={0.05}>
             Everything an NGO needs to go from paper surveys to predictive intelligence.
-          </p>
+          </ScrollReveal>
         </div>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {features.map((f) => (
-            <div
+          {features.map((f, index) => (
+            <ScrollReveal
               key={f.name}
+              as="div"
               className="rounded-card bg-[hsl(243,40%,18%)] border border-[hsl(243,40%,24%)] p-5 hover:border-primary/40 transition-colors group"
+              delay={0.05 + index * 0.02}
             >
               <div className="w-9 h-9 rounded-button bg-primary/20 flex items-center justify-center mb-4 group-hover:bg-primary/30 transition-colors">
                 <f.icon className="w-4.5 h-4.5 text-[hsl(226,80%,76%)]" />
@@ -48,7 +51,7 @@ export function FeaturesSection() {
               <span className={`inline-flex text-[11px] font-semibold px-2.5 py-0.5 rounded-pill ${f.tagColor}`}>
                 {f.tag}
               </span>
-            </div>
+            </ScrollReveal>
           ))}
         </div>
       </div>

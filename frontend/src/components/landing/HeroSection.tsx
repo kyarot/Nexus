@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import ClickSpark from "@/components/ui/ClickSpark";
+import ScrollReveal from "@/components/ui/ScrollReveal";
 import { HeroFloatingCards } from "./HeroFloatingCards";
 import { ArrowRight, Play } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -18,22 +19,22 @@ export function HeroSection() {
         <div className="grid lg:grid-cols-[55%_45%] gap-12 items-center">
           {/* Left column */}
           <div className="space-y-8">
-            <div className="inline-flex items-center gap-2 rounded-pill bg-primary-light px-4 py-1.5 text-xs font-semibold text-primary">
+            <ScrollReveal as="div" className="inline-flex items-center gap-2 rounded-pill bg-primary-light px-4 py-1.5 text-xs font-semibold text-primary">
               <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
               Smart Resource Allocation
-            </div>
+            </ScrollReveal>
 
-            <h1 className="text-4xl md:text-5xl lg:text-[3.5rem] font-extrabold leading-[1.15] text-foreground">
+            <ScrollReveal as="h1" className="text-4xl md:text-5xl lg:text-[3.5rem] font-extrabold leading-[1.15] text-foreground" delay={0.05}>
               Community intelligence,
               <br />
               <span className="text-gradient">that saves lives.</span>
-            </h1>
+            </ScrollReveal>
 
-            <p className="text-lg text-text-secondary max-w-lg" style={{ lineHeight: 1.7 }}>
+            <ScrollReveal as="p" className="text-lg text-text-secondary max-w-lg leading-[1.7]" delay={0.1}>
               Nexus transforms scattered NGO field reports into real-time community insights — so the right volunteer reaches the right family before crisis hits.
-            </p>
+            </ScrollReveal>
 
-            <div className="flex flex-wrap gap-4">
+            <ScrollReveal as="div" className="flex flex-wrap gap-4" delay={0.15}>
               <Button variant="gradient" size="lg" className="rounded-pill" asChild>
                 <Link to="/login">
                   <ArrowRight className="w-4 h-4" />
@@ -44,26 +45,26 @@ export function HeroSection() {
                 <Play className="w-4 h-4" />
                 Watch demo
               </Button>
-            </div>
+            </ScrollReveal>
 
-            <p className="text-[13px] text-text-muted">
+            <ScrollReveal as="p" className="text-[13px] text-text-muted" delay={0.2}>
               31-day free trial · No credit card · Cancel anytime
-            </p>
+            </ScrollReveal>
 
-            <div className="pt-4 border-t border-border">
+            <ScrollReveal as="div" className="pt-4 border-t border-border" delay={0.25}>
               <p className="text-xs text-text-muted mb-3 uppercase tracking-wider font-semibold">Trusted by NGOs across India</p>
               <div className="flex items-center gap-6">
                 {logos.map((name) => (
                   <span key={name} className="text-sm font-bold text-border select-none">{name}</span>
                 ))}
               </div>
-            </div>
+            </ScrollReveal>
           </div>
 
           {/* Right column */}
-          <div className="hidden lg:block">
+          <ScrollReveal as="div" className="hidden lg:block" direction="left" delay={0.1}>
             <HeroFloatingCards />
-          </div>
+          </ScrollReveal>
         </div>
       </ClickSpark>
     </section>

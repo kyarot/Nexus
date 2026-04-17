@@ -1,3 +1,4 @@
+import ScrollReveal from "@/components/ui/ScrollReveal";
 import { Quote } from "lucide-react";
 
 const testimonials = [
@@ -26,16 +27,18 @@ export function Testimonials() {
     <section className="py-24 px-page bg-background">
       <div className="max-w-content mx-auto">
         <div className="text-center mb-16">
-          <h2 className="text-3xl md:text-[2.5rem] font-bold text-foreground">
+          <ScrollReveal as="h2" className="text-3xl md:text-[2.5rem] font-bold text-foreground">
             Voices from the field
-          </h2>
+          </ScrollReveal>
         </div>
 
         <div className="grid md:grid-cols-3 gap-6">
-          {testimonials.map((t) => (
-            <div
+          {testimonials.map((t, index) => (
+            <ScrollReveal
               key={t.name}
+              as="div"
               className="rounded-card bg-card border border-border p-6 shadow-card hover:shadow-card-hover transition-all"
+              delay={0.05 + index * 0.05}
             >
               <Quote className="w-8 h-8 text-primary/30 mb-4" />
               <p className="text-sm text-foreground leading-relaxed mb-6">"{t.quote}"</p>
@@ -48,7 +51,7 @@ export function Testimonials() {
                   <p className="text-xs text-text-secondary">{t.role} · {t.org}</p>
                 </div>
               </div>
-            </div>
+            </ScrollReveal>
           ))}
         </div>
       </div>
