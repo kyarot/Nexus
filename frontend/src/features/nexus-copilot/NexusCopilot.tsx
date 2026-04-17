@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Hand, MicOff, Sparkles, Volume2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import BlurText from "@/components/ui/BlurText";
 import { cn } from "@/lib/utils";
 import { CommunityPulseDonut } from "@/components/coordinator/CommunityPulseDonut";
 import { EmptyState } from "@/components/coordinator/EmptyState";
@@ -739,9 +740,15 @@ export function NexusCopilot() {
                     <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(79,70,229,0.16),transparent_42%),radial-gradient(circle_at_center,rgba(124,58,237,0.08),transparent_58%)]" />
                     <div className="relative flex flex-col items-center text-center">
                       <img src="/logo.png" alt="Nexus" className="h-24 w-24 bg-transparent object-contain drop-shadow-[0_22px_70px_rgba(79,70,229,0.3)]" />
-                      <h2 className="mt-4 bg-gradient-to-r from-[#3730A3] via-[#4F46E5] to-[#6366F1] bg-clip-text text-3xl font-extrabold text-transparent lg:text-5xl">
-                        Nexus Copilot Ready
-                      </h2>
+                      <BlurText
+                        as="h2"
+                        text="Nexus Copilot Ready"
+                        delay={140}
+                        animateBy="words"
+                        direction="top"
+                        className="mt-4 text-3xl font-extrabold lg:text-5xl"
+                        segmentClassName="bg-gradient-to-r from-[#3730A3] via-[#4F46E5] to-[#6366F1] bg-clip-text text-transparent"
+                      />
                       <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground lg:text-base">
                         Real-time coordinator assistant connected to live backend data and existing dashboard components.
                       </p>

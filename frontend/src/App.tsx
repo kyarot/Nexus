@@ -30,6 +30,7 @@ import IntelligenceHub from "./pages/coordinator/IntelligenceHub";
 import { CommunityVoice } from "./pages/public/CommunityVoice";
 import { CommunityVoiceTrack } from "./pages/public/CommunityVoiceTrack";
 import { DashboardLayout } from "./layouts/DashboardLayout";
+import ClickSpark from "@/components/ui/ClickSpark";
 
 const queryClient = new QueryClient();
 
@@ -39,49 +40,51 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
+        <ClickSpark sparkColor="#7c3aed" className="min-h-screen">
+          <Routes>
+            <Route path="/" element={<Index />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
 
-          {/* Coordinator dashboard */}
-          <Route path="/dashboard" element={<DashboardLayout role="coordinator" />}>
-            <Route index element={<Dashboard />} />
-            <Route path="intelligence" element={<IntelligenceHub />} />
-            <Route path="terrain" element={<NeedTerrainMapPage />} />
-            <Route path="alerts" element={<AlertsFeed />} />
-            <Route path="volunteers" element={<Volunteers />} />
-            <Route path="missions" element={<CoordinatorMissions />} />
-            <Route path="resources" element={<ResourceInventory />} />
-            <Route path="insights" element={<GeminiInsights />} />
-            <Route path="impact" element={<ImpactReports />} />
-            <Route path="trust" element={<TrustFabric />} />
-            <Route path="constitution" element={<LivingConstitution />} />
-            <Route path="forecast" element={<Forecast />} />
-            <Route path="echo" element={<CommunityEcho />} />
-            <Route path="organisation" element={<OrganisationSettings />} />
-          </Route>
+            {/* Coordinator dashboard */}
+            <Route path="/dashboard" element={<DashboardLayout role="coordinator" />}>
+              <Route index element={<Dashboard />} />
+              <Route path="intelligence" element={<IntelligenceHub />} />
+              <Route path="terrain" element={<NeedTerrainMapPage />} />
+              <Route path="alerts" element={<AlertsFeed />} />
+              <Route path="volunteers" element={<Volunteers />} />
+              <Route path="missions" element={<CoordinatorMissions />} />
+              <Route path="resources" element={<ResourceInventory />} />
+              <Route path="insights" element={<GeminiInsights />} />
+              <Route path="impact" element={<ImpactReports />} />
+              <Route path="trust" element={<TrustFabric />} />
+              <Route path="constitution" element={<LivingConstitution />} />
+              <Route path="forecast" element={<Forecast />} />
+              <Route path="echo" element={<CommunityEcho />} />
+              <Route path="organisation" element={<OrganisationSettings />} />
+            </Route>
 
-          {/* Volunteer dashboard */}
-          <Route path="/volunteer" element={<DashboardLayout role="volunteer" />}>
-            <Route index element={<VolunteerDashboard />} />
-            <Route path="missions" element={<VolunteerMissions />} />
-            <Route path="empathy" element={<EmpathyEngine />} />
-            <Route path="impact" element={<VolunteerImpact />} />
-            <Route path="profile" element={<VolunteerProfile />} />
-          </Route>
+            {/* Volunteer dashboard */}
+            <Route path="/volunteer" element={<DashboardLayout role="volunteer" />}>
+              <Route index element={<VolunteerDashboard />} />
+              <Route path="missions" element={<VolunteerMissions />} />
+              <Route path="empathy" element={<EmpathyEngine />} />
+              <Route path="impact" element={<VolunteerImpact />} />
+              <Route path="profile" element={<VolunteerProfile />} />
+            </Route>
 
-          {/* Field worker (mobile-first, no sidebar) */}
-          <Route path="/fieldworker" element={<FieldWorker />} />
-          <Route path="/fieldworker/*" element={<FieldWorker />} />
+            {/* Field worker (mobile-first, no sidebar) */}
+            <Route path="/fieldworker" element={<FieldWorker />} />
+            <Route path="/fieldworker/*" element={<FieldWorker />} />
 
-          {/* Public Reporting Channel */}
-          <Route path="/community-voice" element={<CommunityVoice />} />
-          <Route path="/community-voice/track" element={<CommunityVoiceTrack />} />
+            {/* Public Reporting Channel */}
+            <Route path="/community-voice" element={<CommunityVoice />} />
+            <Route path="/community-voice/track" element={<CommunityVoiceTrack />} />
 
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </ClickSpark>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

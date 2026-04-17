@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import ClickSpark from "@/components/ui/ClickSpark";
 import { HeroFloatingCards } from "./HeroFloatingCards";
 import { ArrowRight, Play } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -13,7 +14,7 @@ export function HeroSection() {
       <div className="absolute top-16 right-1/4 w-[500px] h-[500px] bg-primary/[0.06] rounded-full blur-3xl" />
       <div className="absolute bottom-0 left-1/3 w-80 h-80 bg-primary-glow/[0.05] rounded-full blur-3xl" />
 
-      <div className="max-w-content mx-auto relative z-10">
+      <ClickSpark className="max-w-content mx-auto relative z-10" sparkColor="#7c3aed">
         <div className="grid lg:grid-cols-[55%_45%] gap-12 items-center">
           {/* Left column */}
           <div className="space-y-8">
@@ -64,7 +65,7 @@ export function HeroSection() {
             <HeroFloatingCards />
           </div>
         </div>
-      </div>
+      </ClickSpark>
     </section>
   );
 }

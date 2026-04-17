@@ -150,28 +150,32 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-card-gap">
             <StatMetricCard
               label="Avg Zone Score"
-              value={isLoading ? "--" : `${Math.round(dashboard?.avgZoneScore ?? 0)}`}
+              value={isLoading ? "--" : Math.round(dashboard?.avgZoneScore ?? 0)}
               delta={dashboard ? `${dashboard.zoneCount} zones tracked` : "Loading zone metrics"}
               accent="indigo"
+              countUp={!isLoading}
             />
             <StatMetricCard
               label="Zones at Risk"
-              value={isLoading ? "--" : `${dashboard?.zonesAtRisk ?? 0}`}
+              value={isLoading ? "--" : (dashboard?.zonesAtRisk ?? 0)}
               delta={dashboard ? `${dashboard?.criticalZones?.length ?? 0} critical zones` : "Loading risk profile"}
               deltaDirection="up"
               accent="amber"
+              countUp={!isLoading}
             />
             <StatMetricCard
               label="Active Missions"
-              value={isLoading ? "--" : `${dashboard?.activeMissions ?? 0}`}
+              value={isLoading ? "--" : (dashboard?.activeMissions ?? 0)}
               delta="From coordinator NGO"
               accent="green"
+              countUp={!isLoading}
             />
             <StatMetricCard
               label="Volunteers Active"
-              value={isLoading ? "--" : `${dashboard?.availableVolunteers ?? 0}`}
+              value={isLoading ? "--" : (dashboard?.availableVolunteers ?? 0)}
               delta="Presence feed from RTDB"
               accent="purple"
+              countUp={!isLoading}
             />
           </div>
 
