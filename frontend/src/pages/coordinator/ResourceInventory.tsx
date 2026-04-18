@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { createInventoryItem, listInventoryItems, listWarehouses, patchInventoryItem } from "@/lib/ops-api";
+import { getCoordinatorZones } from "@/lib/coordinator-api";
 import { useToast } from "@/hooks/use-toast";
 
 const categories = ["All", "Food", "Medical", "Shelter", "Transport", "Equipment"];
@@ -60,6 +61,7 @@ const ResourceInventory = () => {
       quantity: 0,
       threshold: 5,
       warehouseId: "",
+      zonesServed: [] as string[],
    });
 
    const warehouseQuery = useQuery({
@@ -74,6 +76,30 @@ const ResourceInventory = () => {
       refetchInterval: 12000,
    });
 
+   const zonesQuery = useQuery({
+      queryKey: ["coordinator-zones"],
+      queryFn: () => getCoordinatorZones(),
+      refetchInterval: 30000,
+   });
+
+   const zoneOptions = useMemo(() => {
+      const zones = zonesQuery.data?.zones || [];
+      if (zones.length) {
+         return zones.map((zone) => ({
+            id: zone.id,
+            label: zone.name || zone.id,
+         }));
+      }
+
+      const fallbackZones = (warehouseQuery.data?.warehouses || [])
+         .map((warehouse) => warehouse.zoneId)
+         .filter((zoneId) => Boolean(zoneId));
+      return Array.from(new Set(fallbackZones)).map((zoneId) => ({
+         id: zoneId,
+         label: zoneId,
+      }));
+   }, [warehouseQuery.data?.warehouses, zonesQuery.data?.zones]);
+
    useEffect(() => {
       if (!inventoryQuery.data) {
          return;
@@ -82,6 +108,11 @@ const ResourceInventory = () => {
       const mapped = inventoryQuery.data.items.map((item, index) => {
          const warehouse = warehouseMap.get(item.warehouseId);
          const quantity = Number(item.availableQty || 0);
+         const zonesServed = Array.isArray(item.zonesServed) && item.zonesServed.length
+            ? item.zonesServed
+            : warehouse?.zoneId
+              ? [warehouse.zoneId]
+              : [item.zoneId];
          return {
             id: item.id,
             name: item.name,
@@ -93,7 +124,7 @@ const ResourceInventory = () => {
             distance: warehouse?.zoneId ? `Zone ${warehouse.zoneId}` : "Assigned zone",
             contact: warehouse?.managerName || "Coordinator",
             phone: warehouse?.phone || "N/A",
-            zones: warehouse?.zoneId ? [warehouse.zoneId] : [item.zoneId],
+            zones: zonesServed,
             status: quantity <= 0 ? "Unavailable" : quantity <= Number(item.thresholdQty || 0) ? "Low stock" : "Available",
             color: index % 4 === 0 ? "bg-amber-500" : index % 4 === 1 ? "bg-red-500" : index % 4 === 2 ? "bg-blue-500" : "bg-green-500",
          };
@@ -105,11 +136,41 @@ const ResourceInventory = () => {
       if (addResourceForm.warehouseId || !warehouseQuery.data?.warehouses?.length) {
          return;
       }
+      const defaultWarehouse = warehouseQuery.data?.warehouses?.[0];
       setAddResourceForm((prev) => ({
          ...prev,
-         warehouseId: warehouseQuery.data?.warehouses?.[0]?.id || "",
+         warehouseId: defaultWarehouse?.id || "",
+         zonesServed: prev.zonesServed.length ? prev.zonesServed : defaultWarehouse?.zoneId ? [defaultWarehouse.zoneId] : [],
       }));
    }, [addResourceForm.warehouseId, warehouseQuery.data]);
+
+   useEffect(() => {
+      if (!addResourceForm.warehouseId || addResourceForm.zonesServed.length) {
+         return;
+      }
+      const selectedWarehouse = warehouseQuery.data?.warehouses?.find(
+         (warehouse) => warehouse.id === addResourceForm.warehouseId
+      );
+      if (!selectedWarehouse?.zoneId) {
+         return;
+      }
+      setAddResourceForm((prev) => ({
+         ...prev,
+         zonesServed: [selectedWarehouse.zoneId],
+      }));
+   }, [addResourceForm.warehouseId, addResourceForm.zonesServed.length, warehouseQuery.data]);
+
+   const toggleZoneServed = (zoneId: string) => {
+      setAddResourceForm((prev) => {
+         const exists = prev.zonesServed.includes(zoneId);
+         return {
+            ...prev,
+            zonesServed: exists
+               ? prev.zonesServed.filter((zone) => zone !== zoneId)
+               : [...prev.zonesServed, zoneId],
+         };
+      });
+   };
 
    const handleAddResource = async () => {
       if (!addResourceForm.name.trim()) {
@@ -133,6 +194,7 @@ const ResourceInventory = () => {
          await createInventoryItem({
             warehouseId: addResourceForm.warehouseId,
             zoneId,
+            zonesServed: addResourceForm.zonesServed,
             name: addResourceForm.name.trim(),
             category: addResourceForm.category,
             unit: addResourceForm.unit.trim() || "units",
@@ -148,6 +210,7 @@ const ResourceInventory = () => {
             unit: "units",
             quantity: 0,
             threshold: 5,
+            zonesServed: [],
          }));
       } catch (error) {
          toast({ title: "Add failed", description: error instanceof Error ? error.message : "Unknown error", variant: "destructive" });
@@ -538,12 +601,26 @@ const ResourceInventory = () => {
               <div className="space-y-4">
                  <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">ZONES SERVED</label>
                  <div className="grid grid-cols-2 gap-3">
-                    {["Zone 1", "Zone 2", "Zone 4", "Zone 7", "Zone 9", "Zone 12"].map(z => (
-                      <div key={z} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                         <input type="checkbox" className="h-4 w-4 rounded border-slate-200 text-[#4F46E5] focus:ring-[#4F46E5]" />
-                         <span className="text-xs font-bold text-slate-600">{z}</span>
-                      </div>
-                    ))}
+                              {zoneOptions.length ? (
+                                 zoneOptions.map((zone) => {
+                                    const selected = addResourceForm.zonesServed.includes(zone.id);
+                                    return (
+                                       <label key={zone.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer">
+                                           <input
+                                              type="checkbox"
+                                              checked={selected}
+                                              onChange={() => toggleZoneServed(zone.id)}
+                                              className="h-4 w-4 rounded border-slate-200 text-[#4F46E5] focus:ring-[#4F46E5]"
+                                           />
+                                           <span className="text-xs font-bold text-slate-600">{zone.label}</span>
+                                       </label>
+                                    );
+                                 })
+                              ) : (
+                                 <div className="col-span-2 text-xs font-bold text-slate-400 bg-slate-50 rounded-xl border border-slate-100 p-4 text-center">
+                                    No zones available yet.
+                                 </div>
+                              )}
                  </div>
               </div>
 

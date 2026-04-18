@@ -4,7 +4,7 @@ import { Hexagon, LayoutDashboard, BarChart3, Map, AlertTriangle, Users, Target,
 
 interface NavItem {
   label: string;
-  icon: React.ElementType;
+  icon?: React.ElementType;
   path: string;
 }
 
@@ -25,7 +25,7 @@ const coordinatorNav: NavSection[] = [
     { label: "Resources", icon: Package, path: "/dashboard/resources" },
   ]},
   { title: "INTELLIGENCE", items: [
-    { label: "Gemini Insights", icon: Sparkles, path: "/dashboard/insights" },
+    { label: "Gemini Insights", path: "/dashboard/insights" },
     { label: "Forecast", icon: TrendingUp, path: "/dashboard/forecast" },
     { label: "Community Echo", icon: Handshake, path: "/dashboard/echo" },
   ]},
@@ -97,7 +97,11 @@ export function DashboardSidebar({ role = "coordinator", userName = "Sarah Coord
                   isActive ? "bg-sidebar-accent text-white" : "text-sidebar-foreground/70 hover:bg-sidebar-muted/20 hover:text-sidebar-foreground"
                 )}
               >
-                <item.icon className="h-4.5 w-4.5 shrink-0" />
+                {item.icon ? (
+                  <item.icon className="h-4.5 w-4.5 shrink-0" />
+                ) : (
+                  <span className="h-4.5 w-4.5 shrink-0" aria-hidden="true" />
+                )}
                 {!collapsed && <span>{item.label}</span>}
               </NavLink>
             ))}

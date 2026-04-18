@@ -106,10 +106,12 @@ async def create_inventory_item(
 
     now = _now()
     ref = db.collection("inventoryItems").document()
+    zones_served = [zone.strip() for zone in payload.zonesServed if zone.strip()]
     data = {
         "ngoId": ngo_id,
         "warehouseId": payload.warehouseId,
         "zoneId": payload.zoneId,
+        "zonesServed": zones_served,
         "name": payload.name,
         "category": payload.category,
         "unit": payload.unit,

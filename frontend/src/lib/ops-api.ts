@@ -53,6 +53,7 @@ export interface InventoryItem {
   ngoId: string;
   warehouseId: string;
   zoneId: string;
+  zonesServed?: string[];
   name: string;
   category: string;
   unit: string;
@@ -109,6 +110,7 @@ export const listInventoryItems = (warehouseId?: string) =>
 export const createInventoryItem = (payload: {
   warehouseId: string;
   zoneId: string;
+  zonesServed?: string[];
   name: string;
   category: string;
   unit: string;

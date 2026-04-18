@@ -20,6 +20,7 @@ const filters = ["All Needs", "Food", "Health", "Education", "Shelter", "Mental 
 export default function NeedTerrainMapPage() {
   const [activeFilter, setActiveFilter] = useState("All Needs");
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [isZonePanelOpen, setIsZonePanelOpen] = useState(true);
   const [activeTab, setActiveTab] = useState("profile");
   const [opacity, setOpacity] = useState([70]);
 
@@ -134,6 +135,10 @@ export default function NeedTerrainMapPage() {
   ]);
 
   useEffect(() => {
+    if (!isZonePanelOpen) {
+      return;
+    }
+
     if (!selectedZoneId && filteredZones.length > 0) {
       setSelectedZoneId(filteredZones[0].id);
       return;
@@ -142,7 +147,7 @@ export default function NeedTerrainMapPage() {
     if (selectedZoneId && filteredZones.length > 0 && !filteredZones.some((zone) => zone.id === selectedZoneId)) {
       setSelectedZoneId(filteredZones[0].id);
     }
-  }, [filteredZones, selectedZoneId]);
+  }, [filteredZones, isZonePanelOpen, selectedZoneId]);
 
   const totalZones = filteredZones.length;
   const criticalZones = filteredZones.filter((zone) => zone.riskLevel === "critical").length;
@@ -194,7 +199,10 @@ export default function NeedTerrainMapPage() {
           showLegend={false}
           heatmapPoints={filteredHeatmapPoints}
           opacity={opacity[0] / 100}
-          onZoneClick={(zone) => setSelectedZoneId(zone.id)}
+          onZoneClick={(zone) => {
+            setIsZonePanelOpen(true);
+            setSelectedZoneId(zone.id);
+          }}
         />
 
         <div className="absolute top-20 right-4 z-10 rounded-card bg-card/95 backdrop-blur-sm p-4 shadow-card border text-xs space-y-2">
@@ -215,7 +223,7 @@ export default function NeedTerrainMapPage() {
           </div>
         </div>
 
-        {selectedZone && (
+        {selectedZone && isZonePanelOpen && (
           <div className="absolute right-0 top-0 bottom-0 z-20 w-[400px] border-l bg-card shadow-elevated flex flex-col h-full">
             <div className="flex-1 overflow-y-auto p-6 scrollbar-none">
               <div className="flex items-center justify-between mb-4">
@@ -226,7 +234,15 @@ export default function NeedTerrainMapPage() {
                     <span className="text-xs text-muted-foreground">Updated {selectedSidebar?.badges?.lastUpdateLabel || (selectedZone.updatedAt ? new Date(selectedZone.updatedAt).toLocaleString() : "recently")}</span>
                   </div>
                 </div>
-                <button onClick={() => setSelectedZoneId(null)} className="rounded-lg p-1.5 hover:bg-muted"><X className="h-4 w-4" /></button>
+                <button
+                  onClick={() => {
+                    setIsZonePanelOpen(false);
+                    setSelectedZoneId(null);
+                  }}
+                  className="rounded-lg p-1.5 hover:bg-muted"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
 
               <div className="mb-3 flex flex-wrap gap-2 text-[11px] font-semibold">
@@ -341,12 +357,6 @@ export default function NeedTerrainMapPage() {
               </div>
             </div>
 
-            <div className="p-6 pt-0 mt-auto border-t bg-card/50 backdrop-blur-sm">
-              <Button size="lg" className="w-full mt-6 py-7 text-base font-bold rounded-xl shadow-elevated transition-transform active:scale-95" style={{ backgroundColor: "#1A1A3D" }}>
-                <Zap className="w-4 h-4 mr-2 fill-white text-white" />
-                Initiate Intervention
-              </Button>
-            </div>
           </div>
         )}
       </div>

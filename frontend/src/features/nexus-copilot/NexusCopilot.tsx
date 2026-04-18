@@ -695,11 +695,11 @@ export function NexusCopilot() {
         <motion.button
           aria-label="Open Nexus Copilot"
           onClick={openOverlay}
-          className="fixed bottom-6 right-10 z-[70] grid h-16 w-16 place-items-center rounded-full bg-transparent p-0 shadow-none"
+          className="fixed bottom-6 right-10 z-[70] grid h-16 w-16 place-items-center rounded-full bg-white/25 p-0 shadow-[0_8px_24px_rgba(79,70,229,0.18)] backdrop-blur-md"
           animate={{ y: [0, -2, 0], scale: [1, 1.01, 1] }}
           transition={{ duration: 4.4, repeat: Infinity, ease: "easeInOut" }}
         >
-          <img src="/logo.png" alt="Nexus" className="h-16 w-16 rounded-full bg-transparent object-contain" />
+          <img src="/logo.png" alt="Nexus" className="h-16 w-16 rounded-full bg-transparent object-contain drop-shadow-[0_6px_18px_rgba(79,70,229,0.22)] transition-transform hover:animate-spin" />
         </motion.button>
       ) : null}
 

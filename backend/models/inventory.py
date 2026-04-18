@@ -36,6 +36,7 @@ class InventoryItemDocument(BaseModel):
     ngoId: str
     warehouseId: str
     zoneId: str
+    zonesServed: list[str] = Field(default_factory=list)
     name: str
     category: str = "General"
     unit: str = "units"
@@ -49,6 +50,7 @@ class InventoryItemDocument(BaseModel):
 class InventoryItemCreatePayload(BaseModel):
     warehouseId: str
     zoneId: str
+    zonesServed: list[str] = Field(default_factory=list)
     name: str
     category: str = "General"
     unit: str = "units"
