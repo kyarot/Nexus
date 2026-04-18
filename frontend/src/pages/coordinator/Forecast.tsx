@@ -1,30 +1,283 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableRow, TableCell, TableHead, TableHeader } from "@/components/ui/table";
-import { BarChart3, Bell, Mail, MessageSquare, ExternalLink, Info, Filter, Zap, Target, Users } from "lucide-react";
+import { BarChart3, Bell, Mail, MessageSquare, ExternalLink, Info, Filter, Target, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import {
+  calibrateCommunityForecastMonthly,
+  getCommunityForecastBacktesting,
+  getCommunityForecastSettings,
+  getCommunityForecastStreamUrl,
+  getCommunityForecastSummary,
+  getCommunityForecastZones,
+  patchCommunityForecastSettings,
+  recomputeCommunityForecast,
+} from "@/lib/forecast-api";
+import { getNotificationStreamUrl, listNotifications, type NotificationItem } from "@/lib/ops-api";
+import { useToast } from "@/hooks/use-toast";
 
-const forecastData = [
-  { week: "W12", score: 42 }, { week: "W13", score: 48 },
-  { week: "W14", score: 55 }, { week: "W15", score: 62 },
-  { week: "W16", score: 68 }, { week: "W17", score: 76 },
-  { week: "W18", score: 72 }, { week: "W19", score: 70 },
+const fallbackChart = [
+  { weekLabel: "W12", score: 42, confidence: 100, isForecast: false },
+  { weekLabel: "W13", score: 48, confidence: 100, isForecast: false },
+  { weekLabel: "W14", score: 55, confidence: 100, isForecast: false },
+  { weekLabel: "W15", score: 62, confidence: 100, isForecast: false },
+  { weekLabel: "W16", score: 68, confidence: 82, isForecast: true },
+  { weekLabel: "W17", score: 74, confidence: 78, isForecast: true },
+  { weekLabel: "W18", score: 72, confidence: 73, isForecast: true },
+  { weekLabel: "W19", score: 70, confidence: 69, isForecast: true },
 ];
 
-export default function Forecast() {
-  const [threshold, setThreshold] = useState([75]);
+const toRelativeTime = (value?: string) => {
+  if (!value) {
+    return "--";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  const diffMs = Date.now() - parsed.getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) {
+    return "just now";
+  }
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+};
 
-  // Split data for solid vs dashed line effect
-  const chartData = forecastData.map((d, i) => ({
-    ...d,
-    historical: i <= 3 ? d.score : null,
-    forecast: i >= 3 ? d.score : null,
-  }));
+const titleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+
+export default function Forecast() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const seenNotificationIds = useRef<Set<string>>(new Set());
+
+  const [selectedZoneId, setSelectedZoneId] = useState("all");
+  const [threshold, setThreshold] = useState([75]);
+  const [notificationMethods, setNotificationMethods] = useState({
+    email: true,
+    sms: true,
+    push: false,
+  });
+
+  const summaryQuery = useQuery({
+    queryKey: ["community-forecast-summary"],
+    queryFn: () => getCommunityForecastSummary(),
+    refetchInterval: 60_000,
+  });
+
+  const zonesQuery = useQuery({
+    queryKey: ["community-forecast-zones"],
+    queryFn: () => getCommunityForecastZones(false, 24),
+    refetchInterval: 60_000,
+  });
+
+  const backtestingQuery = useQuery({
+    queryKey: ["community-forecast-backtesting"],
+    queryFn: () => getCommunityForecastBacktesting(24),
+    refetchInterval: 120_000,
+  });
+
+  const settingsQuery = useQuery({
+    queryKey: ["community-forecast-settings"],
+    queryFn: getCommunityForecastSettings,
+    refetchInterval: 120_000,
+  });
+
+  useEffect(() => {
+    if (!settingsQuery.data) {
+      return;
+    }
+    setThreshold([settingsQuery.data.threshold]);
+    setNotificationMethods({ ...settingsQuery.data.notificationMethods });
+  }, [settingsQuery.data]);
+
+  const saveSettingsMutation = useMutation({
+    mutationFn: () =>
+      patchCommunityForecastSettings({
+        threshold: threshold[0],
+        notificationMethods,
+      }),
+    onSuccess: () => {
+      toast({ title: "Forecast settings saved", description: "Alert configuration updated successfully." });
+      queryClient.invalidateQueries({ queryKey: ["community-forecast-settings"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Unable to save settings",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const recomputeMutation = useMutation({
+    mutationFn: recomputeCommunityForecast,
+    onSuccess: () => {
+      toast({ title: "Forecast recomputed", description: "New predictions are now live." });
+      queryClient.invalidateQueries({ queryKey: ["community-forecast-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["community-forecast-zones"] });
+      queryClient.invalidateQueries({ queryKey: ["community-forecast-backtesting"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Recompute failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const calibrateMutation = useMutation({
+    mutationFn: calibrateCommunityForecastMonthly,
+    onSuccess: () => {
+      toast({ title: "Monthly calibration complete", description: "Model bias calibration has been refreshed." });
+      queryClient.invalidateQueries({ queryKey: ["community-forecast-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["community-forecast-backtesting"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Calibration failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    },
+  });
+
+  useEffect(() => {
+    const streamUrl = getCommunityForecastStreamUrl();
+    if (!streamUrl.includes("token=")) {
+      return;
+    }
+
+    const source = new EventSource(streamUrl);
+    source.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data || "{}");
+        if (payload?.type !== "forecast_update") {
+          return;
+        }
+        queryClient.invalidateQueries({ queryKey: ["community-forecast-summary"] });
+        queryClient.invalidateQueries({ queryKey: ["community-forecast-zones"] });
+        queryClient.invalidateQueries({ queryKey: ["community-forecast-backtesting"] });
+      } catch {
+        // Ignore malformed SSE events.
+      }
+    };
+    source.onerror = () => {
+      source.close();
+    };
+
+    return () => {
+      source.close();
+    };
+  }, [queryClient]);
+
+  useEffect(() => {
+    const token = localStorage.getItem("nexus_access_token") || "";
+    if (!token) {
+      return;
+    }
+
+    const streamUrl = getNotificationStreamUrl();
+    const source = new EventSource(streamUrl);
+
+    const handleForecastNotifications = async () => {
+      try {
+        const data = await listNotifications(true);
+        const forecastNotifications = (data.notifications || []).filter(
+          (item: NotificationItem) => item.type === "forecast_alert" || item.type === "forecast_calibration"
+        );
+
+        for (const item of forecastNotifications) {
+          if (seenNotificationIds.current.has(item.id)) {
+            continue;
+          }
+          seenNotificationIds.current.add(item.id);
+          toast({
+            title: item.title || "Forecast Notification",
+            description: item.message || "Forecast event updated.",
+          });
+        }
+      } catch {
+        // Ignore transient notification fetch errors.
+      }
+    };
+
+    source.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data || "{}");
+        if (payload?.type === "notification_update") {
+          handleForecastNotifications();
+        }
+      } catch {
+        // Ignore malformed SSE payloads.
+      }
+    };
+
+    source.onerror = () => {
+      source.close();
+    };
+
+    return () => {
+      source.close();
+    };
+  }, [toast]);
+
+  const summary = summaryQuery.data;
+  const backtesting = backtestingQuery.data;
+  const zoneRows = zonesQuery.data?.zones || [];
+
+  const chartData = useMemo(() => {
+    const points = summary?.mainChart.points?.length ? summary.mainChart.points : fallbackChart;
+    return points.map((point) => ({
+      week: point.weekLabel,
+      score: point.score,
+      confidence: point.confidence,
+      historical: point.isForecast ? null : point.score,
+      forecast: point.isForecast ? point.score : null,
+    }));
+  }, [summary?.mainChart.points]);
+
+  const zoneOptions = useMemo(
+    () => [
+      { id: "all", name: "All Zones (Global)" },
+      ...zoneRows.map((zone) => ({ id: zone.zoneId, name: zone.zone })),
+    ],
+    [zoneRows]
+  );
+
+  const displayedZones = useMemo(() => {
+    if (selectedZoneId === "all") {
+      return zoneRows.slice(0, 3);
+    }
+    return zoneRows.filter((zone) => zone.zoneId === selectedZoneId).slice(0, 3);
+  }, [selectedZoneId, zoneRows]);
+
+  const trendBars = summary?.performance?.trendBars?.length
+    ? summary.performance.trendBars
+    : backtesting?.series?.map((item) => item.accuracy).slice(-5) || [40, 50, 60, 65, 70];
+
+  const riskRows = summary?.riskAssessmentRows || [];
+
+  const isBusy =
+    summaryQuery.isLoading ||
+    zonesQuery.isLoading ||
+    saveSettingsMutation.isPending ||
+    recomputeMutation.isPending ||
+    calibrateMutation.isPending;
 
   return (
     <div className="flex flex-col h-full bg-[#F8F9FE]">
@@ -38,11 +291,34 @@ export default function Forecast() {
             <p className="text-lg text-slate-500 mt-1 font-medium">Predicted need intensity for next 4 weeks across all zones</p>
           </div>
           <div className="flex gap-3">
-            <Button variant="ghost" className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-6">
-              All Zones (Global) <Filter className="ml-2 w-4 h-4" />
+            <div className="bg-slate-100 rounded-xl px-4 h-11 flex items-center gap-2">
+              <select
+                value={selectedZoneId}
+                onChange={(event) => setSelectedZoneId(event.target.value)}
+                className="bg-transparent text-slate-700 font-bold outline-none text-sm"
+              >
+                {zoneOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+              <Filter className="w-4 h-4 text-slate-500" />
+            </div>
+            <Button
+              onClick={() => recomputeMutation.mutate()}
+              disabled={recomputeMutation.isPending}
+              className="bg-[#5A57FF] hover:bg-[#4845E0] text-white font-bold px-6 rounded-xl"
+            >
+              {recomputeMutation.isPending ? "Recomputing..." : "Recompute Forecast"}
             </Button>
-            <Button className="bg-[#5A57FF] hover:bg-[#4845E0] text-white font-bold px-6 rounded-xl">
-              Set Alert Threshold
+            <Button
+              variant="ghost"
+              onClick={() => calibrateMutation.mutate()}
+              disabled={calibrateMutation.isPending}
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-6"
+            >
+              {calibrateMutation.isPending ? "Calibrating..." : "Monthly Calibration"}
             </Button>
           </div>
         </div>
@@ -96,6 +372,7 @@ export default function Forecast() {
                               <p className="text-2xl font-bold text-[#1A1A3D]">{data.score}</p>
                               <p className="text-[10px] font-bold text-[#5A57FF]">Pts</p>
                             </div>
+                            <p className="text-[10px] text-slate-500 mt-1">Confidence {Math.round(data.confidence || 0)}%</p>
                           </div>
                         );
                       }
@@ -129,20 +406,22 @@ export default function Forecast() {
               <div className="flex gap-12">
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Peak Confidence</p>
-                  <p className="text-3xl font-bold text-[#5A57FF] mt-1">92.4%</p>
+                  <p className="text-3xl font-bold text-[#5A57FF] mt-1">{summary ? `${summary.mainChart.peakConfidence.toFixed(1)}%` : "--"}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Drift Ratio</p>
-                  <p className="text-3xl font-bold text-[#1A1A3D] mt-1">0.02</p>
+                  <p className="text-3xl font-bold text-[#1A1A3D] mt-1">{summary ? summary.mainChart.driftRatio.toFixed(2) : "--"}</p>
                 </div>
               </div>
               <div className="flex -space-x-2">
-                {[1, 2, 3].map(i => (
-                  <div key={i} className="h-10 w-10 rounded-full border-2 border-white bg-slate-200 overflow-hidden">
-                    <img src={`https://i.pravatar.cc/150?u=${i}`} alt="user" className="w-full h-full object-cover" />
+                {(zoneRows.slice(0, 3).length ? zoneRows.slice(0, 3) : [{ zone: "Nexus" }]).map((zone) => (
+                  <div key={zone.zoneId || zone.zone} className="h-10 w-10 rounded-full border-2 border-white bg-slate-200 overflow-hidden flex items-center justify-center text-xs font-bold text-[#1A1A3D]">
+                    {(zone.zone || "N").slice(0, 2).toUpperCase()}
                   </div>
                 ))}
-                <div className="h-10 w-10 rounded-full border-2 border-white bg-[#E0E7FF] text-[#5A57FF] text-xs font-bold flex items-center justify-center">+12</div>
+                <div className="h-10 w-10 rounded-full border-2 border-white bg-[#E0E7FF] text-[#5A57FF] text-xs font-bold flex items-center justify-center">
+                  +{Math.max(0, summary?.overview.totalZones ? summary.overview.totalZones - 3 : 0)}
+                </div>
               </div>
             </div>
           </div>
@@ -159,70 +438,71 @@ export default function Forecast() {
             <div className="mt-8 space-y-2">
               <div className="flex justify-between items-end">
                 <span className="text-sm font-medium opacity-80 uppercase tracking-widest text-[10px]">Accuracy Score</span>
-                <span className="text-4xl font-black">84%</span>
+                <span className="text-4xl font-black">{backtesting ? `${Math.round(backtesting.accuracyScore)}%` : "--"}</span>
               </div>
               <div className="h-2 bg-black/20 rounded-full overflow-hidden">
-                <div className="h-full bg-[#10B981] rounded-full" style={{ width: '84%' }} />
+                <div className="h-full bg-[#10B981] rounded-full" style={{ width: `${Math.round(backtesting?.accuracyScore || 0)}%` }} />
               </div>
             </div>
 
             <div className="mt-12 flex-1 flex items-end justify-between gap-2 h-32">
-              {[40, 60, 50, 80, 70].map((h, i) => (
+              {trendBars.map((h, i) => (
                 <div 
                   key={i} 
                   className={cn(
                     "flex-1 rounded-lg transition-all duration-700",
-                    i === 4 ? "bg-[#10B981]" : "bg-white/20"
+                    i === trendBars.length - 1 ? "bg-[#10B981]" : "bg-white/20"
                   )} 
-                  style={{ height: `${h}%` }} 
+                  style={{ height: `${Math.max(20, Math.min(100, h))}%` }} 
                 />
               ))}
             </div>
 
             <div className="mt-8 pt-8 border-t border-white/10 italic text-xs opacity-60">
-              Model retrained 4h ago using updated rainfall data.
+              {summary?.performance.note || "Model quality details unavailable."}
             </div>
           </div>
         </div>
 
         {/* Zone Forecasts: 3 Column Layout */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {[
-            { zone: "Hebbal", peak: "WEEK 17 PEAK", color: "#5A57FF", trend: [30, 45, 60, 80, 70], status: "Deploy 3 food volunteers", badge: "bg-[#F3F2FF] text-[#5A57FF]" },
-            { zone: "Yelahanka", peak: "STABLE", color: "#10B981", trend: [40, 42, 41, 43, 42], status: "Baseline flow maintained", badge: "bg-[#ECFDF5] text-[#10B981]" },
-            { zone: "Jalahalli", peak: "HIGH RISK", color: "#EF4444", trend: [50, 60, 75, 90, 85], status: "Medication stock low", badge: "bg-[#FEF2F2] text-[#EF4444]" }
-          ].map((z, i) => (
-            <div key={i} className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-col">
+          {displayedZones.map((z, i) => (
+            <div key={z.zoneId} className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-col">
               <div className="flex justify-between items-start mb-6">
                 <h3 className="text-xl font-bold text-[#1A1A3D]">{z.zone}</h3>
-                <span className={cn("text-[10px] font-black px-3 py-1 rounded-full", z.badge)}>{z.peak}</span>
+                <span className={cn("text-[10px] font-black px-3 py-1 rounded-full", z.badgeTone)}>{z.peakLabel}</span>
               </div>
 
               <div className="flex items-end justify-between mb-8">
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Confidence</p>
-                  <p className="text-2xl font-bold text-[#1A1A3D] mt-1">78%</p>
+                  <p className="text-2xl font-bold text-[#1A1A3D] mt-1">{Math.round(z.confidence)}%</p>
                 </div>
                 <div className="flex items-end gap-1 h-12 w-24">
                   {z.trend.map((h, j) => (
-                    <div key={j} className="flex-1 rounded-sm" style={{ height: `${h}%`, backgroundColor: z.color, opacity: 0.3 + (j * 0.15) }} />
+                    <div key={j} className="flex-1 rounded-sm" style={{ height: `${Math.max(10, Math.min(100, h))}%`, backgroundColor: z.color, opacity: 0.3 + (j * 0.15) }} />
                   ))}
                 </div>
               </div>
 
               <div className="bg-slate-50 rounded-2xl p-4 flex items-center gap-3 mb-6">
-                {i === 2 ? <Info className="w-4 h-4 text-[#EF4444]" /> : i === 1 ? <Target className="w-4 h-4 text-[#10B981]" /> : <Users className="w-4 h-4 text-[#5A57FF]" />}
-                <p className="text-sm font-medium text-slate-700">{z.status}</p>
+                {z.riskLevel === "critical" || z.riskLevel === "high" ? <Info className="w-4 h-4 text-[#EF4444]" /> : z.riskLevel === "low" ? <Target className="w-4 h-4 text-[#10B981]" /> : <Users className="w-4 h-4 text-[#5A57FF]" />}
+                <p className="text-sm font-medium text-slate-700">{z.recommendedAction}</p>
               </div>
 
               <Button className={cn(
                 "w-full rounded-xl py-6 font-bold uppercase tracking-widest text-xs",
-                i === 1 ? "bg-white border-2 border-[#1A1A3D] text-[#1A1A3D] hover:bg-slate-50" : "bg-[#1A1A3D] text-white hover:bg-black"
+                z.riskLevel === "low" ? "bg-white border-2 border-[#1A1A3D] text-[#1A1A3D] hover:bg-slate-50" : "bg-[#1A1A3D] text-white hover:bg-black"
               )}>
-                {i === 1 ? "View Details" : "Pre-position Now"}
+                {z.riskLevel === "low" ? "View Details" : "Pre-position Now"}
               </Button>
             </div>
           ))}
+          {!displayedZones.length && (
+            <div className="md:col-span-3 bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 text-center text-slate-500 font-medium">
+              No forecast zones available yet.
+            </div>
+          )}
         </div>
 
         {/* Bottom Grid: Risk Assessment & Alert Config */}
@@ -263,27 +543,37 @@ export default function Forecast() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[
-                    { zone: "Hebbal", risk: "1,240", need: "Education", color: "text-[#5A57FF] bg-[#F3F2FF]" },
-                    { zone: "Jalahalli", risk: "890", need: "Nutrition", color: "text-[#EF4444] bg-[#FEF2F2]" },
-                    { zone: "RT Nagar", risk: "2,100", need: "Health", color: "text-[#10B981] bg-[#ECFDF5]" },
-                    { zone: "Yelahanka", risk: "450", need: "Shelter", color: "text-amber-600 bg-amber-50" }
-                  ].map((row, i) => (
+                  {riskRows.map((row, i) => (
                     <TableRow key={i} className="border-slate-50 hover:bg-slate-50/50 transition-colors">
                       <TableCell className="font-bold text-[#1A1A3D]">{row.zone}</TableCell>
-                      <TableCell className="font-mono font-medium text-slate-600">{row.risk}</TableCell>
+                      <TableCell className="font-mono font-medium text-slate-600">{row.atRisk.toLocaleString()}</TableCell>
                       <TableCell>
-                        <Badge className={cn("rounded-lg border-none hover:bg-transparent px-3 py-1 text-[10px] font-bold", row.color)}>
-                          {row.need}
+                        <Badge className={cn(
+                          "rounded-lg border-none hover:bg-transparent px-3 py-1 text-[10px] font-bold",
+                          row.riskLevel === "critical" ? "text-[#EF4444] bg-[#FEF2F2]" : row.riskLevel === "high" ? "text-orange-600 bg-orange-50" : row.riskLevel === "medium" ? "text-[#5A57FF] bg-[#F3F2FF]" : "text-[#10B981] bg-[#ECFDF5]"
+                        )}>
+                          {titleCase(row.need)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button size="icon" variant="ghost" className="text-[#5A57FF] hover:bg-[#F3F2FF]">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setSelectedZoneId(row.zoneId)}
+                          className="text-[#5A57FF] hover:bg-[#F3F2FF]"
+                        >
                           <ExternalLink className="w-4 h-4" />
                         </Button>
                       </TableCell>
                     </TableRow>
                   ))}
+                  {!riskRows.length && (
+                    <TableRow className="border-slate-50">
+                      <TableCell colSpan={4} className="py-8 text-center text-slate-400 font-medium">
+                        Risk assessment data will appear once forecasts are generated.
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>
@@ -302,33 +592,41 @@ export default function Forecast() {
               <div className="space-y-4">
                 <div className="flex justify-between items-center text-sm font-black uppercase tracking-widest text-slate-400">
                   <span>Confidence Threshold</span>
-                  <span className="text-[#5A57FF]">75%</span>
+                  <span className="text-[#5A57FF]">{threshold[0]}%</span>
                 </div>
-                <Slider defaultValue={[75]} max={100} step={1} className="py-4" />
+                <Slider value={threshold} onValueChange={setThreshold} max={100} step={1} className="py-4" />
               </div>
 
               <div className="space-y-6">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Notification Methods</p>
                 <div className="space-y-3">
                   {[
-                    { icon: Mail, label: "Email Summary", active: true },
-                    { icon: MessageSquare, label: "SMS Critical Alerts", active: true },
-                    { icon: Bell, label: "Push Notifications", active: false }
+                    { icon: Mail, label: "Email Summary", key: "email" as const },
+                    { icon: MessageSquare, label: "SMS Critical Alerts", key: "sms" as const },
+                    { icon: Bell, label: "Push Notifications", key: "push" as const }
                   ].map((method, i) => (
                     <div key={i} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl transition-all hover:bg-slate-100">
                       <div className="flex items-center gap-4">
                         <method.icon className="w-5 h-5 text-slate-400" />
                         <span className="text-sm font-bold text-[#1A1A3D]">{method.label}</span>
                       </div>
-                      <Switch className="data-[state=checked]:bg-[#5A57FF]" defaultChecked={method.active} />
+                      <Switch
+                        className="data-[state=checked]:bg-[#5A57FF]"
+                        checked={notificationMethods[method.key]}
+                        onCheckedChange={(checked) => setNotificationMethods((prev) => ({ ...prev, [method.key]: checked }))}
+                      />
                     </div>
                   ))}
                 </div>
               </div>
             </div>
 
-            <Button className="mt-8 bg-[#3730A3] hover:bg-[#2D267E] text-white font-bold py-6 rounded-2xl shadow-lg transition-transform active:scale-95">
-              Save Configuration
+            <Button
+              onClick={() => saveSettingsMutation.mutate()}
+              disabled={saveSettingsMutation.isPending}
+              className="mt-8 bg-[#3730A3] hover:bg-[#2D267E] text-white font-bold py-6 rounded-2xl shadow-lg transition-transform active:scale-95"
+            >
+              {saveSettingsMutation.isPending ? "Saving..." : "Save Configuration"}
             </Button>
           </div>
         </div>
@@ -337,13 +635,13 @@ export default function Forecast() {
         <div className="border-t border-slate-200 mt-12 py-6 flex flex-wrap items-center justify-between text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">
           <div className="flex gap-8">
             <span className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" /> CORE ENGINE: SYNCING
+              <span className={cn("w-2 h-2 rounded-full", isBusy ? "bg-amber-400 animate-pulse" : "bg-[#10B981] animate-pulse")} /> CORE ENGINE: {isBusy ? "SYNCING" : "LIVE"}
             </span>
-            <span>LAST UPDATE: 14:02 UTC</span>
+            <span>LAST UPDATE: {summary?.generatedAt ? toRelativeTime(summary.generatedAt) : "--"}</span>
           </div>
           <div className="flex gap-8">
-            <span>API Response: <span className="text-[#5A57FF]">12ms</span></span>
-            <span>Uptime: <span className="text-[#10B981]">99.99%</span></span>
+            <span>API Response: <span className="text-[#5A57FF]">{summary?.telemetry?.lastComputeDurationMs ?? "--"}ms</span></span>
+            <span>Uptime: <span className="text-[#10B981]">{summary?.telemetry?.uptimePercent?.toFixed(2) ?? "99.95"}%</span></span>
           </div>
         </div>
       </div>
