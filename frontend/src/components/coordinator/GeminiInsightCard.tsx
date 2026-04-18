@@ -3,6 +3,9 @@ import { Button } from "@/components/ui/button";
 import { SignalPill } from "../coordinator/SignalPill";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
+import { createCoordinatorMission } from "@/lib/coordinator-api";
 
 type InsightVariant = "critical" | "high" | "watch" | "resolved";
 
@@ -21,10 +24,12 @@ interface Signal {
 interface GeminiInsightCardProps {
   variant?: InsightVariant;
   zone: string;
+  zoneId?: string;
   signals?: Signal[];
   description: string;
   sourceCount?: string;
   timestamp?: string;
+  hasMission?: boolean;
   className?: string;
   sourceReports?: Array<{
     id: string;
@@ -37,9 +42,136 @@ interface GeminiInsightCardProps {
   }>;
 }
 
-export function GeminiInsightCard({ variant = "watch", zone, signals, description, sourceCount, timestamp, className, sourceReports }: GeminiInsightCardProps) {
+export function GeminiInsightCard({
+  variant = "watch",
+  zone,
+  zoneId,
+  signals,
+  description,
+  sourceCount,
+  timestamp,
+  hasMission,
+  className,
+  sourceReports,
+}: GeminiInsightCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [missionCreated, setMissionCreated] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const v = variantStyles[variant];
+  const showActions = !hasMission && !missionCreated && Boolean(zoneId);
+
+  const resolveNeedType = () => {
+    const needTypes = (sourceReports || [])
+      .map((report) => String(report.needType || "").trim().toLowerCase())
+      .filter(Boolean);
+    if (needTypes.length) {
+      const counts = needTypes.reduce<Record<string, number>>((acc, item) => {
+        acc[item] = (acc[item] || 0) + 1;
+        return acc;
+      }, {});
+      return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "general";
+    }
+
+    const signalText = (signals || []).map((signal) => signal.label.toLowerCase()).join(" ");
+    const knownNeeds = ["food", "education", "health", "substance", "shelter", "safety"];
+    const matched = knownNeeds.find((need) => signalText.includes(need));
+    return matched || "general";
+  };
+
+  const resolvePriority = () => {
+    if (variant === "critical") return "critical";
+    if (variant === "high") return "high";
+    if (variant === "resolved") return "low";
+    return "medium";
+  };
+
+  const formatNeedTitle = (needType: string) => {
+    if (!needType || needType === "general") return "Community support";
+    return `${needType[0].toUpperCase()}${needType.slice(1)} response`;
+  };
+
+  const handleCreateMission = async () => {
+    if (!zoneId) {
+      toast({ title: "Missing zone", description: "Zone data is required to create a mission.", variant: "destructive" });
+      return;
+    }
+
+    const needType = resolveNeedType();
+    const missionTitle = `${formatNeedTitle(needType)} in ${zone}`;
+    const missionDescription = description?.trim() || `Auto-generated mission for ${zone}.`;
+
+    setIsCreating(true);
+    try {
+      const result = await createCoordinatorMission({
+        title: missionTitle,
+        description: missionDescription,
+        zoneId,
+        needType,
+        targetAudience: "volunteer",
+        priority: resolvePriority(),
+        allowAutoAssign: true,
+        sourceReportIds: (sourceReports || []).map((report) => report.id),
+      });
+
+      const assigned = Boolean(result?.mission?.assignedTo);
+      setMissionCreated(true);
+      toast({
+        title: assigned ? "Mission created & assigned" : "Mission created",
+        description: assigned ? "A volunteer has been auto-assigned." : "Awaiting volunteer assignment.",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["coordinator-insights"] });
+      await queryClient.invalidateQueries({ queryKey: ["coordinator-dashboard"] });
+    } catch (error) {
+      toast({
+        title: "Mission creation failed",
+        description: error instanceof Error ? error.message : "Unable to create a mission right now.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleShare = async () => {
+    const signalText = signals?.length ? `Signals: ${signals.map((signal) => signal.label).join(", ")}` : "";
+    const shareText = [
+      `Zone: ${zone}`,
+      `Severity: ${v.badgeText}`,
+      `Summary: ${description}`,
+      signalText,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareText);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = shareText;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      toast({ title: "Insight copied", description: "Insight details copied to clipboard." });
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+      toast({
+        title: "Copy failed",
+        description: "Clipboard access was blocked. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <div className={cn("rounded-card border border-l-4 bg-card p-5 shadow-card", v.border, className)}>
@@ -83,9 +215,21 @@ export function GeminiInsightCard({ variant = "watch", zone, signals, descriptio
         </div>
       )}
       <div className="mt-4 flex items-center gap-2">
-        <Button size="sm" variant="gradient">Generate Plan →</Button>
-        <Button size="sm" variant="ghost">Dispatch Volunteers →</Button>
-        <Button size="icon" variant="ghost" className="ml-auto h-8 w-8"><Share2 className="h-3.5 w-3.5" /></Button>
+        {showActions && (
+          <Button size="sm" variant="gradient" onClick={handleCreateMission} disabled={isCreating}>
+            {isCreating ? "Generating mission..." : "Generate Mission & Assign Volunteers →"}
+          </Button>
+        )}
+        <Button
+          size="icon"
+          variant="ghost"
+          className="ml-auto h-8 w-8"
+          onClick={handleShare}
+          aria-label="Copy insight details"
+          title={copied ? "Copied" : "Copy insight details"}
+        >
+          <Share2 className="h-3.5 w-3.5" />
+        </Button>
       </div>
     </div>
   );

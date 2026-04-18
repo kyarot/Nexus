@@ -181,9 +181,9 @@ export default function Volunteers() {
           <div className={cn(view === "grid" ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6" : "space-y-4")}>
             {volunteers.map(v => (
               view === "grid" ? (
-                <VolunteerAvatarCard key={v.id} {...v} onViewProfile={() => setSelectedVolunteer(v.id)} onDispatch={() => {}} className="h-full flex flex-col" />
+                <VolunteerAvatarCard key={v.id} {...v} onViewProfile={() => setSelectedVolunteer(v.id)} className="h-full flex flex-col" />
               ) : (
-                <VolunteerAvatarCard key={v.id} {...v} compact onDispatch={() => {}} onViewProfile={() => setSelectedVolunteer(v.id)} />
+                <VolunteerAvatarCard key={v.id} {...v} compact onViewProfile={() => setSelectedVolunteer(v.id)} />
               )
             ))}
           </div>
@@ -339,7 +339,6 @@ export default function Volunteers() {
                 </div>
               )}
 
-              <Button variant="gradient" className="w-full mt-6" size="lg">Dispatch to Mission →</Button>
             </div>
           </div>
         )}

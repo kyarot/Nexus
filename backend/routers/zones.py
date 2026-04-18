@@ -51,6 +51,12 @@ def _coerce_datetime(value: Any) -> Optional[datetime]:
     return None
 
 
+def _point_geometry(lat: float, lng: float) -> Optional[dict[str, Any]]:
+    if lat == 0.0 and lng == 0.0:
+        return None
+    return {"type": "Point", "coordinates": [lng, lat]}
+
+
 def _coordinator_user_from_token(token: str) -> tuple[dict[str, Any], str]:
     jwt_payload = decode_access_token(token)
     if not jwt_payload or not isinstance(jwt_payload.get("sub"), str):
@@ -189,6 +195,17 @@ async def get_coordinator_dashboard(
     missions_docs = db.collection("missions").where("ngoId", "==", ngo_id).where("status", "==", "active").stream()
     active_missions = len(list(missions_docs))
 
+    mission_report_ids: set[str] = set()
+    try:
+        mission_docs = db.collection("missions").where("ngoId", "==", ngo_id).stream()
+        for mission_doc in mission_docs:
+            mission_data = mission_doc.to_dict() or {}
+            for report_id in mission_data.get("sourceReportIds") or []:
+                if report_id:
+                    mission_report_ids.add(str(report_id))
+    except Exception:
+        mission_report_ids = set()
+
     # Avoid composite index dependency on (ngoId, status, generatedAt) for local/dev environments.
     insights_docs = db.collection("insights").where("ngoId", "==", ngo_id).limit(80).stream()
     active_insights: list[dict[str, Any]] = []
@@ -206,7 +223,57 @@ async def get_coordinator_dashboard(
         key=lambda item: _coerce_datetime(item.get("generatedAt")) or datetime.min,
         reverse=True,
     )
-    recent_insights = candidates[:2]
+    recent_insights: list[dict[str, Any]] = []
+    for insight in candidates[:2]:
+        zone_id = str(insight.get("zoneId") or "")
+        insight_report_ids = [str(item) for item in (insight.get("sourceReportIds") or []) if str(item).strip()]
+        has_mission = any(report_id in mission_report_ids for report_id in insight_report_ids)
+        report_rows: list[dict[str, Any]] = []
+
+        if zone_id:
+            try:
+                reports = (
+                    db.collection("reports")
+                    .where("ngoId", "==", ngo_id)
+                    .where("zoneId", "==", zone_id)
+                    .order_by("createdAt", direction="DESCENDING")
+                    .limit(5)
+                    .stream()
+                )
+                report_docs = list(reports)
+            except Exception:
+                fallback_reports = (
+                    db.collection("reports")
+                    .where("ngoId", "==", ngo_id)
+                    .stream()
+                )
+                report_docs = [
+                    doc for doc in fallback_reports
+                    if str((doc.to_dict() or {}).get("zoneId") or "") == zone_id
+                ]
+                report_docs.sort(
+                    key=lambda doc: _coerce_datetime((doc.to_dict() or {}).get("createdAt")) or datetime.min,
+                    reverse=True,
+                )
+                report_docs = report_docs[:5]
+
+            for report_doc in report_docs:
+                report_data = report_doc.to_dict() or {}
+                created_at = _coerce_datetime(report_data.get("createdAt"))
+                report_rows.append(
+                    {
+                        "id": report_doc.id,
+                        "needType": report_data.get("needType"),
+                        "severity": report_data.get("severity"),
+                        "familiesAffected": report_data.get("familiesAffected"),
+                        "personsAffected": report_data.get("personsAffected"),
+                        "additionalNotes": report_data.get("additionalNotes")
+                        or ((report_data.get("extractedData") or {}).get("additionalNotes") if isinstance(report_data.get("extractedData"), dict) else None),
+                        "createdAt": created_at.isoformat() if created_at else None,
+                    }
+                )
+
+        recent_insights.append({**insight, "hasMission": has_mission, "sourceReports": report_rows})
 
     available_volunteers = 0
     try:
@@ -266,6 +333,10 @@ async def create_zone(
     zone_ref = db.collection("zones").document()
     now = datetime.utcnow().isoformat()
 
+    geometry = payload.geometry
+    if geometry is None:
+        geometry = _point_geometry(payload.lat, payload.lng)
+
     zone_data = {
         "name": payload.name,
         "ward": payload.ward,
@@ -281,9 +352,10 @@ async def create_zone(
         "forecastConfidence": 50,
         "generationalCohort": payload.generationalCohort,
         "safetyProfile": _default_safety_profile(),
-        "geometry": payload.geometry,
+        "geometry": geometry,
         "lat": payload.lat,
         "lng": payload.lng,
+        "radiusMeters": payload.radiusMeters,
         "updatedAt": now,
         "createdAt": now,
     }
@@ -844,6 +916,7 @@ async def get_zone_detail(
                 "geometry": zone_data.get("geometry"),
                 "lat": float(zone_data.get("lat") or 0.0),
                 "lng": float(zone_data.get("lng") or 0.0),
+                "radiusMeters": float(zone_data.get("radiusMeters") or 1000.0),
                 "updatedAt": zone_data.get("updatedAt", ""),
             }
         )
@@ -874,6 +947,51 @@ async def update_zone(
 
     updates: dict[str, Any] = {}
 
+    if "name" in update_data:
+        updates["name"] = str(update_data.get("name") or "").strip()
+
+    if "ward" in update_data:
+        updates["ward"] = str(update_data.get("ward") or "").strip()
+
+    if "city" in update_data:
+        updates["city"] = str(update_data.get("city") or "").strip()
+
+    if "lat" in update_data:
+        try:
+            updates["lat"] = float(update_data.get("lat"))
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid lat value",
+            )
+
+    if "lng" in update_data:
+        try:
+            updates["lng"] = float(update_data.get("lng"))
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid lng value",
+            )
+
+    if "radiusMeters" in update_data:
+        try:
+            radius_value = float(update_data.get("radiusMeters"))
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid radiusMeters value",
+            )
+        if radius_value < 500 or radius_value > 6000:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="radiusMeters must be between 500 and 6000",
+            )
+        updates["radiusMeters"] = radius_value
+
+    if "geometry" in update_data:
+        updates["geometry"] = update_data.get("geometry")
+
     if "riskLevel" in update_data:
         risk_level = update_data["riskLevel"]
         if risk_level not in [level.value for level in ZoneRiskLevel]:
@@ -903,6 +1021,11 @@ async def update_zone(
                 safety_profile_data["score"] = 50
 
         updates["safetyProfile"] = safety_profile_data
+
+    if "geometry" not in updates and ("lat" in updates or "lng" in updates):
+        lat_value = updates.get("lat", float(zone_data.get("lat") or 0.0))
+        lng_value = updates.get("lng", float(zone_data.get("lng") or 0.0))
+        updates["geometry"] = _point_geometry(lat_value, lng_value)
 
     updates["updatedAt"] = datetime.utcnow().isoformat()
 

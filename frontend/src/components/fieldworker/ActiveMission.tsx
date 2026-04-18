@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   MapPin, 
   CheckCircle2, 
@@ -24,6 +24,8 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { MapPicker } from "@/components/nexus/MapPicker";
+import { useToast } from "@/hooks/use-toast";
+import { getNotificationStreamUrl, listNotifications, type NotificationItem } from "@/lib/ops-api";
 
 const UpdateRow = ({ time, status, text, type }: { time: string, status: string, text: string, type: "system" | "field" }) => (
   <div className="flex gap-4 relative pb-8 group last:pb-0">
@@ -48,6 +50,7 @@ const UpdateRow = ({ time, status, text, type }: { time: string, status: string,
 );
 
 export const ActiveMission = () => {
+   const { toast } = useToast();
   const [activeMission, setActiveMission] = useState<any>(null);
   const [updates, setUpdates] = useState<any[]>([]);
    const [lastMission, setLastMission] = useState<any | null>(null);
@@ -67,6 +70,7 @@ export const ActiveMission = () => {
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const token = localStorage.getItem("nexus_access_token");
+   const seenNotificationIds = useRef<Set<string>>(new Set());
 
   const fetchActiveMission = async () => {
     try {
@@ -95,6 +99,52 @@ export const ActiveMission = () => {
     const interval = setInterval(fetchActiveMission, 10000);
     return () => clearInterval(interval);
   }, []);
+
+   useEffect(() => {
+      if (!token) return;
+      const streamUrl = getNotificationStreamUrl();
+      const source = new EventSource(streamUrl);
+
+      const handleNotifications = async () => {
+         try {
+            const data = await listNotifications(true);
+            const missionMessages = (data.notifications || []).filter(
+               (item: NotificationItem) => item.type === "mission_message",
+            );
+            for (const item of missionMessages) {
+               if (seenNotificationIds.current.has(item.id)) {
+                  continue;
+               }
+               seenNotificationIds.current.add(item.id);
+               toast({
+                  title: item.title || "Coordinator message",
+                  description: item.message,
+               });
+            }
+         } catch {
+            // Ignore notification fetch errors.
+         }
+      };
+
+      source.onmessage = (event) => {
+         try {
+            const payload = JSON.parse(event.data || "{}");
+            if (payload?.type === "notification_update") {
+               handleNotifications();
+            }
+         } catch {
+            // Ignore malformed SSE payloads.
+         }
+      };
+
+      source.onerror = () => {
+         source.close();
+      };
+
+      return () => {
+         source.close();
+      };
+   }, [token, toast]);
 
   const handleStatusUpdate = async (newStatus: string) => {
     if (!activeMission) return;

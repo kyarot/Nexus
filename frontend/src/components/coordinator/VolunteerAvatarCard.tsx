@@ -53,7 +53,9 @@ export function VolunteerAvatarCard({
           <p className="text-xs text-success font-data">{matchPercent}% match</p>
         </div>
         <span className="flex items-center gap-1 text-xs text-muted-foreground whitespace-nowrap"><MapPin className="h-3 w-3" />{distance}</span>
-        <Button size="sm" variant="gradient" className="sm:ml-auto" onClick={onDispatch}>Dispatch</Button>
+        {onDispatch ? (
+          <Button size="sm" variant="gradient" className="sm:ml-auto" onClick={onDispatch}>Dispatch</Button>
+        ) : null}
       </div>
     );
   }
@@ -162,8 +164,17 @@ export function VolunteerAvatarCard({
       )}
 
       <div className="mt-auto pt-6 flex flex-wrap gap-2">
-        <Button size="sm" variant="ghost" className="flex-1 min-w-[100px] font-bold" onClick={onViewProfile}>View Profile</Button>
-        <Button size="sm" variant="gradient" className="flex-1 min-w-[100px] font-bold" onClick={onDispatch}>Dispatch →</Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={cn("font-bold", onDispatch ? "flex-1 min-w-[100px]" : "w-full")}
+          onClick={onViewProfile}
+        >
+          View Profile
+        </Button>
+        {onDispatch ? (
+          <Button size="sm" variant="gradient" className="flex-1 min-w-[100px] font-bold" onClick={onDispatch}>Dispatch →</Button>
+        ) : null}
       </div>
     </div>
   );

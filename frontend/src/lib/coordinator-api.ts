@@ -38,12 +38,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export interface CoordinatorInsight {
+  zoneId?: string;
+  zoneName?: string;
   title?: string;
   summary?: string;
   severity?: string;
   status?: string;
   generatedAt?: string;
   recommendedAction?: string;
+  hasMission?: boolean;
+  sourceReports?: GeminiInsightSourceReport[];
 }
 
 export interface GeminiInsightSourceReport {
@@ -68,6 +72,7 @@ export interface GeminiInsightItem {
   reportCount?: number;
   sourceNgoCount?: number;
   generatedAt?: string | null;
+  hasMission?: boolean;
   sourceReports?: GeminiInsightSourceReport[];
 }
 
@@ -133,6 +138,7 @@ export interface CoordinatorZone {
   geometry?: Record<string, unknown> | null;
   lat: number;
   lng: number;
+  radiusMeters?: number;
   updatedAt?: string;
 }
 
@@ -274,6 +280,7 @@ export interface CoordinatorZoneCreatePayload {
   city?: string;
   lat?: number;
   lng?: number;
+  radiusMeters?: number;
   currentScore?: number;
   riskLevel?: CoordinatorZone["riskLevel"];
   generationalCohort?: string;
@@ -286,9 +293,11 @@ export interface CoordinatorZoneUpdatePayload {
   city?: string;
   lat?: number;
   lng?: number;
+  radiusMeters?: number;
   currentScore?: number;
   riskLevel?: CoordinatorZone["riskLevel"];
   topNeeds?: string[];
+  geometry?: Record<string, unknown> | null;
 }
 
 export interface NgoProfile {
@@ -1052,6 +1061,22 @@ export const assignCoordinatorMission = (missionId: string, volunteerId: string)
     body: JSON.stringify({ volunteerId }),
   });
 
+export const closeCoordinatorMission = (missionId: string) =>
+  request<CoordinatorMission>(`/coordinator/missions/${missionId}/close`, {
+    method: "POST",
+  });
+
+export const sendCoordinatorMissionMessage = (missionId: string, message: string) =>
+  request<{ sent: boolean }>(`/coordinator/missions/${missionId}/message`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+
+export const renotifyCoordinatorMission = (missionId: string) =>
+  request<{ sent: boolean }>(`/coordinator/missions/${missionId}/renotify`, {
+    method: "POST",
+  });
+
 export const getCoordinatorMissionSourceReports = (missionId: string) =>
   request<{ reports: CoordinatorMissionSourceReport[]; total: number }>(`/coordinator/missions/${missionId}/source-reports`);
 
@@ -1132,6 +1157,20 @@ export const getVolunteerMissions = (status?: string) => {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
   return request<CoordinatorMissionListResponse>(`/volunteer/missions${query}`);
 };
+
+export interface VolunteerMissionUpdateItem {
+  id: string;
+  type?: string;
+  text?: string;
+  transcript?: string;
+  status?: string;
+  timestamp?: string | null;
+  submittedBy?: string;
+  senderName?: string;
+}
+
+export const getVolunteerMissionUpdates = (missionId: string) =>
+  request<{ updates: VolunteerMissionUpdateItem[] }>(`/volunteer/missions/${missionId}/updates`);
 
 export const getVolunteerDashboard = () => request<VolunteerDashboardResponse>("/volunteer/dashboard");
 

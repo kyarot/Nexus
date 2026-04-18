@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleF, GoogleMap, HeatmapLayerF, PolygonF } from "@react-google-maps/api";
 
 import { cn } from "@/lib/utils";
@@ -86,20 +86,69 @@ const getGeometryPaths = (geometry?: TerrainZoneMapItem["geometry"]): google.map
 export function NeedTerrainMap({ zones = [], heatmapPoints = [], opacity = 0.7, onZoneClick, className, showLegend = true }: NeedTerrainMapProps) {
   const apiKey = import.meta.env.VITE_GMAPS_KEY || "";
   const { isLoaded } = useNexusGoogleMapsLoader();
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const hasUserMoved = useRef(false);
 
-  const center = useMemo(() => {
-    if (zones.length > 0) {
-      const avgLat = zones.reduce((sum, zone) => sum + zone.lat, 0) / zones.length;
-      const avgLng = zones.reduce((sum, zone) => sum + zone.lng, 0) / zones.length;
-      return { lat: avgLat, lng: avgLng };
+  const validCenterPoints = useMemo(() => {
+    const filteredHeatmap = heatmapPoints.filter(
+      (point) => Number.isFinite(point.lat) && Number.isFinite(point.lng) && (point.lat !== 0 || point.lng !== 0)
+    );
+    if (filteredHeatmap.length > 0) {
+      return filteredHeatmap.map((point) => ({ lat: point.lat, lng: point.lng }));
     }
-    if (heatmapPoints.length > 0) {
-      const avgLat = heatmapPoints.reduce((sum, point) => sum + point.lat, 0) / heatmapPoints.length;
-      const avgLng = heatmapPoints.reduce((sum, point) => sum + point.lng, 0) / heatmapPoints.length;
+
+    return zones
+      .filter((zone) => Number.isFinite(zone.lat) && Number.isFinite(zone.lng) && (zone.lat !== 0 || zone.lng !== 0))
+      .map((zone) => ({ lat: zone.lat, lng: zone.lng }));
+  }, [heatmapPoints, zones]);
+
+  const candidateCenter = useMemo(() => {
+    if (validCenterPoints.length > 0) {
+      const avgLat = validCenterPoints.reduce((sum, point) => sum + point.lat, 0) / validCenterPoints.length;
+      const avgLng = validCenterPoints.reduce((sum, point) => sum + point.lng, 0) / validCenterPoints.length;
       return { lat: avgLat, lng: avgLng };
     }
     return defaultCenter;
-  }, [zones, heatmapPoints]);
+  }, [validCenterPoints]);
+
+  const [mapCenter, setMapCenter] = useState(candidateCenter);
+  const [mapZoom, setMapZoom] = useState(11);
+
+  useEffect(() => {
+    if (!hasUserMoved.current) {
+      setMapCenter(candidateCenter);
+    }
+  }, [candidateCenter]);
+
+  const handleMapLoad = (map: google.maps.Map) => {
+    mapRef.current = map;
+    if (!hasUserMoved.current) {
+      map.setCenter(candidateCenter);
+      map.setZoom(mapZoom);
+    }
+  };
+
+  const handleUserMove = () => {
+    if (!hasUserMoved.current) {
+      hasUserMoved.current = true;
+    }
+  };
+
+  const handleDragEnd = () => {
+    handleUserMove();
+    const nextCenter = mapRef.current?.getCenter();
+    if (nextCenter) {
+      setMapCenter({ lat: nextCenter.lat(), lng: nextCenter.lng() });
+    }
+  };
+
+  const handleZoomChanged = () => {
+    handleUserMove();
+    const nextZoom = mapRef.current?.getZoom();
+    if (typeof nextZoom === "number") {
+      setMapZoom(nextZoom);
+    }
+  };
 
   const displayHeatmapPoints = useMemo(() => {
     if (heatmapPoints.length > 0) {
@@ -149,8 +198,11 @@ export function NeedTerrainMap({ zones = [], heatmapPoints = [], opacity = 0.7, 
     <div className={cn("relative overflow-hidden rounded-card bg-[#10132a]", className)}>
       <GoogleMap
         mapContainerStyle={{ width: "100%", height: "100%" }}
-        center={center}
-        zoom={11}
+        center={mapCenter}
+        zoom={mapZoom}
+        onLoad={handleMapLoad}
+        onDragEnd={handleDragEnd}
+        onZoomChanged={handleZoomChanged}
         options={{
           disableDefaultUI: true,
           zoomControl: true,

@@ -69,6 +69,7 @@ class ZoneDocument(BaseModel):
     geometry: Optional[dict[str, Any]] = None  # GeoJSON geometry
     lat: float = 0.0
     lng: float = 0.0
+    radiusMeters: float = Field(default=1000, ge=500, le=6000)
     updatedAt: str = ""
 
     class Config:
@@ -85,6 +86,7 @@ class ZoneCreateRequest(BaseModel):
     riskLevel: ZoneRiskLevel = ZoneRiskLevel.low
     generationalCohort: str = ""
     geometry: Optional[dict[str, Any]] = None
+    radiusMeters: float = Field(default=1000, ge=500, le=6000)
 
 
 class HeatmapPoint(BaseModel):

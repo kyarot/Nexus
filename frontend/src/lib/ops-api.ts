@@ -174,3 +174,12 @@ export const getNotificationStreamUrl = () => {
   const token = getAuthToken();
   return `${apiBaseUrl}/notifications/stream?token=${encodeURIComponent(token)}`;
 };
+
+export const streamGeminiChat = (payload: { query: string }) =>
+  fetch(`${apiBaseUrl}/coordinator/gemini-chat/stream`, {
+    method: "POST",
+    headers: {
+      ...buildHeaders(true),
+    },
+    body: JSON.stringify(payload),
+  });

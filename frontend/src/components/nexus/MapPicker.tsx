@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import { GoogleMap, Marker } from "@react-google-maps/api";
+import { Circle, GoogleMap, Marker } from "@react-google-maps/api";
 import { MapPin, Navigation, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
@@ -20,14 +20,16 @@ interface MapLocation {
   address?: string;
   pincode?: string;
   areaName?: string;
+  city?: string;
 }
 
 interface MapPickerProps {
   onLocationSelect: (location: MapLocation) => void;
   initialLocation?: { lat: number, lng: number };
+  radiusMeters?: number;
 }
 
-export const MapPicker = ({ onLocationSelect, initialLocation }: MapPickerProps) => {
+export const MapPicker = ({ onLocationSelect, initialLocation, radiusMeters }: MapPickerProps) => {
   const { isLoaded } = useNexusGoogleMapsLoader();
 
   const [map, setMap] = useState<google.maps.Map | null>(null);
@@ -44,6 +46,7 @@ export const MapPicker = ({ onLocationSelect, initialLocation }: MapPickerProps)
         const address = results[0].formatted_address;
         let pincode = "";
         let areaName = "";
+        let city = "";
         
         // Extract pincode from address components
         for (const component of results[0].address_components) {
@@ -54,10 +57,17 @@ export const MapPicker = ({ onLocationSelect, initialLocation }: MapPickerProps)
           if (!areaName && (
             component.types.includes("sublocality_level_1") ||
             component.types.includes("sublocality") ||
-            component.types.includes("neighborhood") ||
-            component.types.includes("locality")
+            component.types.includes("neighborhood")
           )) {
             areaName = component.long_name;
+          }
+
+          if (!city && component.types.includes("locality")) {
+            city = component.long_name;
+          }
+
+          if (!city && component.types.includes("administrative_area_level_2")) {
+            city = component.long_name;
           }
         }
 
@@ -69,7 +79,14 @@ export const MapPicker = ({ onLocationSelect, initialLocation }: MapPickerProps)
           areaName = fallback?.long_name || "";
         }
 
-        onLocationSelect({ lat, lng, address, pincode, areaName });
+        if (!city) {
+          const fallback = results[0].address_components.find((component) =>
+            component.types.includes("administrative_area_level_1")
+          );
+          city = fallback?.long_name || "";
+        }
+
+        onLocationSelect({ lat, lng, address, pincode, areaName, city });
       } else {
         onLocationSelect({ lat, lng });
       }
@@ -180,6 +197,19 @@ export const MapPicker = ({ onLocationSelect, initialLocation }: MapPickerProps)
           onDragEnd={handleMarkerDragEnd}
           animation={google.maps.Animation.DROP}
         />
+        {typeof radiusMeters === "number" && radiusMeters > 0 ? (
+          <Circle
+            center={markerPosition}
+            radius={radiusMeters}
+            options={{
+              fillColor: "#4F46E5",
+              fillOpacity: 0.12,
+              strokeColor: "#4F46E5",
+              strokeOpacity: 0.5,
+              strokeWeight: 2,
+            }}
+          />
+        ) : null}
       </GoogleMap>
 
       <div className="absolute bottom-4 left-4 right-4 flex gap-2">

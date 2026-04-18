@@ -623,6 +623,39 @@ async def list_volunteer_missions(
     )
 
 
+@router.get("/missions/{mission_id}/updates", response_model=dict[str, Any])
+async def list_volunteer_mission_updates(
+    mission_id: str,
+    user: dict[str, Any] = Depends(role_required("volunteer")),
+) -> dict[str, Any]:
+    uid = str(user.get("id") or user.get("uid") or "").strip()
+    ngo_id = str(user.get("ngoId") or user.get("ngo_id") or "").strip()
+    if not uid or not ngo_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user context")
+
+    selected_mission_id, _ = _pick_volunteer_mission(uid, ngo_id, mission_id)
+
+    updates_snapshot = (
+        db.collection("missions")
+        .document(selected_mission_id)
+        .collection("updates")
+        .order_by("timestamp", direction="DESCENDING")
+        .limit(40)
+        .stream()
+    )
+
+    updates: list[dict[str, Any]] = []
+    for doc in updates_snapshot:
+        data = doc.to_dict() or {}
+        data["id"] = doc.id
+        timestamp = data.get("timestamp")
+        if isinstance(timestamp, datetime):
+            data["timestamp"] = timestamp.isoformat()
+        updates.append(data)
+
+    return {"updates": updates}
+
+
 @router.get("/dashboard", response_model=VolunteerDashboardResponse)
 async def get_volunteer_dashboard(
     user: dict[str, Any] = Depends(role_required("volunteer")),

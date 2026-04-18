@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { useRef } from "react";
 import { DirectionsRenderer, GoogleMap, MarkerF } from "@react-google-maps/api";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Button } from "@/components/ui/button";
@@ -17,8 +18,12 @@ import { cn } from "@/lib/utils";
 import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
 import {
   getVolunteerMissions,
+  getVolunteerMissionUpdates,
   type CoordinatorMission,
+  type VolunteerMissionUpdateItem,
 } from "@/lib/coordinator-api";
+import { getNotificationStreamUrl, listNotifications, type NotificationItem } from "@/lib/ops-api";
+import { useToast } from "@/hooks/use-toast";
 import {
   ArrowRight,
   CheckCircle2,
@@ -128,6 +133,7 @@ const toString = (value: unknown, fallback = "") => (typeof value === "string" ?
 const isValidCoordinate = (value: number) => Number.isFinite(value) && Math.abs(value) <= 180;
 const VolunteerMissions = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("all");
   const [subTab, setSubTab] = useState("upcoming");
   const [selectedMission, setSelectedMission] = useState<CoordinatorMission | null>(null);
@@ -138,6 +144,66 @@ const VolunteerMissions = () => {
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
   const [isRouteLoading, setIsRouteLoading] = useState(false);
   const [routeMeta, setRouteMeta] = useState<{ distance: string; duration: string } | null>(null);
+  const token = localStorage.getItem("nexus_access_token");
+  const seenNotificationIds = useRef<Set<string>>(new Set());
+
+    const missionUpdatesQuery = useQuery({
+      queryKey: ["volunteer-mission-updates", selectedMission?.id],
+      queryFn: () => getVolunteerMissionUpdates(selectedMission!.id),
+      enabled: Boolean(selectedMission?.id && activeDetailTab === "fieldnotes"),
+      refetchInterval: selectedMission?.id && activeDetailTab === "fieldnotes" ? 10_000 : false,
+    });
+
+    const missionUpdates = useMemo<VolunteerMissionUpdateItem[]>(
+      () => missionUpdatesQuery.data?.updates ?? [],
+      [missionUpdatesQuery.data?.updates],
+    );
+
+    useEffect(() => {
+      if (!token) return;
+      const streamUrl = getNotificationStreamUrl();
+      const source = new EventSource(streamUrl);
+
+      const handleNotifications = async () => {
+        try {
+          const data = await listNotifications(true);
+          const missionMessages = (data.notifications || []).filter(
+            (item: NotificationItem) => item.type === "mission_message",
+          );
+          for (const item of missionMessages) {
+            if (seenNotificationIds.current.has(item.id)) {
+              continue;
+            }
+            seenNotificationIds.current.add(item.id);
+            toast({
+              title: item.title || "Coordinator message",
+              description: item.message,
+            });
+          }
+        } catch {
+          // Ignore notification fetch errors.
+        }
+      };
+
+      source.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data || "{}");
+          if (payload?.type === "notification_update") {
+            handleNotifications();
+          }
+        } catch {
+          // Ignore malformed SSE payloads.
+        }
+      };
+
+      source.onerror = () => {
+        source.close();
+      };
+
+      return () => {
+        source.close();
+      };
+    }, [token, toast]);
   const mapsApiKey = import.meta.env.VITE_GMAPS_KEY || "";
 
   const { isLoaded: isMapLoaded } = useNexusGoogleMapsLoader();
@@ -606,23 +672,39 @@ const VolunteerMissions = () => {
                   {activeDetailTab === "fieldnotes" && (
                     <div className="space-y-6">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">TIMELINE OF UPDATES</p>
-                      <div className="space-y-6">
-                        <div className="flex gap-4 group">
-                          <div className="flex flex-col items-center">
-                            <div className="w-2.5 h-2.5 rounded-full bg-[#4F46E5] mt-1.5 ring-4 ring-indigo-50" />
-                            <div className="w-px flex-1 bg-slate-100 my-2" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex justify-between items-baseline mb-2">
-                              <h4 className="text-[13px] font-bold text-[#1A1A3D]">Latest Update</h4>
-                              <span className="text-[10px] text-slate-400 font-bold">{formatDate(selectedMission.updatedAt || selectedMission.createdAt)}</span>
-                            </div>
-                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-medium text-slate-600 italic">
-                              {selectedMission.statusText || selectedMission.notes || "No field notes have been logged yet."}
-                            </div>
-                          </div>
+                      {missionUpdatesQuery.isLoading ? (
+                        <div className="text-xs text-slate-400">Loading updates...</div>
+                      ) : missionUpdates.length > 0 ? (
+                        <div className="space-y-6">
+                          {missionUpdates.map((update, index) => {
+                            const label = update.type === "mission_message"
+                              ? "Coordinator message"
+                              : update.type?.replace("_", " ") || "Update";
+                            const updateText = update.text || update.transcript || update.status || "Update received";
+                            return (
+                              <div key={update.id || `${index}-${updateText}`} className="flex gap-4 group">
+                                <div className="flex flex-col items-center">
+                                  <div className="w-2.5 h-2.5 rounded-full bg-[#4F46E5] mt-1.5 ring-4 ring-indigo-50" />
+                                  <div className="w-px flex-1 bg-slate-100 my-2" />
+                                </div>
+                                <div className="flex-1">
+                                  <div className="flex justify-between items-baseline mb-2">
+                                    <h4 className="text-[13px] font-bold text-[#1A1A3D]">{label}</h4>
+                                    <span className="text-[10px] text-slate-400 font-bold">{formatDate(update.timestamp || selectedMission.updatedAt || selectedMission.createdAt)}</span>
+                                  </div>
+                                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-medium text-slate-600 italic">
+                                    {updateText}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      </div>
+                      ) : (
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-medium text-slate-600 italic">
+                          {selectedMission.statusText || selectedMission.notes || "No field notes have been logged yet."}
+                        </div>
+                      )}
                     </div>
                   )}
 

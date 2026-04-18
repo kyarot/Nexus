@@ -36,6 +36,142 @@ class MissionAssignRequest(BaseModel):
     volunteerId: str
 
 
+class MissionMessageRequest(BaseModel):
+    message: str
+
+
+@router.post("/missions/{mission_id}/close", response_model=MissionDocument)
+async def close_mission(
+    mission_id: str,
+    user: dict[str, Any] = Depends(role_required("coordinator")),
+) -> MissionDocument:
+    ngo_id = _get_coordinator_ngo_id(user)
+    mission_ref = db.collection("missions").document(mission_id)
+    mission_snapshot = mission_ref.get()
+    if not mission_snapshot.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission not found")
+
+    mission_data = mission_snapshot.to_dict() or {}
+    if str(mission_data.get("ngoId") or "") != ngo_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mission does not belong to your NGO")
+
+    now = _now()
+    mission_update = {
+        "status": MissionStatus.completed.value,
+        "statusText": "Mission completed",
+        "updatedAt": now,
+        "completedAt": now,
+    }
+    mission_ref.update(mission_update)
+    mission_ref.collection("updates").add({
+        "type": "mission_closed",
+        "status": "completed",
+        "timestamp": now,
+        "submittedBy": user.get("id"),
+    })
+
+    if rtdb is not None:
+        rtdb.child("missionTracking").child(mission_id).update({
+            "status": "completed",
+            "lastUpdate": now.isoformat(),
+            "isOnGround": False,
+        })
+
+    mission_data.update(mission_update)
+    mission_data["id"] = mission_id
+    return _mission_from_doc(mission_id, mission_data)
+
+
+@router.post("/missions/{mission_id}/message", response_model=dict[str, Any])
+async def message_mission_assignee(
+    mission_id: str,
+    payload: MissionMessageRequest,
+    user: dict[str, Any] = Depends(role_required("coordinator")),
+) -> dict[str, Any]:
+    ngo_id = _get_coordinator_ngo_id(user)
+    message = (payload.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="message is required")
+
+    mission_ref = db.collection("missions").document(mission_id)
+    mission_snapshot = mission_ref.get()
+    if not mission_snapshot.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission not found")
+
+    mission_data = mission_snapshot.to_dict() or {}
+    if str(mission_data.get("ngoId") or "") != ngo_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mission does not belong to your NGO")
+
+    assignee_id = str(mission_data.get("assignedTo") or "").strip()
+    if not assignee_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Mission has no assigned responder")
+
+    now = _now()
+    sender_name = str(user.get("name") or user.get("email") or "Coordinator")
+
+    mission_ref.collection("updates").add({
+        "type": "mission_message",
+        "text": message,
+        "timestamp": now,
+        "submittedBy": user.get("id"),
+        "senderName": sender_name,
+    })
+    mission_ref.update({"updatedAt": now})
+
+    notify_users(
+        [assignee_id],
+        type="mission_message",
+        title="Coordinator message",
+        message=message,
+        mission_id=mission_id,
+        metadata={
+            "senderName": sender_name,
+            "senderRole": "coordinator",
+        },
+        timestamp=now,
+    )
+
+    return {"sent": True}
+
+
+@router.post("/missions/{mission_id}/renotify", response_model=dict[str, Any])
+async def renotify_mission_assignee(
+    mission_id: str,
+    user: dict[str, Any] = Depends(role_required("coordinator")),
+) -> dict[str, Any]:
+    ngo_id = _get_coordinator_ngo_id(user)
+    mission_ref = db.collection("missions").document(mission_id)
+    mission_snapshot = mission_ref.get()
+    if not mission_snapshot.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission not found")
+
+    mission_data = mission_snapshot.to_dict() or {}
+    if str(mission_data.get("ngoId") or "") != ngo_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mission does not belong to your NGO")
+
+    assignee_id = str(mission_data.get("assignedTo") or "").strip()
+    if not assignee_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Mission has no assigned responder")
+
+    zone_name = str(mission_data.get("zoneName") or "Assigned zone")
+    now = _now()
+    notify_users(
+        [assignee_id],
+        type="mission_assigned",
+        mission_id=mission_id,
+        title=str(mission_data.get("title") or "Mission reminder"),
+        message=f"Reminder: mission assigned in {zone_name}",
+        metadata={
+            "zoneId": mission_data.get("zoneId"),
+            "zoneName": zone_name,
+            "reminder": True,
+        },
+        timestamp=now,
+    )
+
+    return {"sent": True}
+
+
 def _now() -> datetime:
     return datetime.utcnow()
 

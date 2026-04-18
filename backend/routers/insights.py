@@ -50,6 +50,17 @@ async def list_insights(
 ) -> dict[str, Any]:
     ngo_id = _get_coordinator_ngo_id(user)
 
+    mission_report_ids: set[str] = set()
+    try:
+        mission_docs = db.collection("missions").where("ngoId", "==", ngo_id).stream()
+        for mission_doc in mission_docs:
+            mission_data = mission_doc.to_dict() or {}
+            for report_id in mission_data.get("sourceReportIds") or []:
+                if report_id:
+                    mission_report_ids.add(str(report_id))
+    except Exception:
+        mission_report_ids = set()
+
     insights: list[dict[str, Any]] = []
     try:
         insights_docs = (
@@ -71,6 +82,8 @@ async def list_insights(
     for doc in insight_rows:
         data = doc.to_dict() or {}
         zone_id = str(data.get("zoneId") or "")
+        insight_report_ids = [str(item) for item in (data.get("sourceReportIds") or []) if str(item).strip()]
+        has_mission = any(report_id in mission_report_ids for report_id in insight_report_ids)
         report_rows: list[dict[str, Any]] = []
         if zone_id:
             try:
@@ -126,6 +139,7 @@ async def list_insights(
                 "reportCount": data.get("reportCount") or 0,
                 "sourceNgoCount": data.get("sourceNgoCount") or 1,
                 "generatedAt": _serialize_firestore_value(data.get("generatedAt")),
+                "hasMission": has_mission,
                 "sourceReports": report_rows,
             }
         )

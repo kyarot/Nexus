@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
   SheetContent,
@@ -47,8 +48,10 @@ import {
 } from "lucide-react";
 import {
   assignCoordinatorMission,
+  sendCoordinatorMissionMessage,
+  renotifyCoordinatorMission,
+  closeCoordinatorMission,
   createCoordinatorMission,
-  createCoordinatorZone,
   getCoordinatorMissionCandidatesForAudience,
   getCoordinatorMissionTracking,
   getCoordinatorMissionSourceReports,
@@ -119,26 +122,20 @@ const defaultMissionForm: CoordinatorMissionCreatePayload = {
   allowAutoAssign: true,
 };
 
-const defaultNewZoneForm = {
-  name: "",
-  ward: "",
-  city: "",
-};
-
 const CoordinatorMissions = () => {
   const [activeTab, setActiveTab] = useState("all");
   const [showCreateMission, setShowCreateMission] = useState(false);
   const [creationStep, setCreationStep] = useState(1);
   const [selectedVolunteerForMission, setSelectedVolunteerForMission] = useState<CoordinatorMissionCandidate | null>(null);
   const [selectedMission, setSelectedMission] = useState<CoordinatorMission | null>(null);
+  const [messageMission, setMessageMission] = useState<CoordinatorMission | null>(null);
+  const [messageText, setMessageText] = useState("");
   const [assignMission, setAssignMission] = useState<CoordinatorMission | null>(null);
   const [selectedAssignCandidate, setSelectedAssignCandidate] = useState<CoordinatorMissionCandidate | null>(null);
   const [isScoringExpanded, setIsScoringExpanded] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState("Overview");
   const [selectedSourceReport, setSelectedSourceReport] = useState<CoordinatorMissionSourceReport | null>(null);
   const [missionForm, setMissionForm] = useState<CoordinatorMissionCreatePayload>(defaultMissionForm);
-  const [newZoneForm, setNewZoneForm] = useState(defaultNewZoneForm);
-  const [showNewZoneForm, setShowNewZoneForm] = useState(false);
   const [isPageVisible, setIsPageVisible] = useState(() => (typeof document === "undefined" ? true : !document.hidden));
   const [liveMapSync, setLiveMapSync] = useState<{ connected: boolean; lastEventAt: number | null; lastRefetchAt: number | null }>({
     connected: false,
@@ -240,25 +237,14 @@ const CoordinatorMissions = () => {
   );
 
   const zoneOptions = useMemo(() => {
-    const zones = zonesQuery.data?.zones ?? [];
-    const currentZones = zones.filter((zone) => zone.activeMissions > 0);
-    const newZones = zones.filter((zone) => zone.activeMissions === 0);
-    const preferredZones = missionForm.targetAudience === "volunteer" ? currentZones : newZones;
-    return preferredZones.length ? preferredZones : zones;
-  }, [missionForm.targetAudience, zonesQuery.data?.zones]);
+    return zonesQuery.data?.zones ?? [];
+  }, [zonesQuery.data?.zones]);
 
   useEffect(() => {
     if (!missionForm.zoneId && zoneOptions.length) {
       setMissionForm((current) => ({ ...current, zoneId: zoneOptions[0].id }));
     }
   }, [missionForm.zoneId, zoneOptions]);
-
-  useEffect(() => {
-    if (missionForm.targetAudience === "volunteer") {
-      setShowNewZoneForm(false);
-      setNewZoneForm(defaultNewZoneForm);
-    }
-  }, [missionForm.targetAudience]);
 
   const candidatesQuery = useQuery({
     queryKey: ["coordinator-mission-candidates", missionForm.zoneId, missionForm.needType, missionForm.targetAudience],
@@ -334,6 +320,49 @@ const CoordinatorMissions = () => {
     },
   });
 
+  const missionMessageMutation = useMutation({
+    mutationFn: ({ missionId, message }: { missionId: string; message: string }) =>
+      sendCoordinatorMissionMessage(missionId, message),
+    onSuccess: () => {
+      toast.success("Message sent to responder");
+      setMessageText("");
+      setMessageMission(null);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to send message");
+    },
+  });
+
+  const openMessageDialog = (mission: CoordinatorMission) => {
+    setMessageMission(mission);
+    setMessageText("");
+  };
+
+  const missionRenotifyMutation = useMutation({
+    mutationFn: (missionId: string) => renotifyCoordinatorMission(missionId),
+    onSuccess: () => {
+      toast.success("Responder renotified");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to send reminder");
+    },
+  });
+
+  const closeMissionMutation = useMutation({
+    mutationFn: (missionId: string) => closeCoordinatorMission(missionId),
+    onSuccess: async (mission) => {
+      await queryClient.invalidateQueries({ queryKey: ["coordinator-missions"] });
+      await queryClient.invalidateQueries({ queryKey: ["coordinator-dashboard"] });
+      if (selectedMission?.id === mission.id) {
+        setSelectedMission(mission);
+      }
+      toast.success("Mission closed successfully");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to close mission");
+    },
+  });
+
   const missions = missionsQuery.data?.missions ?? [];
   const filteredMissions = missions.filter((mission) => {
     if (activeTab === "all") {
@@ -406,25 +435,10 @@ const CoordinatorMissions = () => {
   }, [liveMapSync.lastEventAt, liveMapSync.lastRefetchAt]);
 
   const createMission = async () => {
-    let zoneId = missionForm.zoneId;
-
-    if (missionForm.targetAudience === "fieldworker" && showNewZoneForm) {
-      if (!newZoneForm.name.trim()) {
-        toast.error("Add a zone name before creating the mission");
-        return;
-      }
-
-      const createdZone = await createCoordinatorZone({
-        name: newZoneForm.name.trim(),
-        ward: newZoneForm.ward.trim(),
-        city: newZoneForm.city.trim(),
-      });
-      zoneId = createdZone.id;
-      await queryClient.invalidateQueries({ queryKey: ["coordinator-zones"] });
-    }
+    const zoneId = missionForm.zoneId;
 
     if (!zoneId) {
-      toast.error("Select or create a zone before dispatching");
+      toast.error("Select a zone before dispatching");
       return;
     }
 
@@ -646,8 +660,28 @@ const CoordinatorMissions = () => {
                             </div>
 
                             <div className="flex gap-2">
-                              <Button variant="ghost" className="h-10 w-10 p-0 rounded-xl hover:bg-white hover:shadow-sm text-slate-400 hover:text-[#4F46E5]"><MessageSquare className="w-4 h-4" /></Button>
-                              <Button variant="ghost" className="h-10 w-10 p-0 rounded-xl hover:bg-white hover:shadow-sm text-slate-400 hover:text-[#4F46E5]"><Repeat className="w-4 h-4" /></Button>
+                              <Button
+                                variant="ghost"
+                                className="h-10 w-10 p-0 rounded-xl hover:bg-white hover:shadow-sm text-slate-400 hover:text-[#4F46E5]"
+                                disabled={!mission.assignedTo}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openMessageDialog(mission);
+                                }}
+                              >
+                                <MessageSquare className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                className="h-10 w-10 p-0 rounded-xl hover:bg-white hover:shadow-sm text-slate-400 hover:text-[#4F46E5]"
+                                disabled={!mission.assignedTo || mission.status === "completed" || missionRenotifyMutation.isPending}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  missionRenotifyMutation.mutate(mission.id);
+                                }}
+                              >
+                                <Repeat className="w-4 h-4" />
+                              </Button>
                             </div>
                           </div>
 
@@ -670,7 +704,14 @@ const CoordinatorMissions = () => {
                               >
                                 <FileText className="w-4 h-4" /> View Reports
                               </Button>
-                              <Button variant="outline" className="border-red-100 text-red-500 hover:bg-red-50 font-bold px-6">Close Mission</Button>
+                              <Button
+                                variant="outline"
+                                className="border-red-100 text-red-500 hover:bg-red-50 font-bold px-6"
+                                disabled={closeMissionMutation.isPending || mission.status === "completed"}
+                                onClick={() => closeMissionMutation.mutate(mission.id)}
+                              >
+                                Close Mission
+                              </Button>
                             </div>
                           </div>
                         </div>
@@ -910,7 +951,14 @@ const CoordinatorMissions = () => {
                                   </p>
                                   <p className="text-[11px] font-medium text-slate-400">{selectedMission.assignedVolunteerMatch || 0}% Match · {selectedMission.assignedVolunteerDistance || "Nearby"}</p>
                                 </div>
-                                <Button variant="outline" className="h-8 w-8 p-0 rounded-lg border-slate-200 text-[#4F46E5] hover:bg-white"><MessageSquare className="w-3.5 h-3.5" /></Button>
+                                <Button
+                                  variant="outline"
+                                  className="h-8 w-8 p-0 rounded-lg border-slate-200 text-[#4F46E5] hover:bg-white"
+                                  disabled={!selectedMission.assignedTo}
+                                  onClick={() => openMessageDialog(selectedMission)}
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                </Button>
                               </div>
                             </div>
                           </div>
@@ -1114,7 +1162,17 @@ const CoordinatorMissions = () => {
 
                 <div className="p-8 border-t border-slate-50 bg-white absolute bottom-0 left-0 right-0 flex gap-4">
                   <Button variant="outline" className="flex-1 border-slate-200 text-[#1A1A3D] font-bold py-7 rounded-2xl">Flag for Review</Button>
-                  <Button className="flex-1 bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] hover:opacity-90 text-white font-bold py-7 rounded-2xl shadow-lg">Close Mission & Finalize</Button>
+                  <Button
+                    className="flex-1 bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] hover:opacity-90 text-white font-bold py-7 rounded-2xl shadow-lg"
+                    disabled={!selectedMission || closeMissionMutation.isPending || selectedMission.status === "completed"}
+                    onClick={() => {
+                      if (selectedMission) {
+                        closeMissionMutation.mutate(selectedMission.id);
+                      }
+                    }}
+                  >
+                    Close Mission & Finalize
+                  </Button>
                 </div>
               </div>
             )}
@@ -1161,8 +1219,8 @@ const CoordinatorMissions = () => {
                     <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">MISSION AUDIENCE</label>
                     <div className="grid grid-cols-2 gap-3">
                       {[
-                        { id: "fieldworker", label: "Field Worker", helper: "Select new zones" },
-                        { id: "volunteer", label: "Volunteer", helper: "Show current zones" },
+                        { id: "fieldworker", label: "Field Worker", helper: "Select available zones" },
+                        { id: "volunteer", label: "Volunteer", helper: "Select available zones" },
                       ].map((audience) => (
                         <button
                           key={audience.id}
@@ -1200,7 +1258,7 @@ const CoordinatorMissions = () => {
                     </div>
                     <div className="space-y-2">
                       <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">
-                        {missionForm.targetAudience === "volunteer" ? "CURRENT ZONES" : "NEW ZONES"}
+                        ZONES
                       </label>
                       <select
                         className="w-full h-12 bg-slate-50/50 border border-slate-200 rounded-xl px-4 text-sm font-bold appearance-none text-slate-900"
@@ -1212,9 +1270,7 @@ const CoordinatorMissions = () => {
                           {zonesQuery.isLoading
                             ? "Loading zones..."
                             : zoneOptions.length
-                              ? missionForm.targetAudience === "volunteer"
-                                ? "Select a current zone"
-                                : "Select a new zone"
+                              ? "Select a zone"
                               : "No zones available"}
                         </option>
                         {zoneOptions.map((zone: CoordinatorZone) => (
@@ -1225,48 +1281,6 @@ const CoordinatorMissions = () => {
                       </select>
                       {!zonesQuery.isLoading && !zonesQuery.data?.zones.length && (
                         <p className="text-[11px] font-medium text-amber-600">No zones were returned for this NGO. Check zone seed data or the zones API.</p>
-                      )}
-                      {!zonesQuery.isLoading && zonesQuery.data?.zones.length > 0 && !zoneOptions.length && (
-                        <p className="text-[11px] font-medium text-slate-500">No {missionForm.targetAudience === "volunteer" ? "current" : "new"} zones found. Falling back to all zones.</p>
-                      )}
-
-                      {missionForm.targetAudience === "fieldworker" && (
-                        <div className="mt-3 rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
-                          <div className="flex items-center justify-between gap-4">
-                            <div>
-                              <p className="text-[11px] font-black uppercase tracking-widest text-[#4F46E5]">Need a new zone?</p>
-                              <p className="text-[11px] text-slate-500">Create a fresh zone and dispatch the mission into it.</p>
-                            </div>
-                            <Button type="button" variant="outline" className="h-9 rounded-full text-[#4F46E5] border-indigo-200 bg-white" onClick={() => setShowNewZoneForm((value) => !value)}>
-                              {showNewZoneForm ? "Use Existing Zone" : "Add New Zone"}
-                            </Button>
-                          </div>
-
-                          {showNewZoneForm && (
-                            <div className="grid grid-cols-1 gap-3">
-                              <Input
-                                placeholder="New zone name"
-                                value={newZoneForm.name}
-                                onChange={(event) => setNewZoneForm((current) => ({ ...current, name: event.target.value }))}
-                                className="h-11 rounded-xl bg-white"
-                              />
-                              <div className="grid grid-cols-2 gap-3">
-                                <Input
-                                  placeholder="Ward"
-                                  value={newZoneForm.ward}
-                                  onChange={(event) => setNewZoneForm((current) => ({ ...current, ward: event.target.value }))}
-                                  className="h-11 rounded-xl bg-white"
-                                />
-                                <Input
-                                  placeholder="City"
-                                  value={newZoneForm.city}
-                                  onChange={(event) => setNewZoneForm((current) => ({ ...current, city: event.target.value }))}
-                                  className="h-11 rounded-xl bg-white"
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </div>
                       )}
                     </div>
                   </div>
@@ -1637,6 +1651,67 @@ const CoordinatorMissions = () => {
                   <span>Visit: {selectedSourceReport.visitType || "first_visit"}</span>
                   <span>Submitted: {selectedSourceReport.createdAt ? new Date(selectedSourceReport.createdAt).toLocaleString() : "N/A"}</span>
                 </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!messageMission}
+        onOpenChange={(open) => {
+          if (!open) {
+            setMessageMission(null);
+            setMessageText("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Message responder</DialogTitle>
+          </DialogHeader>
+
+          {messageMission && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm">
+                <span className="font-bold text-[#1A1A3D]">
+                  {messageMission.assignedToName || (messageMission.targetAudience === "volunteer" ? "Assigned volunteer" : "Assigned field worker")}
+                </span>
+                <span className="text-slate-500"> · {messageMission.title}</span>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Message</p>
+                <Textarea
+                  value={messageText}
+                  onChange={(event) => setMessageText(event.target.value)}
+                  placeholder="Type an update or instruction..."
+                  className="min-h-[120px] rounded-xl border-slate-200"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setMessageMission(null);
+                    setMessageText("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] text-white"
+                  disabled={!messageText.trim() || missionMessageMutation.isPending}
+                  onClick={() =>
+                    missionMessageMutation.mutate({
+                      missionId: messageMission.id,
+                      message: messageText.trim(),
+                    })
+                  }
+                >
+                  {missionMessageMutation.isPending ? "Sending..." : "Send Message"}
+                </Button>
               </div>
             </div>
           )}

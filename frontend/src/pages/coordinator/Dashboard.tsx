@@ -25,17 +25,6 @@ const riskPalette: Record<CoordinatorTerrainZone["riskLevel"], string> = {
   low: "bg-success",
 };
 
-const fallbackInsightCards = [
-  {
-    variant: "critical" as const,
-    zone: "No live insight yet",
-    signals: [{ label: "Waiting for backend data", variant: "info" as const }],
-    description: "Connect a coordinator account to see the latest insights from the backend.",
-    sourceCount: "0 reports",
-    timestamp: "now",
-  },
-];
-
 const severityToVariant = (severity?: string) => {
   const value = (severity || "watch").toLowerCase();
   if (value === "critical") return "critical" as const;
@@ -131,11 +120,14 @@ export default function Dashboard() {
   const insights = dashboard?.recentInsights?.length ? dashboard.recentInsights : [];
   const insightCards = insights.map((insight: CoordinatorInsight, index: number) => ({
     variant: severityToVariant(insight.severity),
-    zone: insight.title || `Insight ${index + 1}`,
+    zone: insight.title || insight.zoneName || insight.zoneId || `Insight ${index + 1}`,
+    zoneId: insight.zoneId,
     signals: insight.recommendedAction ? [{ label: insight.recommendedAction, variant: "info" as const }] : undefined,
     description: insight.summary || "No summary available from backend.",
     sourceCount: insight.status ? `${insight.status} · ${insight.title || "insight"}` : undefined,
     timestamp: timeAgo(insight.generatedAt),
+    hasMission: insight.hasMission,
+    sourceReports: insight.sourceReports,
   }));
 
   return (
@@ -233,17 +225,26 @@ export default function Dashboard() {
                     Open Insights
                   </Link>
                 </div>
-                {(insightCards.length ? insightCards : fallbackInsightCards).map((insight, index) => (
-                  <GeminiInsightCard
-                    key={index}
-                    variant={insight.variant}
-                    zone={insight.zone}
-                    signals={insight.signals}
-                    description={insight.description}
-                    sourceCount={insight.sourceCount}
-                    timestamp={insight.timestamp}
-                  />
-                ))}
+                {insightCards.length ? (
+                  insightCards.map((insight, index) => (
+                    <GeminiInsightCard
+                      key={index}
+                      variant={insight.variant}
+                      zone={insight.zone}
+                      zoneId={insight.zoneId}
+                      signals={insight.signals}
+                      description={insight.description}
+                      sourceCount={insight.sourceCount}
+                      timestamp={insight.timestamp}
+                      hasMission={insight.hasMission}
+                      sourceReports={insight.sourceReports}
+                    />
+                  ))
+                ) : (
+                  <div className="rounded-card border border-dashed bg-card p-4 text-xs text-muted-foreground">
+                    No Gemini insights available yet.
+                  </div>
+                )}
               </div>
 
               <div className="space-y-3">
