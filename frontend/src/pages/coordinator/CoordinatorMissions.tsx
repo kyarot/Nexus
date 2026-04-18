@@ -26,7 +26,6 @@ import {
   AlertCircle,
   AlertTriangle,
   Activity,
-  Bell,
   Box,
   CheckCircle2,
   ChevronRight,
@@ -124,6 +123,7 @@ const defaultMissionForm: CoordinatorMissionCreatePayload = {
 
 const CoordinatorMissions = () => {
   const [activeTab, setActiveTab] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [showCreateMission, setShowCreateMission] = useState(false);
   const [creationStep, setCreationStep] = useState(1);
   const [selectedVolunteerForMission, setSelectedVolunteerForMission] = useState<CoordinatorMissionCandidate | null>(null);
@@ -383,7 +383,26 @@ const CoordinatorMissions = () => {
     return true;
   });
 
-  const pendingVolunteerMissions = filteredMissions.filter(
+  const searchedMissions = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
+      return filteredMissions;
+    }
+    return filteredMissions.filter((mission) => {
+      const parts = [
+        mission.title,
+        mission.zoneName,
+        mission.zoneId,
+        mission.needType,
+        mission.assignedToName,
+        mission.id,
+        mission.targetAudience,
+      ];
+      return parts.some((value) => String(value || "").toLowerCase().includes(query));
+    });
+  }, [filteredMissions, searchQuery]);
+
+  const pendingVolunteerMissions = searchedMissions.filter(
     (mission) => mission.status === "pending" && mission.targetAudience === "volunteer" && !mission.assignedTo,
   );
 
@@ -475,11 +494,12 @@ const CoordinatorMissions = () => {
               <div className="flex items-center gap-4">
                 <div className="relative w-64">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <Input placeholder="Search missions..." className="pl-10 h-11 bg-white border-slate-200 rounded-xl" />
-                </div>
-                <div className="relative w-11 h-11 bg-white rounded-xl border border-slate-200 flex items-center justify-center cursor-pointer">
-                  <Bell className="w-5 h-5 text-slate-600" />
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white">3</span>
+                  <Input
+                    placeholder="Search missions..."
+                    className="pl-10 h-11 bg-white border-slate-200 rounded-xl"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                  />
                 </div>
                 <Button
                   onClick={() => setShowCreateMission(true)}
@@ -534,7 +554,7 @@ const CoordinatorMissions = () => {
                   <h3 className="text-lg font-bold text-[#1A1A3D]">Recent Activity <span className="text-slate-300 ml-2 font-medium text-sm">• Updated live</span></h3>
                 </div>
 
-                {filteredMissions.map((mission) => {
+                {searchedMissions.map((mission) => {
                   const volunteerName = mission.assignedToName || "Unassigned";
                   const mergedReports = mission.mergedFrom?.reports ?? mission.sourceReportIds.length;
                   const mergedNGOs = mission.mergedFrom?.ngos ?? (mission.sourceNgoIds.length || 1);
