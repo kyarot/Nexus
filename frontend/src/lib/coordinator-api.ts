@@ -1184,3 +1184,170 @@ export const updateVolunteerProfile = (payload: VolunteerProfilePatchPayload) =>
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+
+export interface CommunityEchoOverviewResponse {
+  ngoId: string;
+  weekStart: string;
+  weekEnd: string;
+  summary: {
+    totalMissions: number;
+    activeMissions: number;
+    completedMissions: number;
+    familiesHelped: number;
+    weekFamiliesHelped: number;
+    totalReports: number;
+    linkedAudience: number;
+    scheduledCampaigns: number;
+    sentCampaigns: number;
+    responseCount: number;
+    positiveResponsePercent: number;
+  };
+  zones: Array<{
+    zoneId: string;
+    zoneName: string;
+    linkedReports: number;
+  }>;
+  responseAnalytics: {
+    total: number;
+    positivePercent: number;
+    tags: Array<{ label: string; count: number }>;
+    latest: Array<{
+      id: string;
+      message: string;
+      sentiment: string;
+      createdAt?: string | null;
+      referenceNumber?: string;
+    }>;
+  };
+  campaigns: Array<{
+    id: string;
+    status: string;
+    channel: string;
+    language: string;
+    tone: string;
+    recipientsCount: number;
+    sentCount: number;
+    failedCount: number;
+    sendAt?: string | null;
+    createdAt?: string | null;
+    weekStart?: string;
+    weekEnd?: string;
+    draftTitle?: string;
+  }>;
+  cleanup?: Record<string, number>;
+}
+
+export interface CommunityEchoGenerateDraftPayload {
+  weekStart?: string;
+  weekEnd?: string;
+  language: string;
+  tone: string;
+  missionIds?: string[];
+  zoneIds?: string[];
+  coordinatorNotes?: string;
+}
+
+export interface CommunityEchoDraftResponse {
+  draftTitle: string;
+  draftMessage: string;
+  language: string;
+  tone: string;
+  audienceCount: number;
+  missionCount: number;
+  zoneCount: number;
+  weekStart: string;
+  weekEnd: string;
+  highlights: string[];
+}
+
+export interface CommunityEchoScheduleCampaignPayload {
+  weekStart?: string;
+  weekEnd?: string;
+  language: string;
+  tone: string;
+  draftTitle?: string;
+  draftMessage: string;
+  missionIds?: string[];
+  zoneIds?: string[];
+  sendAt?: string;
+}
+
+export interface CommunityEchoScheduleCampaignResponse {
+  campaignId: string;
+  status: string;
+  sendAt: string;
+  recipientsCount: number;
+  dispatch: {
+    sent: number;
+    failed: number;
+    total: number;
+  };
+}
+
+export interface CommunityEchoResponseAnalytics {
+  summary: {
+    total: number;
+    positive: number;
+    neutral: number;
+    negative: number;
+    positivePercent: number;
+    tags: Array<{ label: string; count: number }>;
+  };
+  responses: Array<{
+    id: string;
+    message: string;
+    sentiment: string;
+    referenceNumber?: string;
+    missionId?: string;
+    zoneId?: string;
+    createdAt?: string | null;
+  }>;
+}
+
+export const getCommunityEchoOverview = (weekStart?: string, weekEnd?: string) => {
+  const params = new URLSearchParams();
+  if (weekStart) {
+    params.set("weekStart", weekStart);
+  }
+  if (weekEnd) {
+    params.set("weekEnd", weekEnd);
+  }
+  const suffix = params.toString();
+  return request<CommunityEchoOverviewResponse>(`/coordinator/community-echo/overview${suffix ? `?${suffix}` : ""}`);
+};
+
+export const generateCommunityEchoDraft = (payload: CommunityEchoGenerateDraftPayload) =>
+  request<CommunityEchoDraftResponse>("/coordinator/community-echo/draft/generate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+export const scheduleCommunityEchoCampaign = (payload: CommunityEchoScheduleCampaignPayload) =>
+  request<CommunityEchoScheduleCampaignResponse>("/coordinator/community-echo/campaigns/schedule", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+export const dispatchDueCommunityEchoCampaigns = (limit = 5) =>
+  request<{ processed: number; campaigns: Array<{ campaignId: string; sent: number; failed: number; total: number }> }>(
+    "/coordinator/community-echo/campaigns/dispatch-due",
+    {
+      method: "POST",
+      body: JSON.stringify({ limit }),
+    },
+  );
+
+export const getCommunityEchoResponses = (params?: { limit?: number; missionId?: string; zoneId?: string }) => {
+  const query = new URLSearchParams();
+  if (typeof params?.limit === "number") {
+    query.set("limit", String(params.limit));
+  }
+  if (params?.missionId) {
+    query.set("missionId", params.missionId);
+  }
+  if (params?.zoneId) {
+    query.set("zoneId", params.zoneId);
+  }
+  const suffix = query.toString();
+  return request<CommunityEchoResponseAnalytics>(`/coordinator/community-echo/responses${suffix ? `?${suffix}` : ""}`);
+};

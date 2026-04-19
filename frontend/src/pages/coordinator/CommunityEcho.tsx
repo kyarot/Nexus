@@ -1,257 +1,543 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Sparkles, Users, MessageSquare, Send, Calendar, Clock, Heart, Info, MoreVertical, Smartphone, LayoutGrid, BarChart3, Bell } from "lucide-react";
-import { cn } from "@/lib/utils";
+import {
+  BarChart3,
+  Calendar,
+  Clock,
+  Heart,
+  RefreshCcw,
+  Send,
+  Sparkles,
+  Users,
+} from "lucide-react";
+import {
+  dispatchDueCommunityEchoCampaigns,
+  generateCommunityEchoDraft,
+  getCommunityEchoOverview,
+  getCommunityEchoResponses,
+  getCoordinatorMissions,
+  getImpactReportSummary,
+  scheduleCommunityEchoCampaign,
+  type CommunityEchoOverviewResponse,
+  type CommunityEchoResponseAnalytics,
+  type CoordinatorMissionListResponse,
+  type ImpactReportExport,
+} from "@/lib/coordinator-api";
+import { useToast } from "@/hooks/use-toast";
 
-const languages = ["Kannada", "Hindi", "Telugu", "English"];
-const tones = [
-  { label: "Warm & encouraging", icon: Heart },
-  { label: "Informational", icon: Info },
-  { label: "Urgent", icon: Info }
+const BROADCAST_LANGUAGE_STORAGE_KEY = "nexus_broadcast_language";
+
+const LANGUAGE_OPTIONS = [
+  { code: "en", label: "English" },
+  { code: "kn", label: "Kannada" },
+  { code: "hi", label: "Hindi" },
+  { code: "te", label: "Telugu" },
 ];
 
+const TONE_OPTIONS = [
+  { value: "warm", label: "Warm & encouraging", icon: Heart },
+  { value: "informational", label: "Informational", icon: BarChart3 },
+  { value: "urgent", label: "Urgent", icon: Clock },
+];
+
+const toDateInput = (value: Date) => value.toISOString().slice(0, 10);
+
+const startOfWeek = () => {
+  const today = new Date();
+  const offset = (today.getDay() + 6) % 7;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - offset);
+  return monday;
+};
+
+const endOfWeek = () => {
+  const monday = startOfWeek();
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return sunday;
+};
+
+const toDateTimeLocalDefault = () => {
+  const nextHour = new Date();
+  nextHour.setMinutes(0, 0, 0);
+  nextHour.setHours(nextHour.getHours() + 1);
+  const year = nextHour.getFullYear();
+  const month = `${nextHour.getMonth() + 1}`.padStart(2, "0");
+  const day = `${nextHour.getDate()}`.padStart(2, "0");
+  const hours = `${nextHour.getHours()}`.padStart(2, "0");
+  const minutes = `${nextHour.getMinutes()}`.padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return parsed.toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+};
+
+const sentimentBadgeClass = (sentiment: string) => {
+  if (sentiment === "positive") return "bg-emerald-50 text-emerald-700";
+  if (sentiment === "negative") return "bg-red-50 text-red-700";
+  return "bg-slate-100 text-slate-600";
+};
+
 export default function CommunityEcho() {
-  const [selectedLang, setSelectedLang] = useState("Kannada");
-  const [selectedTone, setSelectedTone] = useState("Warm & encouraging");
+  const { toast } = useToast();
+
+  const [weekStart, setWeekStart] = useState(toDateInput(startOfWeek()));
+  const [weekEnd, setWeekEnd] = useState(toDateInput(endOfWeek()));
+
+  const [language, setLanguage] = useState(() => {
+    if (typeof window === "undefined") {
+      return "kn";
+    }
+
+    const stored = window.localStorage.getItem(BROADCAST_LANGUAGE_STORAGE_KEY);
+    const valid = LANGUAGE_OPTIONS.some((option) => option.code === stored);
+    return valid && stored ? stored : "kn";
+  });
+  const [tone, setTone] = useState("warm");
+  const [sendAt, setSendAt] = useState(toDateTimeLocalDefault());
+  const [coordinatorNotes, setCoordinatorNotes] = useState("");
+
+  const [overview, setOverview] = useState<CommunityEchoOverviewResponse | null>(null);
+  const [responses, setResponses] = useState<CommunityEchoResponseAnalytics | null>(null);
+  const [impactSummary, setImpactSummary] = useState<ImpactReportExport | null>(null);
+  const [missions, setMissions] = useState<CoordinatorMissionListResponse | null>(null);
+
+  const [draftTitle, setDraftTitle] = useState("Weekly Community Echo");
+  const [draftMessage, setDraftMessage] = useState("");
+  const [draftHighlights, setDraftHighlights] = useState<string[]>([]);
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const [dispatching, setDispatching] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const loadDashboard = async (asRefresh = false) => {
+    if (asRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+    setErrorMessage(null);
+
+    try {
+      const [overviewPayload, responsePayload, impactPayload, missionPayload] = await Promise.all([
+        getCommunityEchoOverview(weekStart, weekEnd),
+        getCommunityEchoResponses({ limit: 30 }),
+        getImpactReportSummary("month").catch(() => null),
+        getCoordinatorMissions().catch(() => null),
+      ]);
+
+      setOverview(overviewPayload);
+      setResponses(responsePayload);
+      setImpactSummary(impactPayload);
+      setMissions(missionPayload);
+
+      if (!draftMessage.trim()) {
+        setDraftMessage(
+          `This week we completed ${overviewPayload.summary.completedMissions} missions and reached ${overviewPayload.summary.weekFamiliesHelped} families. Thank you for your continued support.`,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load Community Echo data";
+      setErrorMessage(message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [weekStart, weekEnd]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(BROADCAST_LANGUAGE_STORAGE_KEY, language);
+    }
+  }, [language]);
+
+  const sentimentStats = responses?.summary;
+  const positivePercent = sentimentStats?.positivePercent ?? overview?.responseAnalytics.positivePercent ?? 0;
+
+  const missionSuccessRate = useMemo(() => {
+    const value = impactSummary?.metrics?.missionSuccessRate;
+    if (typeof value === "number") {
+      return Math.round(value);
+    }
+    if (!overview) {
+      return 0;
+    }
+    const total = overview.summary.totalMissions;
+    if (total <= 0) {
+      return 0;
+    }
+    return Math.round((overview.summary.completedMissions / total) * 100);
+  }, [impactSummary, overview]);
+
+  const handleGenerateDraft = async () => {
+    setGenerating(true);
+    try {
+      const payload = await generateCommunityEchoDraft({
+        weekStart,
+        weekEnd,
+        language,
+        tone,
+        coordinatorNotes: coordinatorNotes.trim() || undefined,
+      });
+      setDraftTitle(payload.draftTitle);
+      setDraftMessage(payload.draftMessage);
+      setDraftHighlights(payload.highlights);
+      toast({
+        title: "Draft generated",
+        description: `Gemini prepared a ${payload.language.toUpperCase()} draft for ${payload.audienceCount} linked contacts.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Draft generation failed",
+        description: error instanceof Error ? error.message : "Unable to generate draft",
+        variant: "destructive",
+      });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleSchedule = async () => {
+    if (!draftMessage.trim()) {
+      toast({
+        title: "Draft required",
+        description: "Generate or write a draft message before scheduling.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setScheduling(true);
+    try {
+      const sendAtIso = sendAt ? new Date(sendAt).toISOString() : undefined;
+      const payload = await scheduleCommunityEchoCampaign({
+        weekStart,
+        weekEnd,
+        language,
+        tone,
+        draftTitle: draftTitle.trim() || undefined,
+        draftMessage,
+        sendAt: sendAtIso,
+      });
+
+      toast({
+        title: "Campaign scheduled",
+        description: `Campaign ${payload.campaignId} prepared for ${payload.recipientsCount} recipients on dummy SMS adapter.`,
+      });
+
+      await loadDashboard(true);
+    } catch (error) {
+      toast({
+        title: "Scheduling failed",
+        description: error instanceof Error ? error.message : "Unable to schedule campaign",
+        variant: "destructive",
+      });
+    } finally {
+      setScheduling(false);
+    }
+  };
+
+  const handleDispatchDue = async () => {
+    setDispatching(true);
+    try {
+      const payload = await dispatchDueCommunityEchoCampaigns(10);
+      toast({
+        title: "Dispatch run complete",
+        description: `${payload.processed} due campaign(s) processed via dummy SMS delivery.`,
+      });
+      await loadDashboard(true);
+    } catch (error) {
+      toast({
+        title: "Dispatch failed",
+        description: error instanceof Error ? error.message : "Unable to dispatch due campaigns",
+        variant: "destructive",
+      });
+    } finally {
+      setDispatching(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col h-full bg-[#F8F9FE]">
+        <DashboardTopBar breadcrumb="Community Echo" />
+        <div className="flex-1 flex items-center justify-center text-slate-500 font-bold">Loading live Community Echo data...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-[#F8F9FE]">
-      <DashboardTopBar breadcrumb="Community Echo" />
-      
-      <div className="flex-1 overflow-y-auto p-8 space-y-8">
-        {/* Header Section */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-[2.5rem] font-bold text-[#1A1A3D] tracking-tight">Community Echo</h1>
-            <p className="text-lg text-slate-500 mt-1 font-medium">Friday broadcasts to your zones</p>
-            <p className="text-sm text-slate-400 font-medium">The only platform that reports back to communities — not just about them</p>
-          </div>
-          <Button className="bg-[#5A57FF] hover:bg-[#4845E0] text-white font-bold px-8 py-6 rounded-2xl shadow-lg shadow-indigo-100 flex gap-2">
-            <Clock className="w-5 h-5" /> Schedule Next Broadcast
+      <DashboardTopBar
+        breadcrumb="Community Echo"
+        rightElement={
+          <Button variant="outline" size="sm" onClick={() => void loadDashboard(true)} disabled={refreshing}>
+            <RefreshCcw className="w-4 h-4 mr-2" />
+            {refreshing ? "Refreshing" : "Refresh"}
           </Button>
+        }
+      />
+
+      <div className="flex-1 overflow-y-auto p-8 space-y-8">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-bold text-[#1A1A3D] tracking-tight">Community Echo</h1>
+            <p className="text-slate-500 font-medium mt-1">Real-time mission-linked broadcasts and community response loop</p>
+            <p className="text-xs text-slate-400 font-semibold mt-2">Dummy SMS provider enabled. Broadcast audience is linked by mission and zone scope.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge className="bg-indigo-50 text-indigo-700 border-none">SMS Adapter: dummy-static</Badge>
+            <Button variant="outline" onClick={handleDispatchDue} disabled={dispatching}>
+              <Send className="w-4 h-4 mr-2" />
+              {dispatching ? "Dispatching" : "Run Due Dispatch"}
+            </Button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Broadcaster Main Card */}
-          <div className="lg:col-span-2 bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-100 relative">
-            <div className="flex items-center justify-between mb-8">
+        {errorMessage ? (
+          <div className="p-4 rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm font-medium">{errorMessage}</div>
+        ) : null}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="bg-white rounded-2xl p-5 border border-slate-100">
+            <p className="text-[10px] tracking-widest font-black text-slate-400 uppercase">Linked Audience</p>
+            <p className="text-3xl font-black text-[#1A1A3D] mt-2">{overview?.summary.linkedAudience ?? 0}</p>
+            <p className="text-xs text-slate-500 mt-1">Contacts linked through missions and zones</p>
+          </div>
+          <div className="bg-white rounded-2xl p-5 border border-slate-100">
+            <p className="text-[10px] tracking-widest font-black text-slate-400 uppercase">Weekly Families Helped</p>
+            <p className="text-3xl font-black text-[#1A1A3D] mt-2">{overview?.summary.weekFamiliesHelped ?? 0}</p>
+            <p className="text-xs text-slate-500 mt-1">Derived from mission outcomes this week</p>
+          </div>
+          <div className="bg-white rounded-2xl p-5 border border-slate-100">
+            <p className="text-[10px] tracking-widest font-black text-slate-400 uppercase">Mission Success Rate</p>
+            <p className="text-3xl font-black text-[#1A1A3D] mt-2">{missionSuccessRate}%</p>
+            <p className="text-xs text-slate-500 mt-1">Based on completed missions from impact summary</p>
+          </div>
+          <div className="bg-white rounded-2xl p-5 border border-slate-100">
+            <p className="text-[10px] tracking-widest font-black text-slate-400 uppercase">Positive Responses</p>
+            <p className="text-3xl font-black text-[#1A1A3D] mt-2">{positivePercent}%</p>
+            <p className="text-xs text-slate-500 mt-1">Live community feedback from tracking portal</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+          <div className="xl:col-span-2 bg-white rounded-3xl p-8 border border-slate-100 shadow-sm space-y-6">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
               <div>
-                <h2 className="text-2xl font-bold text-[#1A1A3D]">Week 14 Broadcast — Hebbal North</h2>
-                <div className="flex items-center gap-2 mt-2 text-slate-500 font-medium">
-                  <Users className="w-4 h-4" />
-                  <span className="text-sm">2,847 registered households in Hebbal North</span>
-                </div>
+                <h2 className="text-2xl font-bold text-[#1A1A3D]">Broadcast Composer</h2>
+                <p className="text-sm text-slate-500">Coordinator can edit Gemini draft before scheduling.</p>
               </div>
-              <Button variant="ghost" size="icon" className="text-slate-400">
-                <MoreVertical className="w-5 h-5" />
-              </Button>
+              <div className="flex items-center gap-2 text-xs text-slate-500 font-semibold">
+                <Calendar className="w-4 h-4" />
+                {weekStart} to {weekEnd}
+              </div>
             </div>
 
-            <div className="space-y-8">
-              {/* Language Cluster */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-4">Language Cluster</p>
-                <div className="flex gap-3">
-                  {languages.map(l => (
+                <p className="text-xs font-black tracking-widest text-slate-400 uppercase mb-2">Week Start</p>
+                <Input type="date" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
+              </div>
+              <div>
+                <p className="text-xs font-black tracking-widest text-slate-400 uppercase mb-2">Week End</p>
+                <Input type="date" value={weekEnd} onChange={(e) => setWeekEnd(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-black tracking-widest text-slate-400 uppercase mb-2">Broadcast Language</p>
+                <select
+                  className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                >
+                  {LANGUAGE_OPTIONS.map((option) => (
+                    <option key={option.code} value={option.code}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <p className="text-xs font-black tracking-widest text-slate-400 uppercase mb-2">Tone</p>
+                <div className="flex gap-2 flex-wrap">
+                  {TONE_OPTIONS.map((option) => (
                     <Button
-                      key={l}
-                      onClick={() => setSelectedLang(l)}
-                      variant={selectedLang === l ? "default" : "secondary"}
-                      className={cn(
-                        "rounded-2xl px-6 py-2 h-auto font-bold transition-all",
-                        selectedLang === l ? "bg-[#5A57FF] text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                      )}
+                      key={option.value}
+                      type="button"
+                      variant={tone === option.value ? "default" : "outline"}
+                      className={tone === option.value ? "bg-[#4F46E5] hover:bg-[#4338CA]" : ""}
+                      onClick={() => setTone(option.value)}
                     >
-                      {l}
+                      <option.icon className="w-4 h-4 mr-2" />
+                      {option.label}
                     </Button>
                   ))}
                 </div>
               </div>
+            </div>
 
-              {/* Echo Tone */}
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-4">Echo Tone</p>
-                <div className="flex gap-3">
-                  {tones.map(t => (
-                    <Button
-                      key={t.label}
-                      onClick={() => setSelectedTone(t.label)}
-                      className={cn(
-                        "rounded-2xl px-6 py-5 h-auto font-bold border-2 transition-all flex gap-2",
-                        selectedTone === t.label 
-                          ? "bg-white border-[#5A57FF] text-[#5A57FF] shadow-md shadow-indigo-50" 
-                          : "bg-slate-50 border-transparent text-slate-400 hover:bg-slate-100"
-                      )}
-                    >
-                      <t.icon className={cn("w-4 h-4", t.label === "Urgent" && "text-red-400")} />
-                      {t.label}
-                    </Button>
+            <div>
+              <p className="text-xs font-black tracking-widest text-slate-400 uppercase mb-2">Coordinator Notes (Optional)</p>
+              <Textarea
+                value={coordinatorNotes}
+                onChange={(e) => setCoordinatorNotes(e.target.value)}
+                placeholder="Add local context, specific requests, or reminders for this week's broadcast."
+                className="min-h-[90px]"
+              />
+            </div>
+
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <Button type="button" onClick={handleGenerateDraft} disabled={generating}>
+                <Sparkles className="w-4 h-4 mr-2" />
+                {generating ? "Generating Draft" : "Generate with Gemini"}
+              </Button>
+              <div className="text-xs text-slate-500 font-semibold">
+                Audience preview: {overview?.summary.linkedAudience ?? 0} recipients
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <Input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} placeholder="Draft title" />
+              <Textarea
+                value={draftMessage}
+                onChange={(e) => setDraftMessage(e.target.value)}
+                className="min-h-[180px]"
+                placeholder="Draft broadcast message"
+              />
+              {draftHighlights.length > 0 ? (
+                <div className="flex gap-2 flex-wrap">
+                  {draftHighlights.map((item, index) => (
+                    <Badge key={`${item}-${index}`} className="bg-indigo-50 text-indigo-700 border-none">
+                      {item}
+                    </Badge>
                   ))}
                 </div>
-              </div>
+              ) : null}
+            </div>
 
-              {/* Message Box */}
-              <div className="relative group">
-                <div className="absolute -top-3 left-4 bg-white px-3 flex items-center gap-1.5 text-[8px] font-black text-[#5A57FF] border border-blue-100 rounded-full py-1 z-10 shadow-sm">
-                  <Sparkles className="w-2.5 h-2.5" /> AI GENERATED PREVIEW
-                </div>
-                <div className="bg-[#F8FAFF] border-2 border-[#E0E7FF] rounded-[2rem] p-8 pt-10">
-                  <p className="text-lg text-[#1A1A3D] leading-relaxed font-medium">
-                    This week in your neighborhood: <span className="text-[#5A57FF] font-bold">34 families</span> received food support. 
-                    A counsellor visits Tuesday 3pm at Community Center. Your area improved 
-                    from <span className="font-bold">61 → 68</span> this week. Thank you.
-                  </p>
-                  <div className="mt-6 flex justify-end">
-                    <button className="flex items-center gap-2 text-[10px] font-black text-[#5A57FF] hover:underline uppercase tracking-widest">
-                      <Sparkles className="w-3.5 h-3.5" /> Regenerate with Gemini
-                    </button>
-                  </div>
-                </div>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+              <div>
+                <p className="text-xs font-black tracking-widest text-slate-400 uppercase mb-2">Schedule Send Time</p>
+                <Input type="datetime-local" value={sendAt} onChange={(e) => setSendAt(e.target.value)} />
+                <p className="mt-2 text-[11px] text-slate-500 font-semibold">
+                  Broadcast will be sent in <span className="text-[#1A1A3D]">{LANGUAGE_OPTIONS.find((option) => option.code === language)?.label || "Selected language"}</span>.
+                </p>
               </div>
-
-              {/* Channels */}
-              <div className="flex gap-4">
-                {[
-                  { id: "whatsapp", label: "WhatsApp", icon: MessageSquare, active: true },
-                  { id: "sms", label: "SMS", icon: Smartphone, active: false },
-                  { id: "push", label: "Push", icon: Bell, active: true }
-                ].map((channel) => (
-                  <div key={channel.id} className="flex-1 bg-slate-50 rounded-2xl p-5 flex items-center justify-between border border-transparent hover:border-slate-100 transition-all">
-                    <div className="flex items-center gap-3">
-                      <div className={cn("p-2 rounded-xl", channel.active ? "bg-white text-[#5A57FF]" : "bg-slate-100 text-slate-400")}>
-                        <channel.icon className="w-4 h-4" />
-                      </div>
-                      <span className="font-bold text-[#1A1A3D] text-sm">{channel.label}</span>
-                    </div>
-                    <Switch defaultChecked={channel.active} className="data-[state=checked]:bg-[#5A57FF]" />
-                  </div>
-                ))}
-              </div>
-
-              {/* Action */}
-              <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-                <button className="text-sm font-bold text-slate-500 hover:text-[#1A1A3D] flex gap-2 items-center">
-                  <LayoutGrid className="w-4 h-4" /> Preview in {selectedLang}
-                </button>
-                <Button className="bg-[#5A57FF] hover:bg-[#4845E0] text-white font-bold px-12 py-7 rounded-2xl text-md">
-                  Schedule Broadcast
-                </Button>
-              </div>
+              <Button className="bg-[#4F46E5] hover:bg-[#4338CA]" onClick={handleSchedule} disabled={scheduling}>
+                {scheduling ? "Scheduling" : "Schedule Broadcast"}
+              </Button>
             </div>
           </div>
 
-          <div className="space-y-8">
-            {/* Community Response Card */}
-            <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-100">
-              <h2 className="text-xl font-bold text-[#1A1A3D] mb-6">Community Response</h2>
-              
-              <div className="space-y-2 mb-8">
-                <div className="flex justify-between items-end">
-                  <span className="text-[#10B981] font-black text-sm">87% positive responses</span>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">This Week</span>
+          <div className="space-y-6">
+            <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm">
+              <h3 className="text-lg font-bold text-[#1A1A3D] mb-4">Community Response</h3>
+              <div className="space-y-2 mb-5">
+                <div className="flex justify-between text-xs font-semibold">
+                  <span className="text-emerald-600">{positivePercent}% positive</span>
+                  <span className="text-slate-400">{responses?.summary.total ?? 0} responses</span>
                 </div>
-                <div className="h-3 bg-slate-50 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#10B981] rounded-full" style={{ width: '87%' }} />
+                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.max(0, Math.min(100, positivePercent))}%` }} />
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2 mb-10">
-                {[
-                  { label: "Grateful", active: false, color: "text-[#10B981] bg-[#ECFDF5]" },
-                  { label: "Helpful", active: true, color: "bg-[#5A57FF] text-white" },
-                  { label: "Timing", active: false, color: "bg-slate-50 text-slate-400" },
-                  { label: "Food Support", active: true, color: "bg-[#E0E7FF] text-[#3730A3]" },
-                  { label: "Clear", active: false, color: "bg-slate-50 text-slate-400" },
-                  { label: "Essential", active: true, color: "bg-amber-50 text-amber-600" }
-                ].map((tag, i) => (
-                  <Badge key={i} className={cn("px-5 py-3 rounded-2xl font-bold border-none transition-transform hover:scale-105", tag.color)}>
-                    {tag.label}
+              <div className="flex gap-2 flex-wrap mb-5">
+                {(responses?.summary.tags || overview?.responseAnalytics.tags || []).slice(0, 6).map((tag) => (
+                  <Badge key={tag.label} className="bg-slate-100 text-slate-700 border-none">
+                    {tag.label} ({tag.count})
                   </Badge>
                 ))}
               </div>
 
-              <div className="space-y-6">
-                {[
-                  { text: "The update about the counsellor was very helpful for my mother. We didn't know about the center before this.", author: "VERIFIED RESIDENT" },
-                  { text: "Thank you for showing us the impact. Knowing 34 families were helped makes us feel proud of our zone.", author: "ANONYMOUS MEMBER" }
-                ].map((quote, i) => (
-                  <div key={i} className="bg-slate-50 rounded-[2rem] p-6 italic relative overflow-hidden group">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-[#5A57FF] opacity-20 group-hover:opacity-100 transition-opacity" />
-                    <p className="text-sm text-[#1A1A3D] font-medium leading-relaxed">"{quote.text}"</p>
-                    <p className="text-[10px] font-black tracking-widest text-slate-400 mt-4 uppercase">— {quote.author}</p>
+              <div className="space-y-3">
+                {(responses?.responses || overview?.responseAnalytics.latest || []).slice(0, 3).map((entry) => (
+                  <div key={entry.id} className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <Badge className={sentimentBadgeClass(entry.sentiment || "neutral")}>{entry.sentiment || "neutral"}</Badge>
+                      <span className="text-[10px] text-slate-400 font-semibold">{formatDateTime(entry.createdAt)}</span>
+                    </div>
+                    <p className="text-sm text-slate-700 leading-relaxed">{entry.message}</p>
                   </div>
                 ))}
+                {!(responses?.responses?.length || overview?.responseAnalytics.latest?.length) ? (
+                  <p className="text-sm text-slate-500">No public feedback submitted yet.</p>
+                ) : null}
               </div>
             </div>
 
-            {/* Impact Score Card */}
-            <div className="bg-gradient-to-br from-[#4F46E5] to-[#3730A3] rounded-[2.5rem] p-8 text-white shadow-lg overflow-hidden relative">
-              <div className="relative z-10">
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60">Global Impact Score</p>
-                <h3 className="text-6xl font-black mt-4">72.4</h3>
-                <p className="text-xs font-bold mt-4 text-[#10B981] flex items-center gap-1">
-                   +4.2 points from last broadcast
-                </p>
+            <div className="bg-gradient-to-br from-[#4F46E5] to-[#3730A3] rounded-3xl p-6 text-white">
+              <p className="text-[10px] tracking-widest uppercase font-black opacity-70">Operational Snapshot</p>
+              <p className="text-3xl font-black mt-2">{overview?.summary.activeMissions ?? 0} Active Missions</p>
+              <p className="text-sm mt-2 opacity-90">{missions?.pending ?? 0} pending · {missions?.completed ?? 0} completed</p>
+              <div className="mt-4 text-xs opacity-90">
+                Reports linked this week: {overview?.summary.totalReports ?? 0}
               </div>
-              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 blur-3xl" />
             </div>
           </div>
         </div>
 
-        {/* Broadcast History Table */}
-        <div className="bg-white rounded-[2.5rem] p-10 shadow-sm border border-slate-100">
-          <div className="flex items-center justify-between mb-10">
+        <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm">
+          <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-[#1A1A3D]">Broadcast History</h2>
-            <Button variant="ghost" className="text-[#5A57FF] font-bold text-sm">
-              View Full Archive <Send className="ml-2 w-4 h-4" />
-            </Button>
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+              <Users className="w-4 h-4" />
+              {overview?.campaigns.length ?? 0} campaigns
+            </div>
           </div>
 
           <Table>
             <TableHeader>
-              <TableRow className="border-none hover:bg-transparent">
-                <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400 pb-6">Date</TableHead>
-                <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400 pb-6">Zone</TableHead>
-                <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400 pb-6">Recipients</TableHead>
-                <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400 pb-6 text-center">Open Rate</TableHead>
-                <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400 pb-6">Tone</TableHead>
-                <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400 pb-6 text-right">Actions</TableHead>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Window</TableHead>
+                <TableHead>Recipients</TableHead>
+                <TableHead>Sent</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Tone</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {[
-                { date: "May 19, 2024", zone: "Hebbal North", recipients: "2,842", rate: "92%", color: "#10B981", tone: "Warm", status: "success" },
-                { date: "May 12, 2024", zone: "Hebbal North", recipients: "2,810", rate: "89%", color: "#10B981", tone: "Informational", status: "success" },
-                { date: "May 05, 2024", zone: "Indiranagar East", recipients: "4,120", rate: "74%", color: "#F59E0B", tone: "Urgent", status: "warning" }
-              ].map((row, i) => (
-                <TableRow key={i} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
-                  <TableCell className="py-6 font-bold text-slate-500 group-hover:text-[#1A1A3D]">{row.date}</TableCell>
-                  <TableCell className="py-6">
-                    <div className="flex items-center gap-2">
-                       <span className="w-2 h-2 rounded-full" style={{ backgroundColor: row.status === "warning" ? "#F59E0B" : "#10B981" }} />
-                       <span className="font-bold text-[#1A1A3D]">{row.zone}</span>
-                    </div>
+              {(overview?.campaigns || []).map((campaign) => (
+                <TableRow key={campaign.id}>
+                  <TableCell className="font-medium">{formatDateTime(campaign.sendAt || campaign.createdAt)}</TableCell>
+                  <TableCell>{campaign.weekStart && campaign.weekEnd ? `${campaign.weekStart} to ${campaign.weekEnd}` : "-"}</TableCell>
+                  <TableCell>{campaign.recipientsCount}</TableCell>
+                  <TableCell>{campaign.sentCount}</TableCell>
+                  <TableCell>
+                    <Badge className={campaign.status === "sent" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}>
+                      {campaign.status}
+                    </Badge>
                   </TableCell>
-                  <TableCell className="py-6 font-mono font-bold text-[#1A1A3D] text-lg">{row.recipients}</TableCell>
-                  <TableCell className="py-6">
-                    <div className="flex justify-center">
-                      <span className={cn("px-4 py-1 rounded-lg text-[10px] font-black", row.status === "warning" ? "bg-amber-50 text-amber-600" : "bg-emerald-50 text-emerald-600")}>
-                        {row.rate}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="py-6 font-medium text-slate-400">{row.tone}</TableCell>
-                  <TableCell className="py-6 text-right">
-                    <Button variant="ghost" size="icon" className="text-slate-300 hover:text-[#5A57FF] hover:bg-[#F3F2FF]">
-                      <BarChart3 className="w-5 h-5" />
-                    </Button>
-                  </TableCell>
+                  <TableCell>{campaign.tone}</TableCell>
                 </TableRow>
               ))}
+              {!(overview?.campaigns.length) ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-slate-500 py-8">
+                    No campaigns yet. Generate and schedule your first Community Echo broadcast.
+                  </TableCell>
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         </div>

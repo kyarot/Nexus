@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     COPILOT_VOICE_COALESCE_ENABLED: bool = True
     COPILOT_VOICE_BURST_WINDOW_MS: int = 850
 
+    PUBLIC_TRACKING_SALT: str = ""
+    PUBLIC_SYNTHESIS_MIN_REPORTS: int = 5
+    PUBLIC_SYNTHESIS_LOOKBACK_DAYS: int = 14
+    PUBLIC_RATE_LIMIT_PHONE_PER_HOUR: int = 5
+    PUBLIC_RATE_LIMIT_IP_PER_HOUR: int = 20
+    PUBLIC_DEDUPE_WINDOW_MINUTES: int = 10
+    COMMUNITY_ECHO_RETENTION_WEEKS: int = 4
+    COMMUNITY_ECHO_DISPATCH_BATCH_SIZE: int = 250
+
     @property
     def origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
