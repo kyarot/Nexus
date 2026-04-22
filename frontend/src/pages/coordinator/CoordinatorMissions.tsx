@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { isQueuedResult } from "@/lib/offline-outbox";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import {
   AlertCircle,
   AlertTriangle,
@@ -144,6 +146,7 @@ const CoordinatorMissions = () => {
   });
   const sseRefetchTimerRef = useRef<number | null>(null);
   const token = localStorage.getItem("nexus_access_token");
+  const isOnline = useOnlineStatus();
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -182,7 +185,7 @@ const CoordinatorMissions = () => {
   const refetchZones = zonesQuery.refetch;
 
   useEffect(() => {
-    if (!token) {
+    if (!token || !isOnline) {
       return;
     }
 
@@ -229,7 +232,8 @@ const CoordinatorMissions = () => {
         sseRefetchTimerRef.current = null;
       }
     };
-  }, [apiBaseUrl, refetchMissions, refetchZones, token]);
+
+  }, [apiBaseUrl, refetchMissions, refetchZones, token, isOnline]);
 
   const selectedZone = useMemo(
     () => zonesQuery.data?.zones.find((zone) => zone.id === missionForm.zoneId) ?? null,
@@ -291,6 +295,14 @@ const CoordinatorMissions = () => {
   const createMissionMutation = useMutation({
     mutationFn: (payload: CoordinatorMissionCreatePayload) => createCoordinatorMission(payload),
     onSuccess: async (response) => {
+      if (isQueuedResult(response)) {
+        setShowCreateMission(false);
+        setCreationStep(1);
+        setSelectedVolunteerForMission(null);
+        setMissionForm(defaultMissionForm);
+        toast.success("Mission queued for sync");
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: ["coordinator-missions"] });
       await queryClient.invalidateQueries({ queryKey: ["coordinator-dashboard"] });
       setSelectedMission(response.mission);
@@ -308,6 +320,12 @@ const CoordinatorMissions = () => {
   const assignVolunteerMutation = useMutation({
     mutationFn: (candidateId: string) => assignCoordinatorMission(assignMission!.id, candidateId),
     onSuccess: async (response) => {
+      if (isQueuedResult(response)) {
+        setAssignMission(null);
+        setSelectedAssignCandidate(null);
+        toast.success("Assignment queued for sync");
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: ["coordinator-missions"] });
       await queryClient.invalidateQueries({ queryKey: ["coordinator-dashboard"] });
       setSelectedMission(response.mission);
@@ -323,8 +341,12 @@ const CoordinatorMissions = () => {
   const missionMessageMutation = useMutation({
     mutationFn: ({ missionId, message }: { missionId: string; message: string }) =>
       sendCoordinatorMissionMessage(missionId, message),
-    onSuccess: () => {
-      toast.success("Message sent to responder");
+    onSuccess: (response) => {
+      if (isQueuedResult(response)) {
+        toast.success("Message queued for sync");
+      } else {
+        toast.success("Message sent to responder");
+      }
       setMessageText("");
       setMessageMission(null);
     },
@@ -340,8 +362,12 @@ const CoordinatorMissions = () => {
 
   const missionRenotifyMutation = useMutation({
     mutationFn: (missionId: string) => renotifyCoordinatorMission(missionId),
-    onSuccess: () => {
-      toast.success("Responder renotified");
+    onSuccess: (response) => {
+      if (isQueuedResult(response)) {
+        toast.success("Renotify queued for sync");
+      } else {
+        toast.success("Responder renotified");
+      }
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to send reminder");
@@ -351,6 +377,10 @@ const CoordinatorMissions = () => {
   const closeMissionMutation = useMutation({
     mutationFn: (missionId: string) => closeCoordinatorMission(missionId),
     onSuccess: async (mission) => {
+      if (isQueuedResult(mission)) {
+        toast.success("Close queued for sync");
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: ["coordinator-missions"] });
       await queryClient.invalidateQueries({ queryKey: ["coordinator-dashboard"] });
       if (selectedMission?.id === mission.id) {

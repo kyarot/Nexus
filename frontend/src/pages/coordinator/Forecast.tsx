@@ -21,6 +21,7 @@ import {
 } from "@/lib/forecast-api";
 import { getNotificationStreamUrl, listNotifications, type NotificationItem } from "@/lib/ops-api";
 import { useToast } from "@/hooks/use-toast";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 
 const fallbackChart = [
   { weekLabel: "W12", score: 42, confidence: 100, isForecast: false },
@@ -62,6 +63,7 @@ const titleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice
 export default function Forecast() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const isOnline = useOnlineStatus();
   const seenNotificationIds = useRef<Set<string>>(new Set());
 
   const [selectedZoneId, setSelectedZoneId] = useState("all");
@@ -157,6 +159,9 @@ export default function Forecast() {
   });
 
   useEffect(() => {
+    if (!isOnline) {
+      return;
+    }
     const streamUrl = getCommunityForecastStreamUrl();
     if (!streamUrl.includes("token=")) {
       return;
@@ -183,9 +188,12 @@ export default function Forecast() {
     return () => {
       source.close();
     };
-  }, [queryClient]);
+  }, [queryClient, isOnline]);
 
   useEffect(() => {
+    if (!isOnline) {
+      return;
+    }
     const token = localStorage.getItem("nexus_access_token") || "";
     if (!token) {
       return;
@@ -234,7 +242,7 @@ export default function Forecast() {
     return () => {
       source.close();
     };
-  }, [toast]);
+  }, [toast, isOnline]);
 
   const summary = summaryQuery.data;
   const backtesting = backtestingQuery.data;

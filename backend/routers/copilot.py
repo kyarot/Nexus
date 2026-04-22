@@ -16,10 +16,14 @@ from pydantic import BaseModel, Field
 from core.config import settings
 from core.dependencies import role_required
 from core.firebase import db
+from models.mission import MissionCreateRequest
+from routers.missions import create_mission
 from services.copilot_data_access import CoordinatorReadLayer, CoordinatorWriteLayer
 from services.copilot_planner import CopilotPlan, CopilotReply, ToolCall, generate_plan, generate_reply
 from services.copilot_voice import synthesize_copilot_speech
-from services.voice_service import process_voice
+from services.drift_alerts import evaluate_ngo_drift_alerts, evaluate_zone_drift_alerts
+from services.insights_synthesis import synthesize_insights_for_ngo
+from services.voice_service import transcribe_voice
 
 router = APIRouter(prefix="/copilot", tags=["copilot"])
 
@@ -112,7 +116,9 @@ TOOL_REGISTRY = {
     "zones": {"scope": "coordinator:read:zones"},
     "terrain": {"scope": "coordinator:read:terrain"},
     "missions": {"scope": "coordinator:read:missions"},
+    "mission_detail": {"scope": "coordinator:read:missions"},
     "volunteers": {"scope": "coordinator:read:volunteers"},
+    "volunteer_detail": {"scope": "coordinator:read:volunteers"},
     "alerts": {"scope": "coordinator:read:alerts"},
     "inventory": {"scope": "coordinator:read:inventory"},
     "resource_requests": {"scope": "coordinator:read:inventory"},
@@ -122,6 +128,10 @@ TOOL_REGISTRY = {
     "approve_resource_request": {"scope": "coordinator:write:inventory"},
     "reject_resource_request": {"scope": "coordinator:write:inventory"},
     "add_volunteer": {"scope": "coordinator:write:volunteers"},
+    "create_mission": {"scope": "coordinator:write:missions"},
+    "update_mission": {"scope": "coordinator:write:missions"},
+    "create_alerts": {"scope": "coordinator:write:alerts"},
+    "create_insights": {"scope": "coordinator:write:insights"},
 }
 
 COPILOT_CAPABILITIES = [
@@ -144,10 +154,28 @@ COPILOT_CAPABILITIES = [
         "sources": ["firestore:missions"],
     },
     {
+        "id": "mission_detail",
+        "label": "Mission details",
+        "type": "read",
+        "sources": ["firestore:missions"],
+    },
+    {
         "id": "dispatch_mission",
         "label": "Dispatch mission",
         "type": "write",
         "sources": ["firestore:missions", "firestore:users", "firestore:notifications"],
+    },
+    {
+        "id": "create_mission",
+        "label": "Create mission",
+        "type": "write",
+        "sources": ["firestore:missions", "firestore:zones", "firestore:users"],
+    },
+    {
+        "id": "update_mission",
+        "label": "Update mission status/priority",
+        "type": "write",
+        "sources": ["firestore:missions", "firestore:missions/updates"],
     },
     {
         "id": "resource_requests",
@@ -162,9 +190,27 @@ COPILOT_CAPABILITIES = [
         "sources": ["firestore:missionResourceRequests", "firestore:inventoryItems", "firestore:notifications"],
     },
     {
+        "id": "create_alerts",
+        "label": "Evaluate drift alerts",
+        "type": "write",
+        "sources": ["firestore:driftAlerts", "firestore:zones", "firestore:reports"],
+    },
+    {
+        "id": "create_insights",
+        "label": "Synthesize insights",
+        "type": "write",
+        "sources": ["firestore:insights", "firestore:reports"],
+    },
+    {
         "id": "add_volunteer",
         "label": "Add volunteer",
         "type": "write",
+        "sources": ["firestore:users"],
+    },
+    {
+        "id": "volunteer_detail",
+        "label": "Volunteer details",
+        "type": "read",
         "sources": ["firestore:users"],
     },
 ]
@@ -244,6 +290,81 @@ def _normalize_suggestions(suggestions: list[str]) -> list[str]:
         seen.add(text.lower())
         ordered.append(text)
     return ordered[:6] if ordered else _DEFAULT_SUGGESTIONS[:3]
+
+
+def _is_action_query(query: str) -> bool:
+    normalized = " ".join(str(query or "").lower().split())
+    action_terms = [
+        "create mission",
+        "created mission",
+        "mission created",
+        "assign",
+        "dispatch",
+        "approve",
+        "reject",
+        "add volunteer",
+        "update mission",
+        "set mission",
+        "synthesize insights",
+        "refresh insights",
+        "evaluate alerts",
+        "create alert",
+        "create insight",
+    ]
+    return any(term in normalized for term in action_terms)
+
+
+def _resolve_zone_id(read: CoordinatorReadLayer, zone_id: str = "", zone_name: str = "") -> tuple[str, str]:
+    if zone_id:
+        zones = read.get_zones(risk_filter="all")
+        match = next((zone for zone in zones if str(zone.get("id") or "") == zone_id), None)
+        if match:
+            return str(match.get("id") or ""), str(match.get("name") or "")
+
+    needle = str(zone_name or "").strip().lower()
+    if not needle:
+        return "", ""
+    needle = " ".join(word for word in needle.replace("zone", " ").split() if word)
+    zones = read.get_zones(risk_filter="all")
+    match = next(
+        (
+            zone
+            for zone in zones
+            if needle
+            and (
+                needle in str(zone.get("name") or "").lower()
+                or str(zone.get("name") or "").lower() in needle
+            )
+        ),
+        None,
+    )
+    if not match:
+        needle_parts = {part for part in needle.split() if part}
+        match = next(
+            (
+                zone
+                for zone in zones
+                if needle_parts
+                and needle_parts.issubset(set(str(zone.get("name") or "").lower().split()))
+            ),
+            None,
+        )
+    if not match:
+        return "", ""
+    return str(match.get("id") or ""), str(match.get("name") or "")
+
+
+def _build_user_payload(session: dict[str, Any]) -> dict[str, Any]:
+    user_id = str(session.get("user_id") or "")
+    user_snapshot = db.collection("users").document(user_id).get()
+    user_data = user_snapshot.to_dict() if user_snapshot.exists else {}
+    return {
+        "id": user_id,
+        "uid": user_id,
+        "ngoId": str(session.get("ngo_id") or ""),
+        "role": str(session.get("role") or ""),
+        "name": str(user_data.get("name") or session.get("user_name") or "Coordinator"),
+    }
 
 
 def _ensure_not_cancelled(session: dict[str, Any], request_id: str) -> None:
@@ -442,6 +563,42 @@ def _tool_missions(read: CoordinatorReadLayer, args: dict[str, Any]) -> _ToolExe
     )
 
 
+def _tool_mission_detail(read: CoordinatorReadLayer, args: dict[str, Any]) -> _ToolExecutionResult:
+    mission_id = str(args.get("mission_id") or args.get("missionId") or args.get("id") or "").strip()
+    title = str(args.get("title") or args.get("name") or "").strip()
+    matches = read.get_mission_detail(mission_id=mission_id, title=title)
+
+    if not matches:
+        return _ToolExecutionResult(
+            text="I could not find that mission. Share a mission ID or exact title.",
+            ui_blocks=[{"component": "empty_state", "props": {"heading": "Mission not found", "subtext": "Provide a mission ID or name to open details."}}],
+            suggestions=["Show active missions", "Show pending missions", "Show dashboard summary"],
+            context={"missions": []},
+        )
+
+    if len(matches) > 1:
+        options = ", ".join([f"{mission.get('title')} ({mission.get('id')})" for mission in matches[:4]])
+        return _ToolExecutionResult(
+            text=f"I found multiple missions: {options}. Which mission should I open?",
+            ui_blocks=[],
+            suggestions=["Show active missions", "Show pending missions"],
+            context={"missions": matches[:8]},
+        )
+
+    mission = matches[0]
+    ui_blocks = [
+        {"component": "stat_metric_card", "props": {"label": "Mission Status", "value": mission.get("status"), "delta": mission.get("priority"), "accent": "green"}},
+        {"component": "stat_metric_card", "props": {"label": "Zone", "value": mission.get("zoneName"), "delta": mission.get("needType"), "accent": "indigo"}},
+    ]
+
+    return _ToolExecutionResult(
+        text=f"Mission {mission.get('title')} is {mission.get('status')}.",
+        ui_blocks=ui_blocks,
+        suggestions=["Update mission status", "Assign a volunteer", "Show active missions"],
+        context={"mission": mission},
+    )
+
+
 def _tool_volunteers(read: CoordinatorReadLayer, args: dict[str, Any]) -> _ToolExecutionResult:
     volunteers = read.get_volunteers(search=str(args.get("search") or args.get("query_scope") or ""))
     high_burnout = sum(1 for item in volunteers if item.get("burnout") == "high")
@@ -459,6 +616,40 @@ def _tool_volunteers(read: CoordinatorReadLayer, args: dict[str, Any]) -> _ToolE
         ui_blocks=ui_blocks,
         suggestions=["Show active missions", "Show high-risk zones", "Show dashboard summary"],
         context={"volunteers": [{"id": v["id"], "name": v["name"], "availableNow": v["availableNow"], "matchPercent": v["matchPercent"]} for v in volunteers[:20]]},
+    )
+
+
+def _tool_volunteer_detail(read: CoordinatorReadLayer, args: dict[str, Any]) -> _ToolExecutionResult:
+    volunteer_id = str(args.get("volunteer_id") or args.get("volunteerId") or args.get("id") or "").strip()
+    name = str(args.get("name") or args.get("volunteer") or "").strip()
+    matches = read.get_volunteer_detail(volunteer_id=volunteer_id, name=name)
+
+    if not matches:
+        return _ToolExecutionResult(
+            text="I could not find that volunteer. Share a volunteer ID or exact name.",
+            ui_blocks=[{"component": "empty_state", "props": {"heading": "Volunteer not found", "subtext": "Provide a volunteer ID or name."}}],
+            suggestions=["Show volunteer availability", "Show dashboard summary"],
+            context={"volunteers": []},
+        )
+
+    if len(matches) > 1:
+        options = ", ".join([f"{vol.get('name')} ({vol.get('id')})" for vol in matches[:4]])
+        return _ToolExecutionResult(
+            text=f"I found multiple volunteers: {options}. Which profile should I open?",
+            ui_blocks=[],
+            suggestions=["Show volunteer availability", "Show active missions"],
+            context={"volunteers": matches[:8]},
+        )
+
+    volunteer = matches[0]
+    ui_blocks = [
+        {"component": "volunteer_avatar_card", "props": {**volunteer, "compact": False}},
+    ]
+    return _ToolExecutionResult(
+        text=f"Volunteer {volunteer.get('name')} is {volunteer.get('availability', 'available')}.",
+        ui_blocks=ui_blocks,
+        suggestions=["Assign a mission", "Show active missions", "Show volunteer availability"],
+        context={"volunteer": volunteer},
     )
 
 
@@ -519,8 +710,55 @@ def _tool_alerts(read: CoordinatorReadLayer, args: dict[str, Any]) -> _ToolExecu
 def _tool_dispatch_mission(session: dict[str, Any], read: CoordinatorReadLayer, args: dict[str, Any]) -> _ToolExecutionResult:
     mission_id = str(args.get("mission_id") or args.get("missionId") or "").strip()
     volunteer_id = str(args.get("volunteer_id") or args.get("volunteerId") or "").strip()
+    volunteer_name = str(args.get("volunteer_name") or args.get("volunteerName") or args.get("assignee") or "").strip()
     note = str(args.get("note") or "").strip()
+    if not volunteer_id and volunteer_name:
+        matches = read.get_volunteer_detail(name=volunteer_name)
+        if matches:
+            volunteer_id = str(matches[0].get("id") or "").strip()
     if not mission_id or not volunteer_id:
+        if mission_id:
+            mission_rows = read.get_mission_detail(mission_id=mission_id)
+            if mission_rows:
+                mission = mission_rows[0]
+                audience = str(mission.get("targetAudience") or "volunteer").lower()
+                responders = read.get_responders(role=audience, search="")
+                candidates = [item for item in responders if item.get("availableNow")]
+                candidates = candidates[:3] if candidates else responders[:3]
+
+                ui_blocks: list[dict[str, Any]] = []
+                for candidate in candidates:
+                    ui_blocks.append({"component": "volunteer_avatar_card", "props": {**candidate, "compact": True}})
+
+                action_cards: list[dict[str, Any]] = []
+                for candidate in candidates:
+                    action_id = _register_pending_action(
+                        session,
+                        "dispatch_mission",
+                        {"mission_id": mission_id, "volunteer_id": candidate.get("id"), "note": note},
+                    )
+                    action_cards.append(
+                        {
+                            "component": "action_card",
+                            "props": {
+                                "actionId": action_id,
+                                "title": "Dispatch mission",
+                                "summary": f"Assign {candidate.get('name')} ({candidate.get('matchPercent')}% match)",
+                                "impact": "Volunteer will be notified and mission status will change to dispatched.",
+                                "confirmLabel": "Confirm dispatch",
+                                "cancelLabel": "Cancel",
+                                "severity": "high",
+                            },
+                        }
+                    )
+
+                return _ToolExecutionResult(
+                    text="I found top candidates. Choose who to dispatch.",
+                    ui_blocks=[*ui_blocks, *action_cards],
+                    suggestions=["Confirm dispatch", "Cancel"],
+                    context={"mission": mission, "candidates": candidates},
+                )
+
         return _ToolExecutionResult(
             text="Which mission and volunteer should I dispatch?",
             ui_blocks=[{"component": "empty_state", "props": {"heading": "Mission dispatch needs details", "subtext": "Share the mission and volunteer IDs or open missions and volunteers for selection."}}],
@@ -723,13 +961,316 @@ def _tool_settings(read: CoordinatorReadLayer, _: dict[str, Any]) -> _ToolExecut
     )
 
 
+def _normalize_priority(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"low", "medium", "high", "critical"}:
+        return normalized
+    return "high"
+
+
+async def _tool_create_mission(session: dict[str, Any], read: CoordinatorReadLayer, args: dict[str, Any]) -> _ToolExecutionResult:
+    need_type = str(args.get("need_type") or args.get("needType") or "").strip()
+    target_audience = str(args.get("target_audience") or args.get("targetAudience") or "fieldworker").strip().lower()
+    zone_id = str(args.get("zone_id") or args.get("zoneId") or "").strip()
+    zone_name = str(args.get("zone_name") or args.get("zoneName") or "").strip()
+    description = str(args.get("description") or "").strip()
+    title = str(args.get("title") or "").strip()
+    priority = _normalize_priority(str(args.get("priority") or "high"))
+    assignee_name = str(args.get("assigned_to_name") or args.get("assignedToName") or args.get("assignee") or "").strip()
+    instructions = str(args.get("instructions") or "").strip() or None
+    notes = str(args.get("notes") or "").strip() or None
+    estimated = args.get("estimated_duration") or args.get("estimatedDurationMinutes") or 45
+    try:
+        estimated_minutes = max(15, int(estimated))
+    except (TypeError, ValueError):
+        estimated_minutes = 45
+
+    resolved_zone_id, resolved_zone_name = _resolve_zone_id(read, zone_id=zone_id, zone_name=zone_name)
+    if not resolved_zone_id:
+        return _ToolExecutionResult(
+            text="Which zone should this mission belong to?",
+            ui_blocks=[{"component": "empty_state", "props": {"heading": "Zone required", "subtext": "Share the zone name or ID for the mission."}}],
+            suggestions=["Show zones", "Show high-risk zones"],
+        )
+
+    if not need_type:
+        text_source = f"{title} {description}".lower()
+        if "medic" in text_source or "medical" in text_source:
+            need_type = "medical"
+        elif "water" in text_source:
+            need_type = "water"
+        elif "shelter" in text_source or "housing" in text_source:
+            need_type = "shelter"
+        elif "food" in text_source or "nutrition" in text_source:
+            need_type = "food"
+        elif "evac" in text_source:
+            need_type = "evacuation"
+        elif "sanitation" in text_source or "hygiene" in text_source:
+            need_type = "sanitation"
+
+    if not need_type:
+        return _ToolExecutionResult(
+            text="What is the need type for this mission?",
+            ui_blocks=[{"component": "empty_state", "props": {"heading": "Need type required", "subtext": "Examples: water, medical, shelter."}}],
+            suggestions=["Show inventory", "Show active missions"],
+        )
+
+    if target_audience not in {"fieldworker", "volunteer"}:
+        return _ToolExecutionResult(
+            text="Who should handle this mission: fieldworker or volunteer?",
+            ui_blocks=[],
+            suggestions=["Use fieldworker", "Use volunteer"],
+        )
+
+    if not title:
+        title = f"{need_type.title()} support in {resolved_zone_name or 'target zone'}"
+    if not description:
+        description = f"Coordinate {need_type.lower()} response in {resolved_zone_name or 'the selected zone'}."
+
+    raw_resources = args.get("resources") or []
+    resources: list[dict[str, Any]] = []
+    if isinstance(raw_resources, list):
+        for item in raw_resources:
+            if isinstance(item, str) and item.strip():
+                resources.append({"name": item.strip()})
+            elif isinstance(item, dict) and str(item.get("name") or "").strip():
+                resources.append({
+                    "name": str(item.get("name") or "").strip(),
+                    "quantity": item.get("quantity"),
+                    "status": item.get("status"),
+                })
+    payload = {
+        "title": title,
+        "description": description,
+        "zoneId": resolved_zone_id,
+        "needType": need_type,
+        "targetAudience": target_audience,
+        "priority": priority,
+        "resources": resources,
+        "instructions": instructions,
+        "estimatedDurationMinutes": estimated_minutes,
+        "allowAutoAssign": False,
+        "notes": notes,
+    }
+
+    responders = read.get_responders(role=target_audience, search="")
+    candidates = [item for item in responders if item.get("availableNow")]
+    candidates = candidates[:3] if candidates else responders[:3]
+    matched_assignee = None
+    if assignee_name:
+        needle = assignee_name.lower()
+        matched_assignee = next((item for item in responders if needle in str(item.get("name") or "").lower()), None)
+        if matched_assignee:
+            candidates = [matched_assignee] + [item for item in candidates if item.get("id") != matched_assignee.get("id")]
+
+    ui_blocks: list[dict[str, Any]] = []
+    for candidate in candidates:
+        ui_blocks.append({"component": "volunteer_avatar_card", "props": {**candidate, "compact": True}})
+
+    if settings.COPILOT_AUTO_CREATE_MISSIONS:
+        auto_payload = payload
+        if matched_assignee:
+            auto_payload = {**payload, "assignedTo": matched_assignee.get("id"), "assignedVolunteerName": matched_assignee.get("name")}
+        mission_request = MissionCreateRequest.model_validate(auto_payload)
+        mission_response = await create_mission(payload=mission_request, user=_build_user_payload(session))
+        mission = mission_response.mission
+        created_text = f"Mission created: {mission.title}."
+        if assignee_name and not matched_assignee:
+            created_text = f"Mission created without assignment because {assignee_name} was not found."
+
+        ui_blocks.extend(
+            [
+                {"component": "stat_metric_card", "props": {"label": "Mission Status", "value": mission.status, "delta": mission.priority, "accent": "green"}},
+                {"component": "stat_metric_card", "props": {"label": "Zone", "value": mission.zoneName, "delta": mission.needType, "accent": "indigo"}},
+            ]
+        )
+        return _ToolExecutionResult(
+            text=created_text,
+            ui_blocks=ui_blocks,
+            suggestions=["Show active missions", "Show mission details", "Show volunteer availability"],
+            context={"mission": mission.model_dump()},
+        )
+
+    action_blocks: list[dict[str, Any]] = []
+    action_id = _register_pending_action(session, "create_mission", {"payload": payload})
+    action_blocks.append(
+        {
+            "component": "action_card",
+            "props": {
+                "actionId": action_id,
+                "title": "Create mission",
+                "summary": f"{title} in {resolved_zone_name}",
+                "impact": "Mission will be created without assignment.",
+                "confirmLabel": "Create mission",
+                "cancelLabel": "Cancel",
+                "severity": "medium",
+            },
+        }
+    )
+
+    for candidate in candidates:
+        if matched_assignee and matched_assignee.get("id") != candidate.get("id"):
+            continue
+        assign_payload = {**payload, "assignedTo": candidate.get("id"), "assignedVolunteerName": candidate.get("name")}
+        action_id = _register_pending_action(session, "create_mission", {"payload": assign_payload})
+        action_blocks.append(
+            {
+                "component": "action_card",
+                "props": {
+                    "actionId": action_id,
+                    "title": "Create + assign",
+                    "summary": f"Assign {candidate.get('name')} ({candidate.get('matchPercent')}% match)",
+                    "impact": "Mission will be created and dispatched to this responder.",
+                    "confirmLabel": "Create & assign",
+                    "cancelLabel": "Cancel",
+                    "severity": "high",
+                },
+            }
+        )
+
+    message = "I drafted the mission and shortlisted top candidates. Choose how to proceed."
+    if assignee_name and not matched_assignee:
+        message = f"I couldn't find {assignee_name}. Choose a candidate or create the mission without assignment."
+
+    return _ToolExecutionResult(
+        text=message,
+        ui_blocks=[*ui_blocks, *action_blocks],
+        suggestions=["Create mission", "Assign top candidate", "Cancel"],
+        context={"missionDraft": payload, "candidates": candidates},
+    )
+
+
+def _tool_update_mission(session: dict[str, Any], read: CoordinatorReadLayer, args: dict[str, Any]) -> _ToolExecutionResult:
+    mission_id = str(args.get("mission_id") or args.get("missionId") or args.get("id") or "").strip()
+    title = str(args.get("title") or args.get("name") or "").strip()
+    status_value = str(args.get("status") or "").strip().lower()
+    priority_value = str(args.get("priority") or "").strip().lower()
+    note = str(args.get("note") or "").strip()
+    allowed_statuses = {"pending", "dispatched", "en_route", "on_ground", "completed", "failed", "cancelled"}
+    allowed_priorities = {"low", "medium", "high", "critical"}
+
+    matches = read.get_mission_detail(mission_id=mission_id, title=title)
+    if not matches:
+        return _ToolExecutionResult(
+            text="I could not find that mission. Share a mission ID or exact title.",
+            ui_blocks=[{"component": "empty_state", "props": {"heading": "Mission not found", "subtext": "Provide a mission ID or name to update."}}],
+            suggestions=["Show active missions", "Show pending missions"],
+        )
+
+    if len(matches) > 1:
+        options = ", ".join([f"{mission.get('title')} ({mission.get('id')})" for mission in matches[:4]])
+        return _ToolExecutionResult(
+            text=f"I found multiple missions: {options}. Which mission should I update?",
+            ui_blocks=[],
+            suggestions=["Show active missions"],
+            context={"missions": matches[:8]},
+        )
+
+    if not status_value and not priority_value:
+        return _ToolExecutionResult(
+            text="What should I update: status or priority?",
+            ui_blocks=[],
+            suggestions=["Set status", "Set priority"],
+        )
+
+    if status_value and status_value not in allowed_statuses:
+        return _ToolExecutionResult(
+            text="That status is not valid. Use pending, dispatched, en_route, on_ground, completed, failed, or cancelled.",
+            ui_blocks=[],
+            suggestions=["Set status to pending", "Set status to completed"],
+        )
+
+    if priority_value and priority_value not in allowed_priorities:
+        return _ToolExecutionResult(
+            text="That priority is not valid. Use low, medium, high, or critical.",
+            ui_blocks=[],
+            suggestions=["Set priority to high", "Set priority to critical"],
+        )
+
+    action_id = _register_pending_action(
+        session,
+        "update_mission",
+        {
+            "mission_id": matches[0].get("id"),
+            "status": status_value,
+            "priority": priority_value,
+            "note": note,
+        },
+    )
+    return _ToolExecutionResult(
+        text="I can update this mission now. Do you want me to proceed?",
+        ui_blocks=[
+            {
+                "component": "action_card",
+                "props": {
+                    "actionId": action_id,
+                    "title": "Update mission",
+                    "summary": f"{matches[0].get('title')} -> {status_value or priority_value}",
+                    "impact": "Mission record will be updated.",
+                    "confirmLabel": "Confirm update",
+                    "cancelLabel": "Cancel",
+                    "severity": "medium",
+                },
+            }
+        ],
+        suggestions=["Confirm update", "Cancel"],
+    )
+
+
+def _tool_create_alerts(session: dict[str, Any], read: CoordinatorReadLayer, args: dict[str, Any]) -> _ToolExecutionResult:
+    zone_id = str(args.get("zone_id") or args.get("zoneId") or "").strip()
+    action_id = _register_pending_action(session, "create_alerts", {"zone_id": zone_id})
+    return _ToolExecutionResult(
+        text="I can evaluate drift alerts now. Do you want me to proceed?",
+        ui_blocks=[
+            {
+                "component": "action_card",
+                "props": {
+                    "actionId": action_id,
+                    "title": "Evaluate drift alerts",
+                    "summary": "Run drift alert evaluation",
+                    "impact": "New drift alerts may be generated.",
+                    "confirmLabel": "Run evaluation",
+                    "cancelLabel": "Cancel",
+                    "severity": "low",
+                },
+            }
+        ],
+        suggestions=["Run evaluation", "Cancel"],
+    )
+
+
+def _tool_create_insights(session: dict[str, Any], read: CoordinatorReadLayer, _: dict[str, Any]) -> _ToolExecutionResult:
+    action_id = _register_pending_action(session, "create_insights", {})
+    return _ToolExecutionResult(
+        text="I can synthesize fresh insights now. Do you want me to proceed?",
+        ui_blocks=[
+            {
+                "component": "action_card",
+                "props": {
+                    "actionId": action_id,
+                    "title": "Synthesize insights",
+                    "summary": "Generate new coordinator insights",
+                    "impact": "Insights will update based on latest reports.",
+                    "confirmLabel": "Run synthesis",
+                    "cancelLabel": "Cancel",
+                    "severity": "low",
+                },
+            }
+        ],
+        suggestions=["Run synthesis", "Cancel"],
+    )
+
+
 _TOOL_HANDLERS = {
     "dashboard": _tool_dashboard,
     "insights": _tool_insights,
     "zones": _tool_zones,
     "terrain": _tool_terrain,
     "missions": _tool_missions,
+    "mission_detail": _tool_mission_detail,
     "volunteers": _tool_volunteers,
+    "volunteer_detail": _tool_volunteer_detail,
     "alerts": _tool_alerts,
     "inventory": _tool_inventory,
     "resource_requests": _tool_resource_requests,
@@ -739,17 +1280,35 @@ _TOOL_HANDLERS = {
     "approve_resource_request": lambda session, read, args: _tool_resource_request_decision(session, read, args, "approved"),
     "reject_resource_request": lambda session, read, args: _tool_resource_request_decision(session, read, args, "rejected"),
     "add_volunteer": _tool_add_volunteer,
+    "create_mission": _tool_create_mission,
+    "update_mission": _tool_update_mission,
+    "create_alerts": _tool_create_alerts,
+    "create_insights": _tool_create_insights,
 }
 
 
-def _execute_tool_call(session: dict[str, Any], read: CoordinatorReadLayer, role: str, tool_call: ToolCall) -> _ToolExecutionResult:
+async def _execute_tool_call(session: dict[str, Any], read: CoordinatorReadLayer, role: str, tool_call: ToolCall) -> _ToolExecutionResult:
     _tool_auth_guard(tool_call.tool, role)
     handler = _TOOL_HANDLERS.get(tool_call.tool)
     if not handler:
         return _ToolExecutionResult()
-    if tool_call.tool in {"dispatch_mission", "approve_resource_request", "reject_resource_request", "add_volunteer"}:
-        return handler(session, read, tool_call.args)
-    return handler(read, tool_call.args)
+    if tool_call.tool in {
+        "dispatch_mission",
+        "approve_resource_request",
+        "reject_resource_request",
+        "add_volunteer",
+        "create_mission",
+        "update_mission",
+        "create_alerts",
+        "create_insights",
+    }:
+        result = handler(session, read, tool_call.args)
+    else:
+        result = handler(read, tool_call.args)
+
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
 
 
 def _build_grounded_context(tool_results: list[_ToolExecutionResult], plan: CopilotPlan) -> dict[str, Any]:
@@ -878,7 +1437,7 @@ async def _run_query_for_session(session: dict[str, Any], session_id: str, query
         for call in plan.tool_calls:
             _ensure_not_cancelled(session, request_id)
             try:
-                tool_results.append(_execute_tool_call(session, read, role, call))
+                tool_results.append(await _execute_tool_call(session, read, role, call))
             except HTTPException:
                 raise
             except Exception as exc:
@@ -892,6 +1451,9 @@ async def _run_query_for_session(session: dict[str, Any], session_id: str, query
         memory=memory,
         fallback_suggestions=_DEFAULT_SUGGESTIONS,
     )
+
+    if tool_results and reply.response_text.strip() == "The AI provider is temporarily unavailable. Please retry in a moment.":
+        reply = CopilotReply(response_text=tool_results[0].text or "Action completed.", suggestions=reply.suggestions)
 
     _ensure_not_cancelled(session, request_id)
 
@@ -928,9 +1490,10 @@ async def _run_query_for_session(session: dict[str, Any], session_id: str, query
 
 async def _run_query_with_coalescing(session: dict[str, Any], session_id: str, query: str) -> CopilotQueryResponse:
     key = _cache_key(str(session.get("ngo_id") or ""), query)
-    cached = _read_cache(key)
-    if cached:
-        return cached
+    if not _is_action_query(query):
+        cached = _read_cache(key)
+        if cached:
+            return cached
 
     async with _INFLIGHT_LOCK:
         existing = _INFLIGHT.get(key)
@@ -1068,9 +1631,18 @@ async def voice_copilot(
 
     audio_bytes = await file.read()
     try:
-        extracted = await process_voice(audio_bytes, language=language, mime_type=file.content_type)
+        extracted = await transcribe_voice(audio_bytes, language=language, mime_type=file.content_type)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        detail = str(exc)
+        if detail.lower().startswith("rate limited"):
+            retry_match = ""
+            for token in detail.split():
+                if token.isdigit():
+                    retry_match = token
+                    break
+            headers = {"Retry-After": retry_match} if retry_match else None
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail, headers=headers) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail) from exc
 
     transcript = str(extracted.get("transcriptEnglish") or extracted.get("transcript") or "").strip()
     if not transcript:
@@ -1178,6 +1750,26 @@ async def confirm_copilot_action(
                 str(args.get("availability") or "available"),
             )
             result_text = "Volunteer added to the roster."
+        elif action_type == "update_mission":
+            write.update_mission(
+                str(args.get("mission_id") or ""),
+                str(args.get("status") or ""),
+                str(args.get("priority") or ""),
+                str(args.get("note") or ""),
+            )
+            result_text = "Mission updated."
+        elif action_type == "create_mission":
+            payload = args.get("payload") or {}
+            mission_request = MissionCreateRequest.model_validate(payload)
+            mission_response = await create_mission(payload=mission_request, user=_build_user_payload(session))
+            result_text = f"Mission created: {mission_response.mission.title}."
+        elif action_type == "create_alerts":
+            zone_id = str(args.get("zone_id") or "").strip() or None
+            result = evaluate_zone_drift_alerts(str(session.get("ngo_id") or ""), zone_id) if zone_id else evaluate_ngo_drift_alerts(str(session.get("ngo_id") or ""))
+            result_text = f"Drift alert evaluation complete. Triggered {int(result.get('triggered') or 0)} alerts."
+        elif action_type == "create_insights":
+            result = synthesize_insights_for_ngo(str(session.get("ngo_id") or ""))
+            result_text = f"Insights synthesis complete. Updated {int(result.get('zonesUpdated') or 0)} zones."
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown action type")
         db.collection("copilot_audit").add(

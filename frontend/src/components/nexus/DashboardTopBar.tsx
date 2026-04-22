@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { getNotificationStreamUrl, listNotifications } from "@/lib/ops-api";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 
 interface DashboardTopBarProps {
   breadcrumb?: string;
@@ -17,6 +18,7 @@ interface DashboardTopBarProps {
 
 export function DashboardTopBar({ breadcrumb = "Dashboard", subtext, onMenuToggle, className, rightElement }: DashboardTopBarProps) {
   const [unread, setUnread] = useState(0);
+  const isOnline = useOnlineStatus();
 
   useEffect(() => {
     let mounted = true;
@@ -35,6 +37,12 @@ export function DashboardTopBar({ breadcrumb = "Dashboard", subtext, onMenuToggl
 
     void refresh();
 
+    if (!isOnline) {
+      return () => {
+        mounted = false;
+      };
+    }
+
     const source = new EventSource(getNotificationStreamUrl());
     source.onmessage = () => {
       void refresh();
@@ -44,7 +52,7 @@ export function DashboardTopBar({ breadcrumb = "Dashboard", subtext, onMenuToggl
       mounted = false;
       source.close();
     };
-  }, []);
+  }, [isOnline]);
 
   return (
     <div className={cn("border-b bg-card", className)}>

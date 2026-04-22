@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     FIREBASE_SERVICE_ACCOUNT_PATH: str
     FIREBASE_DATABASE_URL: str | None = None
     GEMINI_API_KEY: str
+    GEMINI_API_VERSION: str = "v1beta"
+    GEMINI_FLASH_MODEL: str = "gemini-2.5-flash-lite"
+    GEMINI_PRO_MODEL: str = "gemini-2.5-flash-lite"
+    GEMINI_VISION_MODEL: str = "gemini-2.5-flash-lite"
+    COPILOT_VERTEX_PROJECT_ID: str = ""
+    COPILOT_VERTEX_LOCATION: str = "us-central1"
+    COPILOT_VERTEX_MODEL: str = "gemini-2.5-flash-lite"
     GCS_BUCKET_NAME: str
     GCP_SERVICE_ACCOUNT_PATH: str | None = None
     JWT_SECRET_KEY: str = "change-me-in-env"
@@ -27,6 +34,9 @@ class Settings(BaseSettings):
     COPILOT_CACHE_TTL_SECONDS: int = 45
     COPILOT_VOICE_COALESCE_ENABLED: bool = True
     COPILOT_VOICE_BURST_WINDOW_MS: int = 850
+    COPILOT_AUTO_CREATE_MISSIONS: bool = False
+
+    SPEECH_TO_TEXT_DEFAULT_LANGUAGE: str = "en-US"
 
     PUBLIC_TRACKING_SALT: str = ""
     PUBLIC_SYNTHESIS_MIN_REPORTS: int = 5

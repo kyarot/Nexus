@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { MapPicker } from "@/components/nexus/MapPicker";
 import { deriveZoneInfo } from "@/lib/location-utils";
+import { fetchWithOutbox } from "@/lib/offline-outbox";
 
 const splitCsv = (value: string): string[] =>
   value
@@ -75,6 +76,7 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
   const [missionId, setMissionId] = useState<string | null>(null);
   const [activeMission, setActiveMission] = useState<any | null>(null);
   const languages = ["Kannada", "Hindi", "Telugu", "Tamil", "Bengali", "Marathi", "English"];
+  const [isQueued, setIsQueued] = useState(false);
 
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -286,16 +288,14 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
       missionId: activeMission.id,
       zoneId: activeMission.zoneId || zoneInfo.zoneId,
       needType,
-      severity,
       familiesAffected,
       personsAffected,
       location: {
         lat: location.lat || 12.9716,
         lng: location.lng || 77.5946,
         address: location.address || zoneInfo.zoneLabel,
-        landmark: location.address || zoneInfo.zoneLabel
+        landmark: location.address || zoneInfo.zoneLabel,
       },
-      inputType: "voice",
       sourceType: "voice",
       householdRef: reportMeta.householdRef || extractedData?.householdRef || null,
       visitType: reportMeta.visitType || "first_visit",
@@ -346,7 +346,8 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
     };
 
     try {
-      const response = await fetch(`${apiBaseUrl}/fieldworker/reports`, {
+      setIsQueued(false);
+      const { response, queued } = await fetchWithOutbox(`${apiBaseUrl}/fieldworker/reports`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -355,7 +356,16 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
         body: JSON.stringify(payload)
       });
 
-      if (!response.ok) throw new Error("Failed to submit report");
+      if (queued) {
+        setIsQueued(true);
+        setIsMerged(false);
+        setReportId(queued.outboxId);
+        setMissionId(null);
+        setStep("submitted");
+        return;
+      }
+
+      if (!response?.ok) throw new Error("Failed to submit report");
 
       const data = await response.json();
       setIsMerged(data.merged);
@@ -378,10 +388,14 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
            </div>
            <div className="space-y-2">
               <h2 className="text-3xl font-bold text-[#1A1A3D]">
-                {isMerged ? "Report added to active mission!" : "Voice Report Submitted!"}
+                {isMerged ? "Report added to active mission!" : isQueued ? "Report queued" : "Voice Report Submitted!"}
               </h2>
               <p className="text-slate-500 font-medium">
-                {isMerged ? "Your report has been transcribed and linked to an ongoing mission." : "Your report has been transcribed and synced."}
+                {isMerged
+                  ? "Your report has been transcribed and linked to an ongoing mission."
+                  : isQueued
+                  ? "Will sync automatically when you are back online."
+                  : "Your report has been transcribed and synced."}
               </p>
            </div>
 
@@ -399,11 +413,11 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
              </div>
            ) : (
              <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-left">
-                <Database className="w-5 h-5 text-emerald-600" />
-                <div>
-                   <p className="text-sm font-bold text-emerald-900">Syncing to Nexus...</p>
-                   <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Voice ID: {reportId || "Pending"}</p>
-                </div>
+               <Database className="w-5 h-5 text-emerald-600" />
+               <div>
+                 <p className="text-sm font-bold text-emerald-900">{isQueued ? "Queued for sync" : "Syncing to Nexus..."}</p>
+                 <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Voice ID: {reportId || "Pending"}</p>
+               </div>
              </div>
            )}
            

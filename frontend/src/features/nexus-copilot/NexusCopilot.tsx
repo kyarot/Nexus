@@ -39,6 +39,9 @@ type CopilotActionConfirmResponse = {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 const DEFAULT_SUGGESTIONS: string[] = [];
 const VOICE_SILENCE_DELAY_MS = 2200;
+const VOICE_MIN_RECORD_MS = 500;
+const VAD_LEVEL_FLOOR = 0.008;
+const VAD_LEVEL_MULTIPLIER = 2.6;
 const INTERRUPT_COPY = "Uh oh. I got interrupted. Say that again when you're ready.";
 
 type SpeechRecognitionLike = {
@@ -108,6 +111,41 @@ export function NexusCopilot() {
   const silenceTimerRef = useRef<number | null>(null);
   const transcriptBufferRef = useRef<string>("");
   const shouldAutoListenRef = useRef(false);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const vadFrameRef = useRef<number | null>(null);
+  const speechActiveRef = useRef(false);
+  const lastSpeechAtRef = useRef<number>(0);
+  const recordStartAtRef = useRef<number>(0);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const noiseFloorRef = useRef<number>(VAD_LEVEL_FLOOR);
+  const usingRecorderRef = useRef(false);
+  const suppressRecorderSubmitRef = useRef(false);
+
+  const stopVadLoop = () => {
+    if (vadFrameRef.current) {
+      window.cancelAnimationFrame(vadFrameRef.current);
+      vadFrameRef.current = null;
+    }
+  };
+
+  const resetAudioPipeline = () => {
+    stopVadLoop();
+    mediaRecorderRef.current = null;
+    recordedChunksRef.current = [];
+    speechActiveRef.current = false;
+    lastSpeechAtRef.current = 0;
+    recordStartAtRef.current = 0;
+    analyserRef.current = null;
+    audioContextRef.current?.close().catch(() => undefined);
+    audioContextRef.current = null;
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+    }
+  };
 
   const clearSilenceTimer = () => {
     if (silenceTimerRef.current) {
@@ -129,6 +167,150 @@ export function NexusCopilot() {
     }
   };
 
+  const resolveRecorderMimeType = () => {
+    if (typeof MediaRecorder === "undefined") {
+      return "";
+    }
+    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+    return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || "";
+  };
+
+  const ensureAudioStream = async () => {
+    if (audioStreamRef.current) {
+      return audioStreamRef.current;
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioStreamRef.current = stream;
+    return stream;
+  };
+
+  const startMediaRecorder = async () => {
+    if (mediaRecorderRef.current?.state === "recording") {
+      return;
+    }
+    if (typeof MediaRecorder === "undefined") {
+      setError("Voice recording is not supported in this browser.");
+      return;
+    }
+    const stream = await ensureAudioStream();
+    const mimeType = resolveRecorderMimeType();
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    recordedChunksRef.current = [];
+    suppressRecorderSubmitRef.current = false;
+
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        recordedChunksRef.current.push(event.data);
+      }
+    };
+
+    recorder.onstop = () => {
+      const chunks = recordedChunksRef.current;
+      recordedChunksRef.current = [];
+      if (suppressRecorderSubmitRef.current) {
+        suppressRecorderSubmitRef.current = false;
+        return;
+      }
+      const elapsed = performance.now() - recordStartAtRef.current;
+      if (!chunks.length || elapsed < VOICE_MIN_RECORD_MS || isQueryLoading) {
+        return;
+      }
+      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+      void submitVoiceBlob(blob);
+    };
+
+    recorder.start();
+    mediaRecorderRef.current = recorder;
+    recordStartAtRef.current = performance.now();
+  };
+
+  const stopMediaRecorder = () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state !== "recording") {
+      return;
+    }
+    try {
+      recorder.stop();
+    } catch {
+      // Ignore recorder stop errors.
+    }
+  };
+
+  const startVoiceCapture = async () => {
+    if (isMuted || !sessionId || isSessionLoading || isQueryLoading || !isOpen) {
+      return;
+    }
+    if (vadFrameRef.current) {
+      setVoiceState("listening");
+      return;
+    }
+    suppressRecorderSubmitRef.current = false;
+
+    try {
+      const stream = await ensureAudioStream();
+      const audioContext = audioContextRef.current || new AudioContext();
+      audioContextRef.current = audioContext;
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      noiseFloorRef.current = VAD_LEVEL_FLOOR;
+
+      const buffer = new Uint8Array(analyser.fftSize);
+      const analyze = () => {
+        if (!analyserRef.current) {
+          return;
+        }
+        analyserRef.current.getByteTimeDomainData(buffer);
+        let sum = 0;
+        for (let i = 0; i < buffer.length; i += 1) {
+          const value = (buffer[i] - 128) / 128;
+          sum += value * value;
+        }
+        const rms = Math.sqrt(sum / buffer.length);
+        const threshold = Math.max(noiseFloorRef.current * VAD_LEVEL_MULTIPLIER, VAD_LEVEL_FLOOR);
+        const now = performance.now();
+
+        if (rms > threshold) {
+          lastSpeechAtRef.current = now;
+          if (!speechActiveRef.current) {
+            speechActiveRef.current = true;
+            setVoiceState("listening");
+            void startMediaRecorder();
+          }
+        } else if (!speechActiveRef.current) {
+          noiseFloorRef.current = noiseFloorRef.current * 0.9 + rms * 0.1;
+        }
+
+        if (speechActiveRef.current && now - lastSpeechAtRef.current > VOICE_SILENCE_DELAY_MS) {
+          speechActiveRef.current = false;
+          stopMediaRecorder();
+        }
+
+        vadFrameRef.current = window.requestAnimationFrame(analyze);
+      };
+
+      stopVadLoop();
+      vadFrameRef.current = window.requestAnimationFrame(analyze);
+      setVoiceState("listening");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Microphone access failed.";
+      setError(message);
+      resetAudioPipeline();
+      setVoiceState("idle");
+    }
+  };
+
+  const stopVoiceCapture = () => {
+    suppressRecorderSubmitRef.current = true;
+    stopMediaRecorder();
+    resetAudioPipeline();
+  };
+
   const maybeRestartRecognition = () => {
     if (!shouldAutoListenRef.current || isMuted || !sessionId || isSessionLoading || isQueryLoading || !isOpen) {
       return;
@@ -136,14 +318,27 @@ export function NexusCopilot() {
 
     const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionImpl) {
+      usingRecorderRef.current = true;
+      void startVoiceCapture();
       return;
     }
+
+    usingRecorderRef.current = false;
 
     const recognition = recognitionRef.current || new SpeechRecognitionImpl();
     recognitionRef.current = recognition;
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
+
+    const fallbackToRecorder = (reason?: string) => {
+      if (reason) {
+        setError(reason);
+      }
+      usingRecorderRef.current = true;
+      stopRecognition();
+      void startVoiceCapture();
+    };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       clearSilenceTimer();
@@ -184,8 +379,13 @@ export function NexusCopilot() {
       }
     };
 
-    recognition.onerror = () => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       clearSilenceTimer();
+      const error = String(event?.error || "").toLowerCase();
+      if (error === "not-allowed" || error === "service-not-allowed" || error === "audio-capture") {
+        fallbackToRecorder("Microphone access was blocked. Trying voice capture instead.");
+        return;
+      }
       setVoiceState(isMuted ? "idle" : "listening");
     };
 
@@ -194,10 +394,14 @@ export function NexusCopilot() {
       if (shouldAutoListenRef.current && !isMuted && !isQueryLoading && isOpen) {
         window.setTimeout(() => {
           try {
-            recognition.start();
-            setVoiceState("listening");
+            if (usingRecorderRef.current) {
+              void startVoiceCapture();
+            } else {
+              recognition.start();
+              setVoiceState("listening");
+            }
           } catch {
-            // Ignore duplicate-start races.
+            fallbackToRecorder();
           }
         }, 180);
       }
@@ -207,7 +411,7 @@ export function NexusCopilot() {
       recognition.start();
       setVoiceState("listening");
     } catch {
-      // Ignore duplicate-start races.
+      fallbackToRecorder();
     }
   };
 
@@ -287,6 +491,7 @@ export function NexusCopilot() {
   const closeOverlay = () => {
     shouldAutoListenRef.current = false;
     stopRecognition();
+    stopVoiceCapture();
     queryAbortRef.current?.abort();
     queryAbortRef.current = null;
     audioRef.current?.pause();
@@ -302,6 +507,13 @@ export function NexusCopilot() {
   const playSpeech = async (audioBase64?: string, audioMimeType?: string) => {
     if (!audioBase64 || !isSpeakerEnabled || isMuted) {
       setVoiceState("idle");
+      if (!isMuted && isOpen) {
+        if (usingRecorderRef.current) {
+          void startVoiceCapture();
+        } else {
+          maybeRestartRecognition();
+        }
+      }
       return;
     }
 
@@ -318,7 +530,11 @@ export function NexusCopilot() {
       audioRef.current = null;
       setVoiceState("idle");
       if (!isMuted && isOpen) {
-        maybeRestartRecognition();
+        if (usingRecorderRef.current) {
+          void startVoiceCapture();
+        } else {
+          maybeRestartRecognition();
+        }
       }
     };
   };
@@ -343,6 +559,8 @@ export function NexusCopilot() {
       setIsQueryLoading(true);
       setVoiceState("thinking");
       setError(null);
+      stopRecognition();
+      stopVoiceCapture();
 
       const formData = new FormData();
       formData.append("session_id", sessionId);
@@ -395,6 +613,7 @@ export function NexusCopilot() {
     transcriptBufferRef.current = "";
     clearSilenceTimer();
     stopRecognition();
+    stopVoiceCapture();
     setVoiceState("idle");
     setQuery("");
   };
@@ -431,6 +650,8 @@ export function NexusCopilot() {
     setVoiceState("thinking");
     setError(null);
     setLastQuery(input);
+    stopRecognition();
+    stopVoiceCapture();
 
     const response = await fetch(`${API_BASE_URL}/copilot/query/stream`, {
       method: "POST",
@@ -550,6 +771,7 @@ export function NexusCopilot() {
     }
     clearSilenceTimer();
     stopRecognition();
+    stopVoiceCapture();
     shouldAutoListenRef.current = !isMuted;
     audioRef.current?.pause();
     audioRef.current = null;

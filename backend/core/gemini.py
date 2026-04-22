@@ -5,13 +5,11 @@ from google.genai.types import HttpOptions
 from core.config import settings
 
 # Initialize the Gen AI Client
-# Targeting stable v1 API
 client = genai.Client(
     api_key=settings.GEMINI_API_KEY,
-    http_options=HttpOptions(api_version="v1")
+    http_options=HttpOptions(api_version=str(settings.GEMINI_API_VERSION or "v1beta"))
 )
 
-# Using Gemini 2.5 Flash as requested.
-GEMINI_PRO = "gemini-2.5-flash-lite"
-GEMINI_FLASH = "gemini-2.5-flash-lite"
-GEMINI_VISION = "gemini-2.5-flash-lite"
+GEMINI_PRO = str(settings.GEMINI_PRO_MODEL or "gemini-2.5-flash-lite")
+GEMINI_FLASH = str(settings.GEMINI_FLASH_MODEL or "gemini-2.5-flash-lite")
+GEMINI_VISION = str(settings.GEMINI_VISION_MODEL or "gemini-2.5-flash-lite")

@@ -11,6 +11,7 @@ import { CommunityPulseDonut } from "@/components/coordinator/CommunityPulseDonu
 import { MissionStatusChip } from "@/components/coordinator/MissionStatusChip";
 import { ZoneRiskBadge } from "@/components/coordinator/ZoneRiskBadge";
 import { cn } from "@/lib/utils";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import {
   getCoordinatorDashboard,
   getCoordinatorTerrainSnapshot,
@@ -56,6 +57,7 @@ const quickActions = [
 export default function Dashboard() {
   const token = localStorage.getItem("nexus_access_token");
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const isOnline = useOnlineStatus();
 
   const dashboardQuery = useQuery({
     queryKey: ["coordinator-dashboard", token],
@@ -81,7 +83,7 @@ export default function Dashboard() {
   const { data, isLoading } = dashboardQuery;
 
   useEffect(() => {
-    if (!token) {
+    if (!token || !isOnline) {
       return;
     }
 
@@ -106,7 +108,7 @@ export default function Dashboard() {
     return () => {
       source.close();
     };
-  }, [apiBaseUrl, dashboardQuery, token]);
+  }, [apiBaseUrl, dashboardQuery, token, isOnline]);
 
   const zones = data?.zones ?? [];
   const heatmapPoints = data?.heatmap ?? [];

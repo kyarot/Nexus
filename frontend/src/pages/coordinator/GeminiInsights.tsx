@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCoordinatorInsights, synthesizeCoordinatorInsights } from "@/lib/coordinator-api";
 import { getNotificationStreamUrl, listNotifications, streamGeminiChat, type NotificationItem } from "@/lib/ops-api";
 import { useToast } from "@/hooks/use-toast";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 
 const promptChips = ["Summarize all zones", "What worked in Hebbal?", "Generate policy brief"];
 
@@ -27,6 +28,7 @@ export default function GeminiInsights() {
   const queryClient = useQueryClient();
   const token = localStorage.getItem("nexus_access_token");
   const { toast } = useToast();
+  const isOnline = useOnlineStatus();
 
   const insightsQuery = useQuery({
     queryKey: ["coordinator-insights"],
@@ -55,7 +57,7 @@ export default function GeminiInsights() {
   }, [insights]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !isOnline) return;
     const streamUrl = getNotificationStreamUrl();
     const source = new EventSource(streamUrl);
 
@@ -77,7 +79,7 @@ export default function GeminiInsights() {
     return () => {
       source.close();
     };
-  }, [notificationsQuery, token]);
+  }, [notificationsQuery, token, isOnline]);
 
   const synthesisHistory = useMemo(() => {
     const notifications = notificationsQuery.data?.notifications ?? [];

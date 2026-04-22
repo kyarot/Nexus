@@ -8,6 +8,7 @@ import { SignalPill } from "@/components/coordinator/SignalPill";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import {
   getCoordinatorTerrainSidebar,
   getCoordinatorTerrainSnapshot,
@@ -26,6 +27,7 @@ export default function NeedTerrainMapPage() {
 
   const token = localStorage.getItem("nexus_access_token");
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const isOnline = useOnlineStatus();
 
   const terrainSnapshotQuery = useQuery({
     queryKey: ["coordinator-terrain-snapshot", token, activeFilter],
@@ -93,7 +95,7 @@ export default function NeedTerrainMapPage() {
   const selectedHistory = selectedHistoryQuery.data?.history ?? selectedZone?.scoreHistory ?? [];
 
   useEffect(() => {
-    if (!token) {
+    if (!token || !isOnline) {
       return;
     }
 
@@ -132,6 +134,7 @@ export default function NeedTerrainMapPage() {
     selectedZoneQuery,
     selectedHistoryQuery,
     selectedSidebarQuery,
+    isOnline
   ]);
 
   useEffect(() => {

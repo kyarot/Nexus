@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import {
   createMissionFromDriftAlert,
   dismissCoordinatorDriftAlert,
@@ -16,6 +17,7 @@ import {
   getCoordinatorDriftAlerts,
   type CoordinatorDriftAlert,
 } from "@/lib/coordinator-api";
+import { isQueuedResult } from "@/lib/offline-outbox";
 
 const relativeTime = (value?: string | null) => {
   if (!value) return "just now";
@@ -41,6 +43,7 @@ export default function AlertsFeed() {
   const token = localStorage.getItem("nexus_access_token");
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const { toast } = useToast();
+  const isOnline = useOnlineStatus();
 
   const [filter, setFilter] = useState("All");
   const [expandedResolved, setExpandedResolved] = useState<string[]>([]);
@@ -62,6 +65,13 @@ export default function AlertsFeed() {
   const createMissionMutation = useMutation({
     mutationFn: (alertId: string) => createMissionFromDriftAlert(alertId),
     onSuccess: (payload) => {
+      if (isQueuedResult(payload)) {
+        toast({
+          title: "Mission queued",
+          description: "Will sync when connectivity returns.",
+        });
+        return;
+      }
       alertsQuery.refetch();
       toast({
         title: payload.created ? "Mission created" : "Mission already linked",
@@ -77,7 +87,11 @@ export default function AlertsFeed() {
 
   const dismissMutation = useMutation({
     mutationFn: ({ alertId, reason }: { alertId: string; reason: string }) => dismissCoordinatorDriftAlert(alertId, reason),
-    onSuccess: () => {
+    onSuccess: (payload) => {
+      if (isQueuedResult(payload)) {
+        toast({ title: "Dismissal queued", description: "Will sync when connectivity returns." });
+        return;
+      }
       alertsQuery.refetch();
       toast({ title: "Alert dismissed", description: "Dismiss reason saved." });
     },
@@ -87,7 +101,7 @@ export default function AlertsFeed() {
   });
 
   useEffect(() => {
-    if (!token) {
+    if (!token || !isOnline) {
       return;
     }
 
@@ -112,7 +126,7 @@ export default function AlertsFeed() {
     return () => {
       source.close();
     };
-  }, [alertsQuery, apiBaseUrl, token]);
+  }, [alertsQuery, apiBaseUrl, token, isOnline]);
 
   const alerts = alertsQuery.data?.alerts ?? [];
   const counts = alertsQuery.data?.counts;

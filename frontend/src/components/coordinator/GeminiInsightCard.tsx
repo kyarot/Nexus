@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { createCoordinatorMission } from "@/lib/coordinator-api";
+import { isQueuedResult } from "@/lib/offline-outbox";
 
 type InsightVariant = "critical" | "high" | "watch" | "resolved";
 
@@ -115,6 +116,15 @@ export function GeminiInsightCard({
         allowAutoAssign: true,
         sourceReportIds: (sourceReports || []).map((report) => report.id),
       });
+
+      if (isQueuedResult(result)) {
+        setMissionCreated(true);
+        toast({
+          title: "Mission queued",
+          description: "Will sync when connectivity returns.",
+        });
+        return;
+      }
 
       const assigned = Boolean(result?.mission?.assignedTo);
       setMissionCreated(true);
