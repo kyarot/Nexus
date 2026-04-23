@@ -287,7 +287,7 @@ export default function VolunteerDashboard() {
                 <circle cx="80" cy="80" r="70" stroke="#EEF0FF" strokeWidth="8" fill="transparent" />
                 <circle 
                   cx="80" cy="80" r="70" stroke="#3730A3" strokeWidth="10" fill="transparent" 
-                  strokeDasharray="440" strokeDashoffset="110"
+                  strokeDasharray="440"
                   strokeDashoffset={strokeDashoffset}
                   strokeLinecap="round"
                   className="drop-shadow-[0_0_8px_rgba(55,48,163,0.2)]"

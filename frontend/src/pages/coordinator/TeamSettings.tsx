@@ -79,8 +79,8 @@ const TeamSettings = () => {
         rightElement={
           <Sheet open={isInviteOpen} onOpenChange={setIsInviteOpen}>
             <SheetTrigger asChild>
-              <Button className="bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] hover:from-[#4338CA] hover:to-[#6D28D9] text-white font-black text-xs uppercase tracking-widest px-6 h-11 rounded-xl shadow-lg shadow-indigo-200/50 flex gap-2">
-                <Plus className="w-4 h-4" /> Invite Member
+              <Button className="bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] hover:from-[#4338CA] hover:to-[#6D28D9] text-white font-black text-xs uppercase tracking-widest px-4 md:px-6 h-11 rounded-xl shadow-lg shadow-indigo-200/50 flex gap-2">
+                <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Invite Member</span><span className="sm:hidden">Invite</span>
               </Button>
             </SheetTrigger>
             <SheetContent className="w-full sm:max-w-[440px] p-0 border-l border-slate-100 font-['Plus_Jakarta_Sans']">
@@ -162,28 +162,28 @@ const TeamSettings = () => {
       />
       
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-[720px] mx-auto p-8 space-y-10 pb-24">
+        <div className="max-w-[720px] mx-auto p-4 md:p-8 space-y-8 md:space-y-10 pb-20 md:pb-24">
           
           {/* Header */}
           <div className="space-y-1">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-[#4F46E5]">
-                <Users className="w-6 h-6" />
+              <div className="w-8 h-8 md:w-10 md:h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-[#4F46E5]">
+                <Users className="w-5 h-5 md:w-6 md:h-6" />
               </div>
-              <h1 className="text-3xl font-bold text-[#1A1A3D]">Team</h1>
+              <h1 className="text-2xl md:text-3xl font-bold text-[#1A1A3D]">Team</h1>
             </div>
-            <p className="text-[#64748B] font-medium text-base">Manage who has access to your NGO's Nexus workspace</p>
+            <p className="text-[#64748B] font-medium text-sm md:text-base">Manage who has access to your NGO's Nexus workspace</p>
           </div>
 
           {/* Role Legend Card */}
-          <div className="bg-white rounded-[2rem] p-6 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100">
-            <div className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-100">
+          <div className="bg-white rounded-2xl md:rounded-[2rem] p-4 md:p-6 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100">
+            <div className="flex flex-col divide-y md:divide-y-0 md:flex-row md:divide-x divide-slate-100">
               {[
                 { label: "Admin", color: "bg-purple-600", desc: "Full access, billing, settings", dot: "bg-purple-100" },
                 { label: "Coordinator", color: "bg-[#4F46E5]", desc: "Missions, volunteers, reports", dot: "bg-indigo-100" },
                 { label: "Viewer", color: "bg-slate-400", desc: "Read-only access to dashboard", dot: "bg-slate-100" },
               ].map((role) => (
-                <div key={role.label} className="flex-1 px-4 py-4 md:py-0 first:pl-0 last:pr-0 space-y-1.5 text-center md:text-left">
+                <div key={role.label} className="flex-1 px-0 md:px-4 py-4 md:py-0 first:pl-0 last:pr-0 space-y-1.5 text-center md:text-left">
                   <div className="flex items-center justify-center md:justify-start gap-2">
                     <div className={cn("w-2 h-2 rounded-full", role.color)} />
                     <span className="text-[11px] font-black uppercase tracking-widest text-[#1A1A3D]">{role.label}</span>
@@ -195,92 +195,94 @@ const TeamSettings = () => {
           </div>
 
           {/* Team Members List */}
-          <div className="bg-white rounded-[2rem] shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 overflow-hidden">
-            <Table>
-              <TableHeader className="bg-[#4F46E5] border-none">
-                <TableRow className="hover:bg-[#4F46E5] border-none">
-                  <TableHead className="py-4 px-6 text-[10px] font-black uppercase tracking-widest text-white/70">Name</TableHead>
-                  <TableHead className="py-4 px-6 text-[10px] font-black uppercase tracking-widest text-white/70">Role</TableHead>
-                  <TableHead className="py-4 px-6 text-[10px] font-black uppercase tracking-widest text-white/70 text-center">Zones</TableHead>
-                  <TableHead className="py-4 px-6 text-[10px] font-black uppercase tracking-widest text-white/70 text-right">Last Active</TableHead>
-                  <TableHead className="py-4 px-6 text-[10px] font-black uppercase tracking-widest text-white/70 text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {teamMembers.map((member, i) => (
-                  <TableRow key={member.name} className={cn("border-slate-50", i % 2 !== 0 ? "bg-[#F8F9FA]" : "bg-white")}>
-                    <TableCell className="py-4 px-6">
-                      <div className="flex items-center gap-3">
-                        <div className={cn("w-10 h-10 rounded-full flex items-center justify-center text-xs font-black shrink-0", member.color)}>
-                          {member.initials}
-                        </div>
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-black text-[#1A1A3D]">{member.name}</p>
-                            {member.isSelf && (
-                              <Badge className="bg-indigo-100 text-[#4F46E5] border-none text-[8px] font-black uppercase px-1.5 py-0">You</Badge>
-                            )}
-                          </div>
-                          <p className="text-[11px] font-medium text-slate-400 leading-tight">{member.email}</p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-4 px-6">
-                      <Badge className={cn(
-                        "border-none text-[9px] font-black uppercase px-2 py-0.5 tracking-widest",
-                        member.role === "Admin" ? "bg-purple-100 text-purple-600" :
-                        member.role === "Coordinator" ? "bg-indigo-100 text-[#4F46E5]" :
-                        member.role === "Viewer" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-600"
-                      )}>
-                        {member.role}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="py-4 px-6 text-center">
-                      <div className="flex flex-wrap justify-center gap-1">
-                        {member.zones.map((zone) => (
-                          <Badge key={zone} variant="outline" className="text-[9px] border-slate-200 text-slate-500 font-bold px-2 py-0.5 bg-white">{zone}</Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-4 px-6 text-right">
-                      {member.isPending ? (
-                        <div className="flex items-center justify-end gap-1.5">
-                          <Clock className="w-3 h-3 text-amber-500" />
-                          <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest">Pending</span>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col items-end">
-                          <div className="flex items-center gap-1.5">
-                            {member.lastActive === "Active now" && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
-                            <span className={cn("text-[11px] font-bold", member.lastActive === "Active now" ? "text-emerald-600" : "text-slate-400")}>
-                                {member.lastActive}
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="py-4 px-6 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {member.isPending ? (
-                          <>
-                            <Button variant="ghost" className="h-8 text-[#4F46E5] font-black text-[9px] uppercase tracking-widest hover:bg-indigo-50 px-2">Resend</Button>
-                            <Button variant="ghost" className="h-8 text-red-400 hover:text-red-500 hover:bg-red-50 px-2"><X className="w-4 h-4" /></Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button variant="ghost" className="h-8 w-8 p-0 text-slate-300 hover:text-[#4F46E5] hover:bg-indigo-50"><Pencil className="w-4 h-4" /></Button>
-                            {!member.isSelf && (
-                              <Button variant="ghost" className="h-8 w-8 p-0 text-slate-300 hover:text-red-400 hover:bg-red-50"><Trash2 className="w-4 h-4" /></Button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
+          <div className="bg-white rounded-2xl md:rounded-[2rem] shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader className="bg-[#4F46E5] border-none">
+                  <TableRow className="hover:bg-[#4F46E5] border-none">
+                    <TableHead className="py-4 px-4 md:px-6 text-[10px] font-black uppercase tracking-widest text-white/70">Name</TableHead>
+                    <TableHead className="py-4 px-4 md:px-6 text-[10px] font-black uppercase tracking-widest text-white/70">Role</TableHead>
+                    <TableHead className="py-4 px-4 md:px-6 text-[10px] font-black uppercase tracking-widest text-white/70 text-center hidden sm:table-cell">Zones</TableHead>
+                    <TableHead className="py-4 px-4 md:px-6 text-[10px] font-black uppercase tracking-widest text-white/70 text-right">Last Active</TableHead>
+                    <TableHead className="py-4 px-4 md:px-6 text-[10px] font-black uppercase tracking-widest text-white/70 text-right">Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="p-5 border-t border-slate-50 flex items-center justify-between text-[11px] font-black text-slate-400 uppercase tracking-[0.1em] bg-white">
+                </TableHeader>
+                <TableBody>
+                  {teamMembers.map((member, i) => (
+                    <TableRow key={member.name} className={cn("border-slate-50", i % 2 !== 0 ? "bg-[#F8F9FA]" : "bg-white")}>
+                      <TableCell className="py-4 px-4 md:px-6">
+                        <div className="flex items-center gap-3">
+                          <div className={cn("w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center text-xs font-black shrink-0", member.color)}>
+                            {member.initials}
+                          </div>
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-black text-[#1A1A3D] truncate">{member.name}</p>
+                              {member.isSelf && (
+                                <Badge className="bg-indigo-100 text-[#4F46E5] border-none text-[8px] font-black uppercase px-1.5 py-0">You</Badge>
+                              )}
+                            </div>
+                            <p className="text-[11px] font-medium text-slate-400 leading-tight truncate">{member.email}</p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-4 px-4 md:px-6">
+                        <Badge className={cn(
+                          "border-none text-[9px] font-black uppercase px-2 py-0.5 tracking-widest",
+                          member.role === "Admin" ? "bg-purple-100 text-purple-600" :
+                          member.role === "Coordinator" ? "bg-indigo-100 text-[#4F46E5]" :
+                          member.role === "Viewer" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-600"
+                        )}>
+                          {member.role}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-4 px-4 md:px-6 text-center hidden sm:table-cell">
+                        <div className="flex flex-wrap justify-center gap-1">
+                          {member.zones.map((zone) => (
+                            <Badge key={zone} variant="outline" className="text-[9px] border-slate-200 text-slate-500 font-bold px-2 py-0.5 bg-white">{zone}</Badge>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-4 px-4 md:px-6 text-right">
+                        {member.isPending ? (
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Clock className="w-3 h-3 text-amber-500" />
+                            <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest">Pending</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-end">
+                            <div className="flex items-center gap-1.5">
+                              {member.lastActive === "Active now" && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
+                              <span className={cn("text-[11px] font-bold", member.lastActive === "Active now" ? "text-emerald-600" : "text-slate-400")}>
+                                  {member.lastActive}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="py-4 px-4 md:px-6 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {member.isPending ? (
+                            <>
+                              <Button variant="ghost" className="h-8 text-[#4F46E5] font-black text-[9px] uppercase tracking-widest hover:bg-indigo-50 px-2">Resend</Button>
+                              <Button variant="ghost" className="h-8 text-red-400 hover:text-red-500 hover:bg-red-50 px-2"><X className="w-4 h-4" /></Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button variant="ghost" className="h-8 w-8 p-0 text-slate-300 hover:text-[#4F46E5] hover:bg-indigo-50"><Pencil className="w-4 h-4" /></Button>
+                              {!member.isSelf && (
+                                <Button variant="ghost" className="h-8 w-8 p-0 text-slate-300 hover:text-red-400 hover:bg-red-50"><Trash2 className="w-4 h-4" /></Button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="p-4 md:p-5 border-t border-slate-50 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] font-black text-slate-400 uppercase tracking-[0.1em] bg-white">
               <span>5 members · 1 pending invite</span>
               <div className="flex gap-2">
                 <Button disabled variant="outline" className="h-8 px-3 text-[10px] uppercase font-black tracking-widest border-slate-100 text-slate-300">Prev</Button>
@@ -290,10 +292,10 @@ const TeamSettings = () => {
           </div>
 
           {/* Permissions Matrix */}
-          <div className="bg-white rounded-[2rem] shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 overflow-hidden">
+          <div className="bg-white rounded-2xl md:rounded-[2rem] shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 overflow-hidden">
             <Accordion type="single" collapsible className="w-full">
               <AccordionItem value="permissions" className="border-none">
-                <AccordionTrigger className="px-8 py-6 hover:no-underline group">
+                <AccordionTrigger className="px-6 md:px-8 py-6 hover:no-underline group">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-[#4F46E5]">
                       <Shield className="w-4 h-4" />
@@ -302,39 +304,41 @@ const TeamSettings = () => {
                   </div>
                 </AccordionTrigger>
                 <AccordionContent>
-                  <div className="px-8 pb-8">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="border-slate-50 hover:bg-transparent">
-                          <TableHead className="text-[10px] font-black uppercase tracking-widest text-[#1A1A3D] py-4">Feature</TableHead>
-                          <TableHead className="text-[10px] font-black uppercase tracking-widest text-[#1A1A3D] text-center py-4">Admin</TableHead>
-                          <TableHead className="text-[10px] font-black uppercase tracking-widest text-[#1A1A3D] text-center py-4">Coord.</TableHead>
-                          <TableHead className="text-[10px] font-black uppercase tracking-widest text-[#1A1A3D] text-center py-4">Viewer</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {permissions.map((p) => (
-                          <TableRow key={p.feature} className="border-slate-50 hover:bg-slate-50/30">
-                            <TableCell className="text-xs font-bold text-slate-500 py-4 capitalize">{p.feature}</TableCell>
-                            <TableCell className="text-center py-4">
-                              <div className="flex justify-center">
-                                {p.admin ? <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600"><Check className="w-3 h-3 stroke-[3]" /></div> : <X className="w-4 h-4 text-slate-200" />}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-center py-4">
-                              <div className="flex justify-center">
-                                {p.coord ? <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600"><Check className="w-3 h-3 stroke-[3]" /></div> : <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center text-slate-300"><X className="w-3 h-3 stroke-[3]" /></div>}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-center py-4">
-                              <div className="flex justify-center">
-                                {p.viewer ? <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600"><Check className="w-3 h-3 stroke-[3]" /></div> : <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center text-slate-300"><X className="w-3 h-3 stroke-[3]" /></div>}
-                              </div>
-                            </TableCell>
+                  <div className="px-6 md:px-8 pb-8">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-slate-50 hover:bg-transparent">
+                            <TableHead className="text-[10px] font-black uppercase tracking-widest text-[#1A1A3D] py-4">Feature</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase tracking-widest text-[#1A1A3D] text-center py-4">Admin</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase tracking-widest text-[#1A1A3D] text-center py-4">Coord.</TableHead>
+                            <TableHead className="text-[10px] font-black uppercase tracking-widest text-[#1A1A3D] text-center py-4">Viewer</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {permissions.map((p) => (
+                            <TableRow key={p.feature} className="border-slate-50 hover:bg-slate-50/30">
+                              <TableCell className="text-xs font-bold text-slate-500 py-4 capitalize">{p.feature}</TableCell>
+                              <TableCell className="text-center py-4">
+                                <div className="flex justify-center">
+                                  {p.admin ? <div className="w-4 h-4 md:w-5 md:h-5 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600"><Check className="w-2.5 h-2.5 md:w-3 md:h-3 stroke-[3]" /></div> : <X className="w-3 h-3 md:w-4 md:h-4 text-slate-200" />}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center py-4">
+                                <div className="flex justify-center">
+                                  {p.coord ? <div className="w-4 h-4 md:w-5 md:h-5 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600"><Check className="w-2.5 h-2.5 md:w-3 md:h-3 stroke-[3]" /></div> : <div className="w-4 h-4 md:w-5 md:h-5 rounded-full bg-slate-100 flex items-center justify-center text-slate-300"><X className="w-2.5 h-2.5 md:w-3 md:h-3 stroke-[3]" /></div>}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center py-4">
+                                <div className="flex justify-center">
+                                  {p.viewer ? <div className="w-4 h-4 md:w-5 md:h-5 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600"><Check className="w-2.5 h-2.5 md:w-3 md:h-3 stroke-[3]" /></div> : <div className="w-4 h-4 md:w-5 md:h-5 rounded-full bg-slate-100 flex items-center justify-center text-slate-300"><X className="w-2.5 h-2.5 md:w-3 md:h-3 stroke-[3]" /></div>}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   </div>
                 </AccordionContent>
               </AccordionItem>

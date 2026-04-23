@@ -193,18 +193,18 @@ export default function AlertsFeed() {
         </div>
 
         {/* Main content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="flex items-center justify-between mb-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 md:mb-6 gap-4">
             <div>
               <h1 className="text-xl font-bold text-foreground">Drift Alerts</h1>
               <p className="text-sm text-muted-foreground">
                 {counts ? `${counts.active + counts.actioned} active this week · ${counts.critical} critical` : "Live trend and prediction feed"}
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex gap-1">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <div className="flex gap-1 overflow-x-auto">
                 {["All", "Critical", "High", "Watch", "Actioned", "Resolved"].map((f) => (
-                  <button key={f} onClick={() => setFilter(f)} className={cn("rounded-pill px-3 py-1 text-xs font-medium transition-all", filter === f ? "bg-primary text-white" : "text-muted-foreground hover:bg-muted")}>{f}</button>
+                  <button key={f} onClick={() => setFilter(f)} className={cn("rounded-pill px-3 py-1 text-xs font-medium transition-all whitespace-nowrap", filter === f ? "bg-primary text-white" : "text-muted-foreground hover:bg-muted")}>{f}</button>
                 ))}
               </div>
               <button className="text-xs text-primary font-medium hover:underline" onClick={() => alertsQuery.refetch()}>Refresh</button>
@@ -224,7 +224,7 @@ export default function AlertsFeed() {
                 const createLabel = alert.severity === "watch" ? "Schedule Follow-up Survey →" : "Create Mission →";
 
                 return (
-                <div key={alert.id} className={cn("rounded-card border border-l-4 bg-card p-5 shadow-card transition-opacity", borderColor[zoneRisk], isResolvedLike && "opacity-80")}>
+                <div key={alert.id} className={cn("rounded-card border border-l-4 bg-card p-4 md:p-5 shadow-card transition-opacity", borderColor[zoneRisk], isResolvedLike && "opacity-80")}>
                   {showCollapsed ? (
                     <button onClick={() => setExpandedResolved((prev) => [...prev, alert.id])} className="flex w-full items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -235,7 +235,7 @@ export default function AlertsFeed() {
                     </button>
                   ) : (
                     <>
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
                           <span className="text-sm font-semibold text-foreground">{alert.title}</span>
                           <ZoneRiskBadge level={zoneRisk} />
@@ -265,9 +265,9 @@ export default function AlertsFeed() {
                       ) : null}
 
                       {!isResolvedLike && (
-                        <div className="mt-4 flex items-center gap-3">
+                        <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
                           <span className="text-xs text-muted-foreground">Detected {relativeTime(alert.triggeredAt || alert.createdAt)}</span>
-                          <div className="ml-auto flex gap-2">
+                          <div className="flex flex-wrap gap-2 sm:ml-auto">
                             <Button size="sm" variant="gradient" onClick={() => createMissionMutation.mutate(alert.id)} disabled={createMissionMutation.isPending}>
                               {createLabel}
                             </Button>

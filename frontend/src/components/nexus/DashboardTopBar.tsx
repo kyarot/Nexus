@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { getNotificationStreamUrl, listNotifications } from "@/lib/ops-api";
 import { useOnlineStatus } from "@/hooks/use-online-status";
+import { useSidebarStore } from "@/hooks/use-sidebar-store";
 
 interface DashboardTopBarProps {
   breadcrumb?: string;
@@ -19,6 +20,7 @@ interface DashboardTopBarProps {
 export function DashboardTopBar({ breadcrumb = "Dashboard", subtext, onMenuToggle, className, rightElement }: DashboardTopBarProps) {
   const [unread, setUnread] = useState(0);
   const isOnline = useOnlineStatus();
+  const { setIsOpen } = useSidebarStore();
 
   useEffect(() => {
     let mounted = true;
@@ -54,11 +56,23 @@ export function DashboardTopBar({ breadcrumb = "Dashboard", subtext, onMenuToggl
     };
   }, [isOnline]);
 
+  const handleMenuToggle = () => {
+    if (onMenuToggle) {
+      onMenuToggle();
+    } else {
+      // Toggle the GlobalSidebar on mobile
+      setIsOpen(true);
+    }
+  };
+
   return (
     <div className={cn("border-b bg-card", className)}>
-      <div className="flex items-center justify-between px-6 py-3">
+      <div className="flex items-center justify-between px-4 md:px-6 py-3">
         <div className="flex items-center gap-3">
-          <button onClick={onMenuToggle} className="lg:hidden text-muted-foreground hover:text-foreground">
+          <button 
+            onClick={handleMenuToggle} 
+            className="lg:hidden text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-muted transition-colors"
+          >
             <Menu className="h-5 w-5" />
           </button>
           <h1 className="text-lg font-bold text-foreground">{breadcrumb}</h1>
@@ -84,7 +98,7 @@ export function DashboardTopBar({ breadcrumb = "Dashboard", subtext, onMenuToggl
         </div>
       </div>
       {subtext && (
-        <div className="border-t px-6 py-2 text-xs text-muted-foreground flex items-center gap-2">
+        <div className="border-t px-4 md:px-6 py-2 text-xs text-muted-foreground flex items-center gap-2">
           <span className="h-1.5 w-1.5 rounded-full bg-success" />
           {subtext}
         </div>
