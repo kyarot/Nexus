@@ -5,7 +5,6 @@ import {
   Wifi, 
   WifiOff, 
   Navigation, 
-  Plus,
   Sun,
   ChevronRight,
   Database,
@@ -104,6 +103,32 @@ const FieldWorker = () => {
     zone: "Bengaluru South"
   });
 
+  const hasActiveMission = Boolean(activeMission?.id);
+
+  const handleNavigateToMission = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!hasActiveMission) {
+      setActiveTab("Active");
+      return;
+    }
+
+    const locationData = activeMission?.location || {};
+    const lat = Number(locationData?.lat);
+    const lng = Number(locationData?.lng);
+    const address = String(locationData?.address || "").trim();
+    const destination = Number.isFinite(lat) && Number.isFinite(lng)
+      ? `${lat},${lng}`
+      : address || activeMission?.zoneName || "";
+
+    if (!destination) {
+      setActiveTab("Active");
+      return;
+    }
+
+    const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
+    window.open(mapsUrl, "_blank", "noopener,noreferrer");
+  };
+
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const token = localStorage.getItem("nexus_access_token");
 
@@ -112,6 +137,7 @@ const FieldWorker = () => {
     apiBaseUrl,
     token,
     language: uiLanguage,
+    enabled: activeTab === "Dashboard",
     refreshKey: activeTab,
   });
 
@@ -232,6 +258,17 @@ const FieldWorker = () => {
     ? Math.round((logs.filter((log) => (log.status || "synced").toLowerCase() === "synced").length / logs.length) * 100)
     : 100;
   const reportsDelta = sessionStartReports === null ? 0 : Math.max(0, stats.totalReports - sessionStartReports);
+  const missionLocation = activeMission?.location || {};
+  const missionLat = Number(missionLocation?.lat);
+  const missionLng = Number(missionLocation?.lng);
+  const missionAddress = String(missionLocation?.address || "").trim();
+  const hasMissionCoords = Number.isFinite(missionLat) && Number.isFinite(missionLng) && Math.abs(missionLat) > 0.000001 && Math.abs(missionLng) > 0.000001;
+  const hasMissionLocation = hasMissionCoords || Boolean(missionAddress);
+  const missionMapUrl = hasMissionCoords
+    ? `https://www.google.com/maps?q=${encodeURIComponent(`${missionLat},${missionLng}`)}&z=15&output=embed`
+    : missionAddress
+      ? `https://www.google.com/maps?q=${encodeURIComponent(missionAddress)}&z=15&output=embed`
+      : "";
 
   useEffect(() => {
     if (sessionStartReports === null && stats.totalReports >= 0) {
@@ -293,9 +330,6 @@ const FieldWorker = () => {
                 <Bell className="w-5 h-5" />
                 <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-red-500 border-2 border-white" />
              </button>
-             <Button className="h-10 px-6 bg-[#5A57FF] hover:bg-[#4845E0] text-white font-bold text-xs rounded-2xl shadow-lg shadow-indigo-100 flex gap-2">
-               <Plus className="w-4 h-4" /> Quick Log
-             </Button>
           </div>
         </header>
 
@@ -499,9 +533,9 @@ const FieldWorker = () => {
                      <div className="space-y-1">
                         <Badge className={cn(
                           "border-none font-black text-[9px] tracking-widest uppercase px-3 py-1",
-                          stats.activeMissions > 0 ? "bg-[#10B981] text-white" : "bg-slate-100 text-slate-400"
+                          hasActiveMission ? "bg-[#10B981] text-white" : "bg-slate-100 text-slate-400"
                         )}>
-                          {stats.activeMissions > 0 ? "Active Now" : "No Mission"}
+                          {hasActiveMission ? "Active Now" : "No Mission"}
                         </Badge>
                         <h4 className="text-xl font-bold text-[#1A1A3D]">{activeMission?.title || "No Active Mission"}</h4>
                      </div>
@@ -509,35 +543,55 @@ const FieldWorker = () => {
                   </div>
 
                   <div className="h-44 bg-[#F8FAFF] rounded-[2rem] relative overflow-hidden border border-slate-100">
-                     <div className="absolute inset-0 bg-slate-50 opacity-50" />
-                     <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="relative">
-                           {stats.activeMissions > 0 && <div className="absolute -inset-6 bg-[#10B981]/10 rounded-full animate-ping" />}
-                           <div className={cn(
-                             "w-5 h-5 rounded-full border-4 border-white shadow-lg",
-                             stats.activeMissions > 0 ? "bg-[#10B981] shadow-[0_0_20px_rgba(16,185,129,0.5)]" : "bg-slate-300 shadow-none"
-                           )} />
+                    {hasActiveMission && missionMapUrl ? (
+                      <iframe
+                        title="Active mission map"
+                        src={missionMapUrl}
+                        className="absolute inset-0 h-full w-full border-0"
+                        loading="lazy"
+                        referrerPolicy="no-referrer-when-downgrade"
+                      />
+                    ) : (
+                      <>
+                        <div className="absolute inset-0 bg-slate-50 opacity-50" />
+                        <div className="absolute inset-0 flex items-center justify-center">
+                           <div className="relative">
+                              {hasActiveMission && <div className="absolute -inset-6 bg-[#10B981]/10 rounded-full animate-ping" />}
+                              <div className={cn(
+                                "w-5 h-5 rounded-full border-4 border-white shadow-lg",
+                                hasActiveMission ? "bg-[#10B981] shadow-[0_0_20px_rgba(16,185,129,0.5)]" : "bg-slate-300 shadow-none"
+                              )} />
+                           </div>
                         </div>
-                     </div>
+                      </>
+                    )}
                      <div className="absolute bottom-4 left-4 right-4 bg-white/80 backdrop-blur-sm p-3 rounded-2xl border border-white/50 shadow-sm flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-[#1A1A3D]">Location accuracy ± 2m</span>
+                        <span className="text-[10px] font-bold text-[#1A1A3D]">
+                          {hasMissionLocation ? "Live mission location" : "Location unavailable"}
+                        </span>
                         <div className="flex gap-1">
-                           <div className={cn("w-1 h-1 rounded-full", stats.activeMissions > 0 ? "bg-[#10B981]" : "bg-slate-200")} />
-                           <div className={cn("w-1 h-1 rounded-full", stats.activeMissions > 0 ? "bg-[#10B981]" : "bg-slate-200")} />
-                           <div className={cn("w-1 h-1 rounded-full", stats.activeMissions > 0 ? "bg-[#10B981]" : "bg-slate-200")} />
+                          <div className={cn("w-1 h-1 rounded-full", hasActiveMission ? "bg-[#10B981]" : "bg-slate-200")} />
+                          <div className={cn("w-1 h-1 rounded-full", hasActiveMission ? "bg-[#10B981]" : "bg-slate-200")} />
+                          <div className={cn("w-1 h-1 rounded-full", hasActiveMission ? "bg-[#10B981]" : "bg-slate-200")} />
                         </div>
                      </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                     <Button className="bg-[#F3F2FF] hover:bg-[#E0E7FF] text-[#5A57FF] font-bold text-[10px] uppercase tracking-widest h-12 rounded-[1.2rem] flex items-center gap-2 border-none">
+                      <Button
+                        onClick={handleNavigateToMission}
+                        className="bg-[#F3F2FF] hover:bg-[#E0E7FF] text-[#5A57FF] font-bold text-[10px] uppercase tracking-widest h-12 rounded-[1.2rem] flex items-center gap-2 border-none"
+                      >
                         <Navigation className="w-3.5 h-3.5" /> Navigate
                      </Button>
                      <Button
-                       onClick={() => setActiveTab(stats.activeMissions > 0 ? "Active" : "Reports")}
+                        onClick={(event) => {
+                         event.stopPropagation();
+                         setActiveTab(hasActiveMission ? "Active" : "Reports");
+                        }}
                        className="bg-[#1A1A3D] hover:bg-[#2A2665] text-white font-bold text-[10px] uppercase tracking-widest h-12 rounded-[1.2rem] flex items-center gap-2 border-none"
                      >
-                         {stats.activeMissions > 0 ? "Resume" : "History"}
+                         {hasActiveMission ? "Resume" : "History"}
                      </Button>
                   </div>
                </div>

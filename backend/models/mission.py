@@ -123,6 +123,10 @@ class MissionDocument(BaseModel):
     statusText: str | None = None
     familiesHelped: int = 0
     outcomeNotes: str | None = None
+    reviewFlagged: bool = False
+    reviewReason: str | None = None
+    reviewFlaggedBy: str | None = None
+    reviewFlaggedAt: datetime | None = None
     mergedFrom: dict[str, Any] | None = None
     newUpdates: int = 0
     createdAt: datetime | None = None

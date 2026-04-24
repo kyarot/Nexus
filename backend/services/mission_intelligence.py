@@ -12,6 +12,138 @@ from core.gemini import GEMINI_FLASH, client
 logger = logging.getLogger("nexus.mission_intelligence")
 
 
+def _safe_lower(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _mission_need_label(mission: dict[str, Any]) -> str:
+    return str(mission.get("needType") or "community support").strip() or "community support"
+
+
+def _mission_zone_label(mission: dict[str, Any], zone: dict[str, Any]) -> str:
+    return str(mission.get("zoneName") or zone.get("name") or "Assigned zone").strip() or "Assigned zone"
+
+
+def _default_trigger_summary(mission: dict[str, Any]) -> str:
+    description = str(mission.get("description") or "").strip()
+    if description:
+        return description[:180]
+    need = _mission_need_label(mission)
+    return f"Recent reports indicate urgent {need.lower()} need in this area."
+
+
+def _build_dynamic_decision_tree(mission: dict[str, Any], zone: dict[str, Any], language: str) -> list[dict[str, str]]:
+    need = _mission_need_label(mission)
+    zone_label = _mission_zone_label(mission, zone)
+    language_label = str(language or "English")
+    return [
+        {
+            "id": "01",
+            "if": f"Family asks what support is available right now for {need.lower()}.",
+            "response": f"Start with immediate options in {zone_label}, explain what can be delivered today, and confirm consent before action.",
+        },
+        {
+            "id": "02",
+            "if": "Household is anxious or distrustful.",
+            "response": "Acknowledge their concern, share one clear next step, and avoid promises you cannot guarantee.",
+        },
+        {
+            "id": "03",
+            "if": f"Conversation needs language support ({language_label}).",
+            "response": f"Switch to {language_label} if possible, keep sentences short, and repeat key safety and follow-up information.",
+        },
+    ]
+
+
+def ensure_dynamic_empathy_brief(
+    payload: dict[str, Any],
+    mission: dict[str, Any],
+    volunteer: dict[str, Any],
+    zone: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    zone = zone or {}
+    merged = dict(payload or {})
+
+    mission_context = merged.get("missionContext") if isinstance(merged.get("missionContext"), dict) else {}
+    language = str(volunteer.get("primaryLanguage") or mission.get("language") or mission_context.get("language") or "English")
+    trigger_summary = str(mission_context.get("triggerSummary") or "").strip() or _default_trigger_summary(mission)
+
+    mission_context = {
+        **mission_context,
+        "zone": _mission_zone_label(mission, zone),
+        "status": str(mission.get("status") or mission_context.get("status") or "dispatched"),
+        "language": language,
+        "triggerSummary": trigger_summary,
+    }
+    merged["missionContext"] = mission_context
+
+    need_label = _mission_need_label(mission)
+    zone_label = _mission_zone_label(mission, zone)
+
+    say_first = str(merged.get("sayFirst") or "").strip()
+    if not say_first or "listen first and support safely" in _safe_lower(say_first):
+        merged["sayFirst"] = f"I am here to support your {need_label.lower()} needs in {zone_label}. Let us take this one step at a time."
+
+    say_tags = merged.get("sayTags") if isinstance(merged.get("sayTags"), list) else []
+    if not say_tags:
+        merged["sayTags"] = ["Calm", "Practical", need_label.title()]
+
+    avoid = merged.get("avoid") if isinstance(merged.get("avoid"), list) else []
+    normalized_avoid: list[dict[str, str]] = []
+    for item in avoid[:4]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip() or "Overpromising outcomes"
+        note = str(item.get("note") or "").strip() or "Set realistic next steps and confirm what can be done now."
+        normalized_avoid.append({"title": title, "note": note})
+    if not normalized_avoid:
+        normalized_avoid = [
+            {"title": "Overpromising outcomes", "note": "Set realistic next steps and confirm what can be done now."},
+            {"title": "Technical jargon", "note": "Use plain language and verify understanding."},
+        ]
+    merged["avoid"] = normalized_avoid
+
+    decision_tree = merged.get("decisionTree") if isinstance(merged.get("decisionTree"), list) else []
+    generic_if = "community response changes"
+    generic_resp = "acknowledge concern and provide the next practical support step."
+    is_generic_tree = (
+        not decision_tree
+        or all(
+            isinstance(node, dict)
+            and _safe_lower(node.get("if")) == generic_if
+            and _safe_lower(node.get("response")) == generic_resp
+            for node in decision_tree[:3]
+        )
+    )
+    if is_generic_tree:
+        merged["decisionTree"] = _build_dynamic_decision_tree(mission, zone, language)
+    else:
+        cleaned_tree: list[dict[str, str]] = []
+        for idx, node in enumerate(decision_tree[:6], start=1):
+            if not isinstance(node, dict):
+                continue
+            cleaned_tree.append(
+                {
+                    "id": str(node.get("id") or str(idx).zfill(2)),
+                    "if": str(node.get("if") or f"Situation update {idx}"),
+                    "response": str(node.get("response") or "Acknowledge concern and proceed with a practical, safe next step."),
+                }
+            )
+        merged["decisionTree"] = cleaned_tree or _build_dynamic_decision_tree(mission, zone, language)
+
+    zone_safety = merged.get("zoneSafety") if isinstance(merged.get("zoneSafety"), dict) else {}
+    timeline = zone_safety.get("timeline") if isinstance(zone_safety.get("timeline"), list) else []
+    if not timeline:
+        timeline = [
+            {"date": "Today", "note": f"Monitor {need_label.lower()} response in {zone_label}", "status": "warning"},
+            {"date": "Yesterday", "note": "Last support cycle completed with coordinator confirmation", "status": "success"},
+        ]
+    zone_safety["timeline"] = timeline[:4]
+    merged["zoneSafety"] = zone_safety
+
+    return merged
+
+
 def _strip_json_fences(text: str) -> str:
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -370,7 +502,7 @@ def generate_empathy_brief(mission: dict[str, Any], volunteer: dict[str, Any], z
                     normalized.append(40)
             payload["pulse"] = normalized
 
-        return payload
+        return ensure_dynamic_empathy_brief(payload, mission, volunteer, zone)
     except Exception as exc:
         logger.warning("Empathy brief fallback used: %s", exc)
-        return default_payload
+        return ensure_dynamic_empathy_brief(default_payload, mission, volunteer, zone)

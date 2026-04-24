@@ -39,7 +39,7 @@ import {
   SheetClose
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { createInventoryItem, listInventoryItems, listWarehouses, patchInventoryItem } from "@/lib/ops-api";
+import { autoAllocateCoordinatorResourceRequests, createInventoryItem, listInventoryItems, listWarehouses, patchInventoryItem } from "@/lib/ops-api";
 import { getCoordinatorZones } from "@/lib/coordinator-api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -54,6 +54,7 @@ const ResourceInventory = () => {
   const [logUsageRes, setLogUsageRes] = useState<any>(null);
    const [resources, setResources] = useState<any[]>([]);
    const [isAddingResource, setIsAddingResource] = useState(false);
+   const [isAutoAllocating, setIsAutoAllocating] = useState(false);
    const [addResourceForm, setAddResourceForm] = useState({
       name: "",
       category: categories[1],
@@ -219,6 +220,33 @@ const ResourceInventory = () => {
       }
    };
 
+   const handleGeminiAutoAllocate = async () => {
+      setIsAutoAllocating(true);
+      try {
+         const result = await autoAllocateCoordinatorResourceRequests(25);
+         await Promise.all([inventoryQuery.refetch()]);
+         if (result.processed === 0) {
+            toast({
+               title: "No pending resource requests",
+               description: "Gemini found nothing to allocate. Volunteers need to raise requests from active missions first.",
+            });
+            return;
+         }
+         toast({
+            title: "Gemini allocation completed",
+            description: `${result.processed} requests processed · ${result.approved} approved · ${result.rejected} rejected`,
+         });
+      } catch (error) {
+         toast({
+            title: "Auto-allocation failed",
+            description: error instanceof Error ? error.message : "Unknown error",
+            variant: "destructive",
+         });
+      } finally {
+         setIsAutoAllocating(false);
+      }
+   };
+
    const stats = useMemo(() => {
       const lowStock = resources.filter((item) => item.quantity > 0 && item.quantity <= item.threshold).length;
       const available = resources.filter((item) => item.quantity > 0).length;
@@ -261,6 +289,14 @@ const ResourceInventory = () => {
           >
             <Plus className="w-5 h-5" /> Add Resource
           </Button>
+
+               <Button
+                  onClick={handleGeminiAutoAllocate}
+                  disabled={isAutoAllocating}
+                  className="bg-[#1E1B4B] hover:bg-[#2B256B] text-white font-bold h-12 px-6 rounded-xl flex gap-2 shadow-lg"
+               >
+                  <Activity className="w-5 h-5" /> {isAutoAllocating ? "Auto-allocating..." : "Gemini Auto-Allocate"}
+               </Button>
         </div>
 
         {/* Metric Cards */}

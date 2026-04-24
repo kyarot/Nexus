@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { 
   Mic, 
   Square, 
@@ -70,6 +70,8 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
   const [step, setStep] = useState<"idle" | "recording" | "processing" | "result" | "submitted">("idle");
   const [language, setLanguage] = useState("Kannada");
   const [timer, setTimer] = useState(0);
+  const [reportMode, setReportMode] = useState<"mission_update" | "independent">("independent");
+  const [selectedNeedType, setSelectedNeedType] = useState("General");
   const [isMerged, setIsMerged] = useState(false);
   const [reportId, setReportId] = useState<string | null>(null);
   const [missionId, setMissionId] = useState<string | null>(null);
@@ -110,6 +112,21 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const token = localStorage.getItem("nexus_access_token");
 
+  const mapInitialLocation = useMemo(
+    () => ({ lat: location.lat, lng: location.lng }),
+    [location.lat, location.lng]
+  );
+
+  const handleLocationSelect = useCallback((loc: { lat: number; lng: number; address?: string; pincode?: string; areaName?: string }) => {
+    setLocation({
+      lat: loc.lat,
+      lng: loc.lng,
+      address: loc.address || "",
+      pincode: loc.pincode || "",
+      areaName: loc.areaName || ""
+    });
+  }, []);
+
   useEffect(() => {
     const fetchActiveMission = async () => {
       try {
@@ -123,7 +140,9 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
         const mission = data?.mission || null;
         setActiveMission(mission);
         if (mission) {
+          setReportMode("mission_update");
           setMissionId(mission.id || null);
+          setSelectedNeedType(mission.needType || "General");
           setLocation((prev) => ({
             ...prev,
             address: mission.location?.address || prev.address,
@@ -206,6 +225,7 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
       const data = await response.json();
       setExtractedData(data.extracted);
       setVoiceUrl(data.voiceUrl);
+      setSelectedNeedType(data.extracted?.needType || activeMission?.needType || "General");
       
       // Update location address if AI found something
       if (data.extracted.location) {
@@ -246,11 +266,6 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
   };
 
   const handleSubmit = async () => {
-    if (!activeMission?.id) {
-      setError("No active assigned mission found. Submit reports only from your Active Mission.");
-      return;
-    }
-
     setStep("processing");
 
     const zoneInfo = deriveZoneInfo({
@@ -261,7 +276,9 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
       areaName: location.areaName,
     });
     
-    const needType = activeMission.needType || extractedData?.needType || "General";
+    const needType = reportMode === "mission_update"
+      ? (activeMission?.needType || selectedNeedType || extractedData?.needType || "General")
+      : (selectedNeedType || extractedData?.needType || "General");
     const severity = (extractedData?.severity || "medium").toLowerCase();
     const familiesAffected = parseInt(extractedData?.familiesAffected || "0", 10) || 0;
     const personsAffected = parseInt(reportMeta.personsAffected || "0", 10) > 0
@@ -283,8 +300,8 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
     });
 
     const payload = {
-      missionId: activeMission.id,
-      zoneId: activeMission.zoneId || zoneInfo.zoneId,
+      missionId: reportMode === "mission_update" ? (activeMission?.id || null) : null,
+      zoneId: reportMode === "mission_update" ? (activeMission?.zoneId || zoneInfo.zoneId) : zoneInfo.zoneId,
       needType,
       severity,
       familiesAffected,
@@ -529,7 +546,7 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
                  <div className="grid grid-cols-2 gap-4">
                     <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl text-left space-y-2">
                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Identified Issue</p>
-                       <p className="text-sm font-bold text-[#1A1A3D]">{extractedData?.needType || "General Issue"}</p>
+                       <p className="text-sm font-bold text-[#1A1A3D]">{selectedNeedType || extractedData?.needType || "General Issue"}</p>
                     </div>
                     <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl text-left space-y-2">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Mapped Zone</p>
@@ -537,16 +554,67 @@ export const VoiceReport = ({ onGoToDashboard }: { onGoToDashboard: () => void }
                     </div>
                  </div>
 
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl p-4 text-left">
+                    <div className="space-y-2 md:col-span-2">
+                      <Label className="text-xs font-bold text-slate-500">Report Option</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant={reportMode === "mission_update" ? "default" : "outline"}
+                          className="h-10 rounded-xl text-xs"
+                          disabled={!activeMission?.id}
+                          onClick={() => {
+                            if (!activeMission?.id) return;
+                            setReportMode("mission_update");
+                            if (activeMission?.needType) {
+                              setSelectedNeedType(activeMission.needType);
+                            }
+                          }}
+                        >
+                          Assigned mission
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={reportMode === "independent" ? "default" : "outline"}
+                          className="h-10 rounded-xl text-xs"
+                          onClick={() => setReportMode("independent")}
+                        >
+                          Submit other report
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500">Need Type</Label>
+                      <Select
+                        value={selectedNeedType}
+                        onValueChange={setSelectedNeedType}
+                        disabled={reportMode === "mission_update" && Boolean(activeMission?.needType)}
+                      >
+                        <SelectTrigger className="h-10 rounded-xl bg-white border-slate-200"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="General">General</SelectItem>
+                          <SelectItem value="Food Insecurity">Food Insecurity</SelectItem>
+                          <SelectItem value="Sanitation">Sanitation</SelectItem>
+                          <SelectItem value="Medical Aid">Medical Aid</SelectItem>
+                          <SelectItem value="Housing">Housing</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {reportMode === "mission_update" && activeMission?.id ? (
+                      <p className="text-[11px] text-indigo-700 font-medium md:col-span-2">
+                        This report will follow mission need type: {activeMission.needType || "General"}.
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-indigo-700 font-medium md:col-span-2">
+                        This report will be submitted as a separate need report and can use a different need type.
+                      </p>
+                    )}
+                 </div>
+
                  <div className="w-full h-44 rounded-[2rem] overflow-hidden border border-slate-100 relative shadow-inner group">
-                    <MapPicker 
-                      initialLocation={{ lat: location.lat, lng: location.lng }}
-                      onLocationSelect={(loc) => setLocation({
-                        lat: loc.lat,
-                        lng: loc.lng,
-                        address: loc.address || "",
-                        pincode: loc.pincode || "",
-                        areaName: loc.areaName || ""
-                      })}
+                    <MapPicker
+                      initialLocation={mapInitialLocation}
+                      onLocationSelect={handleLocationSelect}
                     />
                  </div>
 

@@ -16,6 +16,7 @@ import {
   sendImpactPolicyBrief,
 } from "@/lib/coordinator-api";
 import { useToast } from "@/hooks/use-toast";
+import { downloadNexusPdfReport } from "@/lib/pdf-report";
 
 const formatNumber = (value: number) => value.toLocaleString();
 
@@ -73,21 +74,9 @@ export default function ImpactReports() {
   const costPerIntervention = null;
   const exportDisabled = !reportQuery.data;
 
-  const downloadJson = (payload: unknown, filename: string) => {
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  };
-
   const buildFilename = (prefix: string) => {
     const stamp = new Date().toISOString().slice(0, 10);
-    return `${prefix}-${period}-${stamp}.json`;
+    return `${prefix}-${period}-${stamp}.pdf`;
   };
 
   const handleDownloadGrant = async () => {
@@ -97,8 +86,53 @@ export default function ImpactReports() {
     setExportState((prev) => ({ ...prev, grant: true }));
     try {
       const payload = await downloadImpactGrantReport(period);
-      downloadJson(payload, buildFilename("grant-report"));
-      toast({ title: "Grant report ready", description: "Report exported as JSON." });
+      downloadNexusPdfReport({
+        fileName: buildFilename("grant-report"),
+        reportTitle: "Nexus Impact Grant Report",
+        reportSubtitle: "Funding-ready summary of verified community impact.",
+        generatedAt: payload.generatedAt,
+        meta: [
+          { label: "Organization", value: payload.organization?.name || orgName },
+          { label: "Period", value: period },
+          { label: "Missions", value: String(payload.summary.missions) },
+        ],
+        metrics: [
+          { label: "Completed Missions", value: String(payload.summary.completedMissions), note: `${payload.metrics.missionSuccessRate}% success rate` },
+          { label: "Families Reached", value: String(payload.metrics.familiesReached), note: "Verified by source reports." },
+          { label: "Avg Need Reduction", value: `-${payload.metrics.avgNeedReduction}%`, note: "Calculated from the verified ledger." },
+          { label: "Reports Referenced", value: String(payload.summary.reports), note: "Connected to the policy brief pipeline." },
+        ],
+        sections: [
+          {
+            title: "Key Highlights",
+            lines: [
+              `Mission success rate: ${payload.metrics.missionSuccessRate}%`,
+              `Families reached: ${payload.metrics.familiesReached}`,
+              `Verified missions: ${payload.summary.completedMissions}`,
+            ],
+          },
+          {
+            title: "Policy Brief",
+            lines: payload.policyBrief.items.length ? payload.policyBrief.items : ["No policy brief items available."],
+          },
+        ],
+        tables: [
+          {
+            title: "Verified Impact Ledger",
+            headers: ["Mission", "Zone", "Before", "After", "Delta", "Volunteer"],
+            rows: payload.ledger.map((row) => [
+              String(row.mission || "-").slice(0, 8),
+              row.zone || "-",
+              row.before,
+              row.after,
+              row.change,
+              row.volunteer || "-",
+            ]),
+          },
+        ],
+        footerNote: "Nexus grant-ready report.",
+      });
+      toast({ title: "Grant report ready", description: "Report exported as PDF." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to export grant report.";
       toast({ title: "Export failed", description: message, variant: "destructive" });
@@ -114,8 +148,29 @@ export default function ImpactReports() {
     setExportState((prev) => ({ ...prev, brief: true }));
     try {
       const payload = await downloadImpactPolicyBrief(period);
-      downloadJson(payload, buildFilename("policy-brief"));
-      toast({ title: "Policy brief ready", description: "Brief exported as JSON." });
+      downloadNexusPdfReport({
+        fileName: buildFilename("policy-brief"),
+        reportTitle: "Nexus Policy Brief",
+        reportSubtitle: "Simple brief for district and donor review.",
+        generatedAt: payload.generatedAt,
+        meta: [
+          { label: "Organization", value: payload.organization?.name || orgName },
+          { label: "Period", value: period },
+        ],
+        metrics: [
+          { label: "Mission Success", value: `${payload.metrics.missionSuccessRate}%`, note: "Based on verified mission outcomes." },
+          { label: "Families Reached", value: String(payload.metrics.familiesReached), note: "Confirmed impact count." },
+          { label: "Avg Need Reduction", value: `-${payload.metrics.avgNeedReduction}%`, note: "Calculated from the latest ledger." },
+        ],
+        sections: [
+          {
+            title: "Brief Notes",
+            lines: payload.policyBrief.items.length ? payload.policyBrief.items : ["No policy brief items available."],
+          },
+        ],
+        footerNote: "Nexus policy brief export.",
+      });
+      toast({ title: "Policy brief ready", description: "Brief exported as PDF." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to export policy brief.";
       toast({ title: "Export failed", description: message, variant: "destructive" });

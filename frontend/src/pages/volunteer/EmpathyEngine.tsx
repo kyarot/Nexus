@@ -6,6 +6,7 @@ import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Info,
   MapPin,
@@ -25,6 +26,7 @@ import {
   LocateFixed,
   Route,
   X,
+  ListFilter,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
@@ -34,6 +36,7 @@ import {
   requestExtraMissionResources,
   type VolunteerEmpathyResponse,
 } from "@/lib/ops-api";
+import { getVolunteerMissions, type CoordinatorMission } from "@/lib/coordinator-api";
 import { useToast } from "@/hooks/use-toast";
 
 const toNumber = (value: unknown, fallback = 0) => {
@@ -45,10 +48,31 @@ const toString = (value: unknown, fallback = "") => {
   return typeof value === "string" ? value : fallback;
 };
 
+const prettyStatus = (value: string) =>
+  value
+    .split("_")
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+
+const missionStatusTone = (status: string) => {
+  const normalized = status.toLowerCase();
+  if (["dispatched", "en_route", "on_ground"].includes(normalized)) {
+    return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  }
+  if (normalized === "pending") {
+    return "bg-amber-50 text-amber-700 border-amber-200";
+  }
+  if (["completed"].includes(normalized)) {
+    return "bg-slate-100 text-slate-700 border-slate-200";
+  }
+  return "bg-rose-50 text-rose-700 border-rose-200";
+};
+
 const isValidCoordinate = (value: number) => Number.isFinite(value) && Math.abs(value) <= 180;
 export default function EmpathyEngine() {
   const { toast } = useToast();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [audioAssist, setAudioAssist] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
   const [isRequesting, setIsRequesting] = useState(false);
@@ -62,10 +86,37 @@ export default function EmpathyEngine() {
 
   const { isLoaded: isMapLoaded } = useNexusGoogleMapsLoader();
 
+  const missionsQuery = useQuery({
+    queryKey: ["volunteer-missions-brief-selector"],
+    queryFn: () => getVolunteerMissions(),
+    staleTime: 30_000,
+  });
+
+  const missionOptions = useMemo(
+    () => (Array.isArray(missionsQuery.data?.missions) ? missionsQuery.data.missions : []) as CoordinatorMission[],
+    [missionsQuery.data?.missions]
+  );
+
+  const selectedMissionId = missionIdFromQuery || missionOptions[0]?.id;
+
+  useEffect(() => {
+    if (missionIdFromQuery) {
+      const exists = missionOptions.some((mission) => mission.id === missionIdFromQuery);
+      if (!exists && missionOptions[0]?.id) {
+        setSearchParams({ missionId: missionOptions[0].id }, { replace: true });
+      }
+      return;
+    }
+    if (missionOptions[0]?.id) {
+      setSearchParams({ missionId: missionOptions[0].id }, { replace: true });
+    }
+  }, [missionIdFromQuery, missionOptions, setSearchParams]);
+
   const empathyQuery = useQuery<VolunteerEmpathyResponse>({
-    queryKey: ["volunteer-empathy-brief", missionIdFromQuery],
-    queryFn: () => getVolunteerEmpathyBrief(missionIdFromQuery, false),
+    queryKey: ["volunteer-empathy-brief", selectedMissionId],
+    queryFn: () => getVolunteerEmpathyBrief(selectedMissionId, false),
     refetchInterval: 15000,
+    enabled: Boolean(selectedMissionId),
   });
 
   const payload = empathyQuery.data;
@@ -77,7 +128,9 @@ export default function EmpathyEngine() {
   );
 
   const missionId = toString(mission.id, "");
+  const missionTitle = toString(mission.title, "Untitled Mission");
   const missionCode = missionId ? `#${missionId.slice(0, 8).toUpperCase()}` : "#PENDING";
+  const selectedMissionMeta = missionOptions.find((item) => item.id === selectedMissionId);
   const missionLocation = (mission.location && typeof mission.location === "object" ? mission.location : {}) as Record<string, unknown>;
   const destination = {
     lat: toNumber(missionLocation.lat, NaN),
@@ -86,6 +139,10 @@ export default function EmpathyEngine() {
   const hasDestination = isValidCoordinate(destination.lat) && isValidCoordinate(destination.lng);
 
   const missionContext = empathy?.missionContext || {};
+  const liveMissionStatus = toString(mission.status, "");
+  const liveMissionZone = toString(mission.zoneName, "") || toString((missionLocation as Record<string, unknown>).address, "");
+  const contextZoneLabel = liveMissionZone || toString(missionContext.zone, "Assigned Zone");
+  const contextStatusLabel = liveMissionStatus ? prettyStatus(liveMissionStatus) : toString(missionContext.status, "Dispatched");
   const destinationAddress = toString(missionLocation.address, toString(missionContext.zone, "Mission area"));
   const zoneSafety = empathy?.zoneSafety || {};
   const trust = toNumber(empathy?.trust, 72);
@@ -215,6 +272,26 @@ export default function EmpathyEngine() {
     }
   };
 
+  if (missionsQuery.isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F8F9FE]">
+        <div className="flex items-center gap-2 text-slate-600">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading your assigned missions...
+        </div>
+      </div>
+    );
+  }
+
+  if (!selectedMissionId) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F8F9FE] px-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-700 max-w-lg text-center">
+          No assigned missions found for briefing. Once a mission is assigned to you, it will appear here.
+        </div>
+      </div>
+    );
+  }
+
   if (empathyQuery.isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F8F9FE]">
@@ -245,7 +322,41 @@ export default function EmpathyEngine() {
       <div className="flex-1 p-6 space-y-6 flex flex-col">
         <header className="mb-0">
           <h1 className="text-[2rem] font-bold text-[#1A1A3D] tracking-tight">Pre-Mission Briefing</h1>
-          <p className="text-slate-500 font-medium text-base">Cognitive readiness assessment for Mission ID: {missionCode}</p>
+          <p className="text-slate-500 font-medium text-base">Cognitive readiness assessment for {missionTitle} ({missionCode})</p>
+          <div className="mt-4 w-full max-w-2xl rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-sm">
+            <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+              <ListFilter className="h-3.5 w-3.5" />
+              Select Assigned Mission
+            </div>
+            <Select
+              value={selectedMissionId || ""}
+              onValueChange={(nextMissionId) => {
+                if (!nextMissionId) return;
+                setSearchParams({ missionId: nextMissionId }, { replace: true });
+              }}
+            >
+              <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50 text-[#1A1A3D] font-semibold">
+                <SelectValue placeholder="Choose mission" />
+              </SelectTrigger>
+              <SelectContent>
+                {missionOptions.map((missionOption) => (
+                  <SelectItem key={missionOption.id} value={missionOption.id}>
+                    {missionOption.title} • {prettyStatus(missionOption.status)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedMissionMeta ? (
+              <div className="mt-2 flex items-center gap-2 text-xs">
+                <span className={cn("rounded-full border px-2 py-0.5 font-semibold", missionStatusTone(selectedMissionMeta.status))}>
+                  {prettyStatus(selectedMissionMeta.status)}
+                </span>
+                <span className="text-slate-500">
+                  {selectedMissionMeta.zoneName || selectedMissionMeta.zoneId || "Assigned zone"}
+                </span>
+              </div>
+            ) : null}
+          </div>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 shrink-0">
@@ -260,11 +371,11 @@ export default function EmpathyEngine() {
             <div className="grid grid-cols-3 gap-4 mb-6">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Zone</p>
-                <p className="text-base font-bold text-[#1A1A3D]">{toString(missionContext.zone, "Assigned Zone")}</p>
+                <p className="text-base font-bold text-[#1A1A3D]">{contextZoneLabel}</p>
               </div>
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Status</p>
-                <p className="text-base font-bold text-[#1A1A3D]">{toString(missionContext.status, "Dispatched")}</p>
+                <p className="text-base font-bold text-[#1A1A3D]">{contextStatusLabel}</p>
               </div>
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Language</p>

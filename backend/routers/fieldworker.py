@@ -686,6 +686,77 @@ async def get_fieldworker_stats(
             "zone": "Unknown"
         }
 
+
+@router.get("/profile/zone-options")
+async def get_fieldworker_zone_options(
+    user: dict = Depends(role_required("fieldworker"))
+):
+    """
+    Returns selectable zones for field workers based on coordinator-created NGO zones
+    and mission zones observed for the same NGO.
+    """
+    ngo_id = str(user.get("ngoId") or user.get("ngo_id") or "").strip()
+    if not ngo_id:
+        raise HTTPException(status_code=400, detail="Field worker is not mapped to an NGO")
+
+    zone_map: dict[str, str] = {}
+
+    # Primary source: zones created/linked to the NGO.
+    try:
+        zone_docs = (
+            db.collection("zones")
+            .where(filter=FieldFilter("ngoIds", "array_contains", ngo_id))
+            .stream()
+        )
+        for doc in zone_docs:
+            data = doc.to_dict() or {}
+            zone_id = str(data.get("id") or doc.id or "").strip()
+            if not zone_id:
+                continue
+            zone_name = str(data.get("name") or zone_id).strip()
+            zone_map[zone_id] = zone_name
+    except Exception as exc:
+        logger.warning("Failed to load NGO zones for fieldworker profile options: %s", exc)
+
+    # Secondary source: mission zones for the NGO (covers legacy or partially seeded data).
+    try:
+        mission_docs = (
+            db.collection("missions")
+            .where(filter=FieldFilter("ngoId", "==", ngo_id))
+            .limit(500)
+            .stream()
+        )
+        for doc in mission_docs:
+            data = doc.to_dict() or {}
+            zone_id = str(data.get("zoneId") or "").strip()
+            if not zone_id:
+                continue
+            zone_name = str(data.get("zoneName") or zone_map.get(zone_id) or zone_id).strip()
+            zone_map.setdefault(zone_id, zone_name)
+    except Exception as exc:
+        logger.warning("Failed to load mission zones for fieldworker profile options: %s", exc)
+
+    zone_options = [zone_name for zone_name in zone_map.values() if zone_name.strip()]
+    zone_options.sort(key=lambda item: item.lower())
+
+    def _normalize_selected(values: list[Any]) -> list[str]:
+        normalized: list[str] = []
+        for item in values:
+          raw_value = str(item or "").strip()
+          if not raw_value:
+              continue
+          normalized.append(zone_map.get(raw_value, raw_value))
+        return sorted(list(dict.fromkeys([value for value in normalized if value.strip()])), key=str.lower)
+
+    current_zones = _normalize_selected(list(user.get("zones") or []))
+    current_offline = _normalize_selected(list(user.get("offlineZones") or []))
+
+    return {
+        "zones": zone_options,
+        "selectedZones": current_zones,
+        "selectedOfflineZones": current_offline,
+    }
+
 @router.post("/profile/image")
 async def upload_profile_image(
     file: UploadFile = File(...),
@@ -726,6 +797,7 @@ async def upload_profile_image(
     try:
         db.collection("users").document(user["id"]).update({
             "photoUrl": photo_url,
+            "profilePhoto": photo_url,
             "updatedAt": datetime.now()
         })
     except Exception as e:
@@ -1154,12 +1226,23 @@ async def get_active_mission(
 
     missions_snapshot = db.collection("missions")\
         .where(filter=FieldFilter("assignedTo", "==", user_id))\
-        .where(filter=FieldFilter("assignedRole", "==", "fieldworker"))\
         .where(filter=FieldFilter("status", "in", ["dispatched", "en_route", "on_ground"]))\
         .get()
 
+    # Backward compatibility: older missions may not include assignedRole.
+    filtered_missions = []
+    for doc in missions_snapshot:
+        row = doc.to_dict() or {}
+        assigned_role = str(row.get("assignedRole") or "").strip().lower()
+        target_audience = str(row.get("targetAudience") or "fieldworker").strip().lower()
+        if assigned_role and assigned_role != "fieldworker":
+            continue
+        if target_audience not in {"fieldworker", ""}:
+            continue
+        filtered_missions.append(doc)
+
     missions = sorted(
-        missions_snapshot,
+        filtered_missions,
         key=lambda doc: (
             doc.to_dict().get("priority") == "critical",
             doc.to_dict().get("priority") == "high",
@@ -1194,6 +1277,48 @@ async def get_active_mission(
     
     mission = missions[0].to_dict()
     mission["id"] = missions[0].id
+
+    # Ensure active mission always has a usable location payload for map preview/navigation.
+    mission_location = mission.get("location") if isinstance(mission.get("location"), dict) else {}
+    lat = mission_location.get("lat")
+    lng = mission_location.get("lng")
+    address = str(mission_location.get("address") or "").strip()
+
+    def _to_float(value: Any) -> float | None:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if abs(numeric) < 0.000001:
+            return None
+        return numeric
+
+    lat_value = _to_float(lat)
+    lng_value = _to_float(lng)
+
+    if lat_value is None or lng_value is None or not address:
+        zone_id = str(mission.get("zoneId") or "").strip()
+        if zone_id:
+            zone_snapshot = db.collection("zones").document(zone_id).get()
+            if zone_snapshot.exists:
+                zone_data = zone_snapshot.to_dict() or {}
+                if lat_value is None:
+                    lat_value = _to_float(zone_data.get("lat"))
+                if lng_value is None:
+                    lng_value = _to_float(zone_data.get("lng"))
+                if not address:
+                    zone_name = str(zone_data.get("name") or mission.get("zoneName") or "").strip()
+                    ward = str(zone_data.get("ward") or "").strip()
+                    city = str(zone_data.get("city") or "").strip()
+                    address_parts = [part for part in [zone_name, ward, city] if part]
+                    address = ", ".join(address_parts)
+
+    mission["location"] = {
+        "lat": float(lat_value or 0.0),
+        "lng": float(lng_value or 0.0),
+        "address": address,
+        "landmark": str(mission_location.get("landmark") or mission.get("zoneName") or "").strip() or None,
+    }
     
     # Get last 10 updates
     updates_snapshot = db.collection("missions").document(mission["id"])\

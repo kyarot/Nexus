@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Building2, ClipboardList, Heart, Eye, EyeOff, Hexagon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,6 @@ export default function Signup() {
   const [selectedDataChannels, setSelectedDataChannels] = useState<string[]>([]);
 
   const [additionalLanguagesInput, setAdditionalLanguagesInput] = useState("");
-  const [offlineZonesInput, setOfflineZonesInput] = useState("");
 
   const [volunteerSkillsInput, setVolunteerSkillsInput] = useState("");
   const [travelRadius, setTravelRadius] = useState(5);
@@ -47,11 +46,12 @@ export default function Signup() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [ngoOptions, setNgoOptions] = useState<Array<{ id: string; name: string; city?: string | null }>>([]);
+  const [loadingNgos, setLoadingNgos] = useState(false);
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
   const zones = zoneInput.split(",").map((v) => v.trim()).filter(Boolean);
   const additionalLanguages = additionalLanguagesInput.split(",").map((v) => v.trim()).filter(Boolean);
-  const offlineZones = offlineZonesInput.split(",").map((v) => v.trim()).filter(Boolean);
   const volunteerSkills = volunteerSkillsInput.split(",").map((v) => v.trim()).filter(Boolean);
   const avoidCategories = avoidCategoriesInput.split(",").map((v) => v.trim()).filter(Boolean);
 
@@ -62,6 +62,27 @@ export default function Signup() {
   ) => {
     setter(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
   };
+
+  useEffect(() => {
+    const loadNgos = async () => {
+      setLoadingNgos(true);
+      try {
+        const response = await fetch(`${apiBaseUrl}/auth/signup/ngos`);
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        const options = Array.isArray(data) ? data : [];
+        setNgoOptions(options);
+      } catch {
+        // Keep signup usable even if NGO lookup fails.
+      } finally {
+        setLoadingNgos(false);
+      }
+    };
+
+    void loadNgos();
+  }, [apiBaseUrl]);
 
   const handleSignup = async () => {
     setErrorMessage("");
@@ -90,9 +111,10 @@ export default function Signup() {
       : selectedRole === "fieldworker"
         ? {
             ...basePayload,
+            zones: [],
             ngo_id: ngoId,
             additional_languages: additionalLanguages,
-            offline_zones: offlineZones,
+            offline_zones: [],
             phone,
           }
         : {
@@ -206,7 +228,21 @@ export default function Signup() {
                 </div>
 
                 {joinMode === "join" ? (
-                  <div><Label>NGO ID / invite code</Label><Input value={ngoId} onChange={(e) => setNgoId(e.target.value)} className="mt-1 rounded-button" /></div>
+                  <div>
+                    <Label>Select NGO</Label>
+                    <select
+                      value={ngoId}
+                      onChange={(e) => setNgoId(e.target.value)}
+                      className="mt-1 flex h-10 w-full rounded-button border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">{loadingNgos ? "Loading NGOs..." : "Select NGO"}</option>
+                      {ngoOptions.map((ngo) => (
+                        <option key={ngo.id} value={ngo.id}>
+                          {ngo.name}{ngo.city ? ` (${ngo.city})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 ) : (
                   <>
                     <div><Label>NGO Name</Label><Input value={ngoName} onChange={(e) => setNgoName(e.target.value)} className="mt-1 rounded-button" /></div>
@@ -244,15 +280,41 @@ export default function Signup() {
               </div>
             ) : selectedRole === "fieldworker" ? (
               <div className="space-y-4">
-                <div><Label>NGO ID</Label><Input value={ngoId} onChange={(e) => setNgoId(e.target.value)} className="mt-1 rounded-button" /></div>
-                <div><Label>Assigned Zones (comma separated)</Label><Input value={zoneInput} onChange={(e) => setZoneInput(e.target.value)} className="mt-1 rounded-button" /></div>
+                <div>
+                  <Label>Select NGO</Label>
+                  <select
+                    value={ngoId}
+                    onChange={(e) => setNgoId(e.target.value)}
+                    className="mt-1 flex h-10 w-full rounded-button border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">{loadingNgos ? "Loading NGOs..." : "Select NGO"}</option>
+                    {ngoOptions.map((ngo) => (
+                      <option key={ngo.id} value={ngo.id}>
+                        {ngo.name}{ngo.city ? ` (${ngo.city})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div><Label>Additional Languages (comma separated)</Label><Input value={additionalLanguagesInput} onChange={(e) => setAdditionalLanguagesInput(e.target.value)} className="mt-1 rounded-button" /></div>
-                <div><Label>Offline Zones to Pre-cache</Label><Input value={offlineZonesInput} onChange={(e) => setOfflineZonesInput(e.target.value)} className="mt-1 rounded-button" /></div>
                 <div><Label>Phone</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-1 rounded-button" /></div>
               </div>
             ) : (
               <div className="space-y-4">
-                <div><Label>NGO ID</Label><Input value={ngoId} onChange={(e) => setNgoId(e.target.value)} className="mt-1 rounded-button" /></div>
+                <div>
+                  <Label>Select NGO</Label>
+                  <select
+                    value={ngoId}
+                    onChange={(e) => setNgoId(e.target.value)}
+                    className="mt-1 flex h-10 w-full rounded-button border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">{loadingNgos ? "Loading NGOs..." : "Select NGO"}</option>
+                    {ngoOptions.map((ngo) => (
+                      <option key={ngo.id} value={ngo.id}>
+                        {ngo.name}{ngo.city ? ` (${ngo.city})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div><Label>Zones of Comfort (comma separated)</Label><Input value={zoneInput} onChange={(e) => setZoneInput(e.target.value)} className="mt-1 rounded-button" /></div>
                 <div><Label>Skills (comma separated)</Label><Input value={volunteerSkillsInput} onChange={(e) => setVolunteerSkillsInput(e.target.value)} className="mt-1 rounded-button" /></div>
                 <div><Label>Travel Radius (km)</Label><Input type="number" value={travelRadius} onChange={(e) => setTravelRadius(Number(e.target.value || 5))} className="mt-1 rounded-button" /></div>

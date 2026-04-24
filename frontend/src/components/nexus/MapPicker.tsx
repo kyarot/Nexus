@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { memo, useState, useCallback, useEffect, useRef } from "react";
 import { Circle, GoogleMap, Marker } from "@react-google-maps/api";
 import { MapPin, Navigation, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,7 @@ interface MapPickerProps {
   radiusMeters?: number;
 }
 
-export const MapPicker = ({ onLocationSelect, initialLocation, radiusMeters }: MapPickerProps) => {
+const MapPickerComponent = ({ onLocationSelect, initialLocation, radiusMeters }: MapPickerProps) => {
   const { isLoaded } = useNexusGoogleMapsLoader();
 
   const [map, setMap] = useState<google.maps.Map | null>(null);
@@ -231,3 +231,6 @@ export const MapPicker = ({ onLocationSelect, initialLocation, radiusMeters }: M
     </div>
   );
 };
+
+export const MapPicker = memo(MapPickerComponent);
+MapPicker.displayName = "MapPicker";

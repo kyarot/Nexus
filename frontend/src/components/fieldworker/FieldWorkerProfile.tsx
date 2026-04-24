@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { 
   User, 
   MapPin, 
@@ -25,12 +25,15 @@ import {
   Camera,
   Loader2
 } from "lucide-react";
+import { MapPicker } from "@/components/nexus/MapPicker";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { listNotifications, markNotificationRead, type NotificationItem } from "@/lib/ops-api";
+import { useToast } from "@/hooks/use-toast";
 
 const ProfileStat = ({ label, value, icon: Icon }: { label: string, value: string | number, icon: any }) => (
   <div className="bg-white rounded-[2.5rem] p-8 border border-slate-50 flex items-center justify-between shadow-sm flex-1">
@@ -61,8 +64,22 @@ const SettingCard = ({ title, children, icon: Icon, action }: { title: string, c
 );
 
 export const FieldWorkerProfile = () => {
+   const { toast } = useToast();
   const [user, setUser] = useState<any>(null);
   const [isUploading, setIsUploading] = useState(false);
+   const [zoneOptions, setZoneOptions] = useState<string[]>([]);
+   const [selectedZones, setSelectedZones] = useState<string[]>([]);
+   const [selectedOfflineZones, setSelectedOfflineZones] = useState<string[]>([]);
+    const [additionalLanguages, setAdditionalLanguages] = useState<string[]>([]);
+    const [primaryLanguage, setPrimaryLanguage] = useState("English");
+    const [languageDraft, setLanguageDraft] = useState("");
+   const [isSavingZones, setIsSavingZones] = useState(false);
+    const [isSavingLanguages, setIsSavingLanguages] = useState(false);
+      const [isEditingProfile, setIsEditingProfile] = useState(false);
+      const [isSavingProfile, setIsSavingProfile] = useState(false);
+      const [profilePhoneDraft, setProfilePhoneDraft] = useState("");
+    const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
+    const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [stats, setStats] = useState({
     activeMissions: 0,
     totalReports: 0,
@@ -71,16 +88,50 @@ export const FieldWorkerProfile = () => {
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+   const zoneSettingsRef = useRef<HTMLDivElement | null>(null);
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const token = localStorage.getItem("nexus_access_token");
 
   useEffect(() => {
     const storedUser = localStorage.getItem("nexus_user");
     if (storedUser) {
-      setUser(JSON.parse(storedUser));
+         const parsed = JSON.parse(storedUser);
+         setUser(parsed);
+          setProfileNameDraft(String(parsed?.name || ""));
+          setProfilePhoneDraft(String(parsed?.phone || ""));
+          setCurrentLocation(parsed?.currentLocation || null);
+         setSelectedZones(Array.isArray(parsed?.zones) ? parsed.zones : []);
+         setSelectedOfflineZones(Array.isArray(parsed?.offlineZones) ? parsed.offlineZones : []);
+             setAdditionalLanguages(Array.isArray(parsed?.additionalLanguages) ? parsed.additionalLanguages : []);
+             setPrimaryLanguage(typeof parsed?.primaryLanguage === "string" ? parsed.primaryLanguage : "English");
     }
 
-    const fetchStats = async () => {
+      const fetchProfile = async () => {
+         try {
+            const response = await fetch(`${apiBaseUrl}/auth/me`, {
+               headers: {
+                  "Authorization": `Bearer ${token}`,
+               },
+            });
+
+            if (!response.ok) {
+               return;
+            }
+
+            setProfileNameDraft(String(data?.name || ""));
+            setProfilePhoneDraft(String(data?.phone || ""));
+            setCurrentLocation(data?.currentLocation || null);
+            setSelectedZones(Array.isArray(data?.zones) ? data.zones : []);
+            setSelectedOfflineZones(Array.isArray(data?.offlineZones) ? data.offlineZones : []);
+            setPrimaryLanguage(typeof data?.primaryLanguage === "string" ? data.primaryLanguage : "English");
+            setAdditionalLanguages(Array.isArray(data?.additionalLanguages) ? data.additionalLanguages : []);
+            localStorage.setItem("nexus_user", JSON.stringify(data));
+         } catch (err) {
+            console.error("Failed to fetch profile data", err);
+         }
+      };
+
+      const fetchStats = async () => {
       try {
         const response = await fetch(`${apiBaseUrl}/fieldworker/stats`, {
           headers: {
@@ -101,37 +152,288 @@ export const FieldWorkerProfile = () => {
       }
     };
 
+      const fetchNotifications = async () => {
+         try {
+            const data = await listNotifications(true);
+            setNotifications((data.notifications || []).slice(0, 4));
+         } catch (err) {
+            console.error("Failed to fetch notifications", err);
+         }
+      };
+
+      const fetchZoneOptions = async () => {
+         try {
+            const response = await fetch(`${apiBaseUrl}/fieldworker/profile/zone-options`, {
+               headers: {
+                  "Authorization": `Bearer ${token}`,
+               },
+            });
+
+            if (!response.ok) {
+               return;
+            }
+
+            const data = await response.json();
+            setZoneOptions(Array.isArray(data?.zones) ? data.zones : []);
+            if (Array.isArray(data?.selectedZones)) {
+               setSelectedZones(data.selectedZones);
+            }
+            if (Array.isArray(data?.selectedOfflineZones)) {
+               setSelectedOfflineZones(data.selectedOfflineZones);
+            }
+         } catch (err) {
+            console.error("Failed to fetch available profile zones", err);
+         }
+      };
+
+    void fetchProfile();
     fetchStats();
-  }, []);
+      fetchZoneOptions();
+      void fetchNotifications();
+   }, []);
+
+   const currentZoneLabel = useMemo(
+      () => selectedZones[0] || stats.zone || "No zone selected",
+      [selectedZones, stats.zone]
+   );
+
+   const zoneSummary = useMemo(
+      () => selectedZones.length ? selectedZones.join(", ") : "No zones selected",
+      [selectedZones]
+   );
+
+   const toggleZone = (zoneName: string) => {
+      setSelectedZones((current) =>
+         current.includes(zoneName) ? current.filter((item) => item !== zoneName) : [...current, zoneName]
+      );
+   };
+
+   const toggleOfflineZone = (zoneName: string) => {
+      setSelectedOfflineZones((current) =>
+         current.includes(zoneName) ? current.filter((item) => item !== zoneName) : [...current, zoneName]
+      );
+   };
+
+   const saveZonePreferences = async () => {
+      setIsSavingZones(true);
+      try {
+         const response = await fetch(`${apiBaseUrl}/auth/me`, {
+            method: "PATCH",
+            headers: {
+               "Content-Type": "application/json",
+               "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+               zones: selectedZones,
+               offlineZones: selectedOfflineZones,
+               volunteerProfileSettings: {
+                  profileMeta: {
+                     zoneLabel: selectedZones[0] || selectedOfflineZones[0] || null,
+                  },
+               },
+               currentLocation,
+            }),
+         });
+
+         if (!response.ok) {
+            const payload = await response.json().catch(() => null);
+            throw new Error(payload?.detail || "Failed to save zone preferences");
+         }
+
+         const updatedUser = {
+            ...(user || {}),
+            zones: selectedZones,
+            offlineZones: selectedOfflineZones,
+            volunteerProfileSettings: {
+               ...(user?.volunteerProfileSettings || {}),
+               profileMeta: {
+                  ...(user?.volunteerProfileSettings?.profileMeta || {}),
+                  zoneLabel: selectedZones[0] || selectedOfflineZones[0] || null,
+               },
+            },
+         };
+         setUser(updatedUser);
+         localStorage.setItem("nexus_user", JSON.stringify(updatedUser));
+         window.dispatchEvent(new Event("storage"));
+         window.dispatchEvent(new Event("userUpdate"));
+         toast({ title: "Zone preferences saved", description: "Field area and offline cache zones updated." });
+      } catch (err) {
+         console.error("Failed to save profile zones", err);
+         toast({
+            title: "Save failed",
+            description: err instanceof Error ? err.message : "Could not save zone preferences",
+            variant: "destructive",
+         });
+      } finally {
+         setIsSavingZones(false);
+      }
+   };
+
+   const saveLanguagePreferences = async () => {
+      setIsSavingLanguages(true);
+      try {
+         const response = await fetch(`${apiBaseUrl}/auth/me`, {
+            method: "PATCH",
+            headers: {
+               "Content-Type": "application/json",
+               "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+               primaryLanguage,
+               additionalLanguages,
+            }),
+         });
+
+         if (!response.ok) {
+            const payload = await response.json().catch(() => null);
+            throw new Error(payload?.detail || "Failed to save language preferences");
+         }
+
+         const updatedUser = {
+            ...(user || {}),
+            primaryLanguage,
+            additionalLanguages,
+         };
+         setUser(updatedUser);
+         localStorage.setItem("nexus_user", JSON.stringify(updatedUser));
+         window.dispatchEvent(new Event("storage"));
+         window.dispatchEvent(new Event("userUpdate"));
+         toast({ title: "Language preferences saved", description: "Translation defaults updated." });
+      } catch (err) {
+         console.error("Failed to save language preferences", err);
+         toast({
+            title: "Save failed",
+            description: err instanceof Error ? err.message : "Could not save language preferences",
+            variant: "destructive",
+         });
+      } finally {
+         setIsSavingLanguages(false);
+      }
+   };
+
+   const savePersonalInfo = async () => {
+      if (!profileNameDraft.trim()) {
+        toast({ title: "Name required", description: "Please enter your name.", variant: "destructive" });
+        return;
+      }
+
+      setIsSavingProfile(true);
+      try {
+         const response = await fetch(`${apiBaseUrl}/auth/me`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              name: profileNameDraft.trim(),
+              phone: profilePhoneDraft.trim() || null,
+              currentLocation,
+            }),
+         });
+
+         if (!response.ok) {
+            const payload = await response.json().catch(() => null);
+            throw new Error(payload?.detail || "Failed to save personal info");
+         }
+
+         const updatedUser = {
+            ...(user || {}),
+            name: profileNameDraft.trim(),
+            phone: profilePhoneDraft.trim() || null,
+         };
+         setUser(updatedUser);
+         localStorage.setItem("nexus_user", JSON.stringify(updatedUser));
+         window.dispatchEvent(new Event("storage"));
+         window.dispatchEvent(new Event("userUpdate"));
+         setIsEditingProfile(false);
+         toast({ title: "Profile updated", description: "Personal information saved." });
+      } catch (err) {
+         console.error("Failed to save profile info", err);
+         toast({
+            title: "Save failed",
+            description: err instanceof Error ? err.message : "Could not save profile info",
+            variant: "destructive",
+         });
+      } finally {
+         setIsSavingProfile(false);
+      }
+   };
+
+   const markSingleNotificationRead = async (item: NotificationItem) => {
+      if (item.read) {
+        return;
+      }
+      try {
+        await markNotificationRead(item.id);
+        setNotifications((current) =>
+          current.map((row) => (row.id === item.id ? { ...row, read: true } : row))
+        );
+      } catch (err) {
+        console.error("Failed to mark notification read", err);
+      }
+   };
+
+   const addLanguage = () => {
+      const value = languageDraft.trim();
+      if (!value || additionalLanguages.includes(value)) {
+        setLanguageDraft("");
+        return;
+      }
+      setAdditionalLanguages((current) => [...current, value]);
+      setLanguageDraft("");
+   };
+
+   const removeLanguage = (language: string) => {
+      setAdditionalLanguages((current) => current.filter((item) => item !== language));
+   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+      if (!file.type.startsWith("image/")) {
+         toast({ title: "Invalid file", description: "Please upload an image file.", variant: "destructive" });
+         return;
+      }
+      if (file.size > 2 * 1024 * 1024) {
+         toast({ title: "File too large", description: "Please upload an image under 2MB.", variant: "destructive" });
+         return;
+      }
+
     setIsUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/fieldworker/profile/image`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        },
-        body: formData
-      });
+         const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(new Error("Failed to read image"));
+            reader.readAsDataURL(file);
+         });
 
-      if (response.ok) {
-        const data = await response.json();
-        const updatedUser = { ...user, photoUrl: data.photoUrl };
-        setUser(updatedUser);
-        localStorage.setItem("nexus_user", JSON.stringify(updatedUser));
-        // Force header update and same-window sync
-        window.dispatchEvent(new Event('storage'));
-        window.dispatchEvent(new Event('userUpdate'));
-      }
+         const response = await fetch(`${apiBaseUrl}/auth/me`, {
+            method: "PATCH",
+            headers: {
+               "Content-Type": "application/json",
+               "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({ profilePhoto: dataUrl }),
+         });
+
+         if (!response.ok) {
+            const payload = await response.json().catch(() => null);
+            throw new Error(payload?.detail || "Avatar update failed");
+         }
+
+         const updatedUser = { ...user, profilePhoto: dataUrl, photoUrl: dataUrl };
+         setUser(updatedUser);
+         localStorage.setItem("nexus_user", JSON.stringify(updatedUser));
+         window.dispatchEvent(new Event('storage'));
+         window.dispatchEvent(new Event('userUpdate'));
+         toast({ title: "Profile photo updated" });
     } catch (err) {
       console.error("Avatar upload failed", err);
+         toast({ title: "Upload failed", description: err instanceof Error ? err.message : "Avatar upload failed", variant: "destructive" });
     } finally {
       setIsUploading(false);
     }
@@ -148,8 +450,8 @@ export const FieldWorkerProfile = () => {
               <div className="absolute inset-0 bg-gradient-to-br from-[#5A57FF] to-purple-600 rounded-[2.5rem] rotate-6 group-hover:rotate-12 transition-transform duration-500" />
               
               {/* Profile Image Container */}
-              <div 
-                className="absolute inset-0 bg-white rounded-[2.5rem] overflow-hidden border-2 border-slate-100 relative shadow-sm cursor-pointer group/avatar"
+                     <div 
+                        className="absolute inset-0 bg-white rounded-[2.5rem] overflow-hidden border-2 border-slate-100 shadow-sm cursor-pointer group/avatar"
                 onClick={() => fileInputRef.current?.click()}
               >
                   {isUploading ? (
@@ -159,7 +461,7 @@ export const FieldWorkerProfile = () => {
                   ) : (
                     <>
                       <img 
-                        src={user?.photoUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.name || 'User'}`} 
+                                    src={user?.photoUrl || user?.profilePhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.name || 'User'}`} 
                         className="w-full h-full object-cover transition-all group-hover/avatar:scale-110 group-hover/avatar:blur-[2px]" 
                       />
                       <div className="absolute inset-0 bg-black/20 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center">
@@ -189,7 +491,7 @@ export const FieldWorkerProfile = () => {
                  <Badge className="bg-amber-500 text-white border-none font-black text-[9px] tracking-[0.2em] uppercase px-4 py-1.5 h-6">Verified Personnel</Badge>
               </div>
               <p className="text-xs font-bold text-slate-400 flex items-center justify-center gap-1.5 uppercase tracking-widest">
-                 <MapPin className="w-3.5 h-3.5" /> {stats.zone || user?.zone || "Central Hub"}
+                 <MapPin className="w-3.5 h-3.5" /> {currentZoneLabel}
               </p>
            </div>
            
@@ -206,24 +508,79 @@ export const FieldWorkerProfile = () => {
            </div>
         </div>
 
-        <div className="bg-white rounded-[2.5rem] p-8 border border-slate-50 shadow-sm space-y-6">
-           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 italic">Assigned Area</p>
-           <div className="flex flex-col gap-2">
-              <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-2xl flex items-center justify-between">
-                 <div className="flex items-center gap-3">
-                    <MapPin className="w-4 h-4 text-[#5A57FF]" />
-                    <span className="text-xs font-bold text-[#1A1A3D]">{stats.zone || user?.zone}</span>
-                 </div>
-              </div>
-              <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex items-center justify-between">
-                 <div className="flex items-center gap-3">
-                    <MapPin className="w-4 h-4 text-slate-400" />
-                    <span className="text-xs font-bold text-slate-400">Regional Node {user?.id?.slice(-2) || "A"}</span>
-                 </div>
-              </div>
+      <div ref={zoneSettingsRef} className="bg-white rounded-[2.5rem] p-8 border border-slate-50 shadow-sm space-y-6">
+           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 italic">Current Location</p>
+           
+           <div className="h-64 rounded-2xl overflow-hidden border border-slate-100 bg-slate-50">
+             <MapPicker 
+                onLocationSelect={(loc) => {
+                  setCurrentLocation({ lat: loc.lat, lng: loc.lng });
+                  if (loc.areaName && !selectedZones.includes(loc.areaName)) {
+                    // Optionally auto-select zone
+                  }
+                }}
+                initialLocation={currentLocation || undefined}
+                radiusMeters={1000}
+             />
            </div>
-           <Button variant="ghost" className="w-full h-12 text-[#5A57FF] font-bold text-[10px] uppercase tracking-widest gap-2">
-              Request Zone Change <ChevronRight className="w-3 h-3" />
+
+           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 italic">Assigned Area</p>
+           <div className="space-y-4">
+              <div>
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Mission/NGO Available Zones</p>
+                 <div className="flex flex-wrap gap-2">
+                               {zoneOptions.length ? zoneOptions.map((zone) => {
+                                 const active = selectedZones.includes(zone);
+                      return (
+                        <button
+                                       key={zone}
+                          type="button"
+                                       onClick={() => toggleZone(zone)}
+                          className={cn(
+                            "px-3 py-1.5 rounded-xl border text-xs font-bold transition-all",
+                            active ? "bg-indigo-100 border-indigo-200 text-[#4338CA]" : "bg-white border-slate-200 text-slate-500 hover:border-indigo-200"
+                          )}
+                        >
+                                       {zone}
+                        </button>
+                      );
+                    }) : (
+                      <div className="text-xs text-slate-400 font-medium">No zones discovered yet from missions/coordinator setup.</div>
+                    )}
+                 </div>
+              </div>
+
+              <div>
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Offline Pre-cache Zones</p>
+                 <div className="flex flex-wrap gap-2">
+                              {zoneOptions.length ? zoneOptions.map((zone) => {
+                                 const active = selectedOfflineZones.includes(zone);
+                      return (
+                        <button
+                                       key={`offline-${zone}`}
+                          type="button"
+                                       onClick={() => toggleOfflineZone(zone)}
+                          className={cn(
+                            "px-3 py-1.5 rounded-xl border text-xs font-bold transition-all",
+                            active ? "bg-emerald-100 border-emerald-200 text-emerald-700" : "bg-white border-slate-200 text-slate-500 hover:border-emerald-200"
+                          )}
+                        >
+                                       {zone}
+                        </button>
+                      );
+                    }) : null}
+                 </div>
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium">Selected: {zoneSummary}</p>
+           </div>
+
+                <Button
+             variant="ghost"
+             onClick={saveZonePreferences}
+             disabled={isSavingZones}
+             className="w-full h-12 text-[#5A57FF] font-bold text-[10px] uppercase tracking-widest gap-2"
+           >
+              {isSavingZones ? "Saving..." : "Save Zone Preferences"} <ChevronRight className="w-3 h-3" />
            </Button>
         </div>
 
@@ -234,17 +591,42 @@ export const FieldWorkerProfile = () => {
         
         {/* Statistics cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-           <ProfileStat label="Mission Points" value={stats.points?.toFixed(1) || "0.0"} icon={Zap} />
-           <ProfileStat label="Active Success" value="98%" icon={CheckCircle2} />
+           <ProfileStat label="Mission Points" value={(user?.impactPoints ?? stats.points)?.toFixed?.(1) || String(user?.impactPoints ?? stats.points ?? 0)} icon={Zap} />
+           <ProfileStat label="Active Success" value={`${Math.round(Number(user?.successRate ?? 0))}%`} icon={CheckCircle2} />
         </div>
 
         {/* Personal info */}
         <SettingCard 
           title="Personal Information" 
           icon={User} 
-          action={<Button variant="ghost" className="text-[#5A57FF] font-bold text-xs flex gap-2 h-10 px-5 rounded-xl hover:bg-indigo-50"><Edit3 className="w-4 h-4" /> Edit Profile</Button>}
+               action={
+                  <Button
+                     variant="ghost"
+                     className="text-[#5A57FF] font-bold text-xs flex gap-2 h-10 px-5 rounded-xl hover:bg-indigo-50"
+                     onClick={() => {
+                        if (isEditingProfile) {
+                           setProfileNameDraft(String(user?.name || ""));
+                           setProfilePhoneDraft(String(user?.phone || ""));
+                        }
+                        setIsEditingProfile((current) => !current);
+                     }}
+                  >
+                     <Edit3 className="w-4 h-4" /> {isEditingProfile ? "Cancel" : "Edit Profile"}
+                  </Button>
+               }
         >
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                     <div className="space-y-2 md:col-span-2">
+                         <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Full Name</Label>
+                         {isEditingProfile ? (
+                            <Input value={profileNameDraft} onChange={(event) => setProfileNameDraft(event.target.value)} className="h-14 rounded-2xl" />
+                         ) : (
+                            <div className="flex items-center gap-3 bg-slate-50 px-5 h-14 rounded-2xl border border-transparent">
+                                 <User className="w-4 h-4 text-slate-400" />
+                                 <span className="text-sm font-bold text-[#1A1A3D] truncate">{user?.name || "loading..."}</span>
+                            </div>
+                         )}
+                     </div>
               <div className="space-y-2">
                  <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Email Address</Label>
                  <div className="flex items-center gap-3 bg-slate-50 px-5 h-14 rounded-2xl border border-transparent">
@@ -252,6 +634,17 @@ export const FieldWorkerProfile = () => {
                     <span className="text-sm font-bold text-[#1A1A3D] truncate">{user?.email || "loading..."}</span>
                  </div>
               </div>
+                     <div className="space-y-2">
+                         <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Phone Number</Label>
+                         {isEditingProfile ? (
+                            <Input value={profilePhoneDraft} onChange={(event) => setProfilePhoneDraft(event.target.value)} placeholder="Add phone number" className="h-14 rounded-2xl" />
+                         ) : (
+                            <div className="flex items-center gap-3 bg-slate-50 px-5 h-14 rounded-2xl border border-transparent">
+                                 <Phone className="w-4 h-4 text-slate-400" />
+                                 <span className="text-sm font-bold text-[#1A1A3D] truncate">{user?.phone || "Not set"}</span>
+                            </div>
+                         )}
+                     </div>
               <div className="space-y-2">
                  <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nexus Worker ID</Label>
                  <div className="flex items-center gap-3 bg-slate-50 px-5 h-14 rounded-2xl border border-transparent">
@@ -260,19 +653,69 @@ export const FieldWorkerProfile = () => {
                  </div>
               </div>
            </div>
+                {isEditingProfile && (
+                   <div className="pt-6">
+                      <Button onClick={savePersonalInfo} disabled={isSavingProfile} className="rounded-xl">
+                         {isSavingProfile ? "Saving..." : "Save Personal Information"}
+                      </Button>
+                   </div>
+                )}
         </SettingCard>
 
         {/* Language Preferences */}
         <SettingCard title="Operational Languages" icon={Languages}>
            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div className="space-y-2">
+                    <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Primary Language</Label>
+                    <select
+                      value={primaryLanguage}
+                      onChange={(e) => setPrimaryLanguage(e.target.value)}
+                      className="flex h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-[#1A1A3D]"
+                    >
+                      {[
+                        "English",
+                        "Hindi",
+                        "Kannada",
+                        "Tamil",
+                        "Telugu",
+                        "Marathi",
+                        "Bengali",
+                      ].map((language) => (
+                        <option key={language} value={language}>{language}</option>
+                      ))}
+                    </select>
+                 </div>
+                 <div className="space-y-2">
+                    <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Add Language</Label>
+                    <div className="flex gap-2">
+                      <Input value={languageDraft} onChange={(e) => setLanguageDraft(e.target.value)} placeholder="e.g. Marathi" className="rounded-2xl" />
+                      <Button type="button" variant="outline" onClick={addLanguage}>Add</Button>
+                    </div>
+                 </div>
+              </div>
               <div className="space-y-3">
-                 <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Transcribing For {stats.zone || "Zone"}</Label>
+                 <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Transcribing For {currentZoneLabel}</Label>
                  <div className="flex flex-wrap gap-3">
-                    <Badge className="bg-indigo-100 text-[#5A57FF] border-none px-4 py-2 font-bold text-xs rounded-xl">English (Standard)</Badge>
-                    <Badge className="bg-indigo-100 text-[#5A57FF] border-none px-4 py-2 font-bold text-xs rounded-xl">Local Dialect (Primary)</Badge>
-                    <button className="h-9 px-4 rounded-xl border-2 border-dashed border-slate-200 text-slate-400 font-bold text-xs hover:border-indigo-200 hover:text-[#5A57FF] transition-all flex items-center gap-2">
-                       + Add New
-                    </button>
+                    <Badge className="bg-indigo-100 text-[#5A57FF] border-none px-4 py-2 font-bold text-xs rounded-xl">{primaryLanguage}</Badge>
+                    {additionalLanguages.length ? additionalLanguages.map((language) => (
+                      <button
+                        key={language}
+                        type="button"
+                        onClick={() => removeLanguage(language)}
+                        className="bg-white border border-slate-200 text-slate-600 px-4 py-2 font-bold text-xs rounded-xl hover:border-red-200 hover:text-red-500 transition-all"
+                        title="Click to remove"
+                      >
+                        {language} ×
+                      </button>
+                    )) : (
+                      <span className="text-xs text-slate-400 font-medium">No additional languages added.</span>
+                    )}
+                 </div>
+                 <div className="pt-2">
+                           <Button type="button" onClick={saveLanguagePreferences} disabled={isSavingLanguages} className="rounded-xl">
+                      {isSavingLanguages ? "Saving..." : "Save Language Preferences"}
+                   </Button>
                  </div>
               </div>
            </div>
@@ -281,24 +724,24 @@ export const FieldWorkerProfile = () => {
         {/* Notifications */}
         <SettingCard title="Incident Alerts" icon={Bell}>
            <div className="space-y-4">
-              {[
-                { title: "Emergency Broadcasts", desc: "Push & SMS for life-safety events", icon: CloudLightning, color: "text-red-500", bg: "bg-red-50", active: true },
-                { title: "Mission Dispatches", desc: "Instantly notify for assigned field work", icon: Zap, color: "text-[#10B981]", bg: "bg-emerald-50", active: true },
-                { title: "Report Sync Updates", desc: "confirmations for all field submissions", icon: Database, color: "text-indigo-500", bg: "bg-indigo-50", active: true }
-              ].map((item) => (
-                <div key={item.title} className="flex items-center justify-between p-5 bg-slate-50/50 rounded-2xl border border-slate-100 group hover:border-indigo-100 transition-all">
+              {notifications.length ? notifications.map((item) => (
+                <button key={item.id} type="button" onClick={() => markSingleNotificationRead(item)} className="w-full text-left flex items-center justify-between p-5 bg-slate-50/50 rounded-2xl border border-slate-100 group hover:border-indigo-100 transition-all">
                    <div className="flex items-center gap-4">
-                      <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", item.bg, item.color)}>
-                         <item.icon className="w-5 h-5" />
+                      <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", item.read ? "bg-slate-100 text-slate-400" : "bg-amber-50 text-amber-600")}>
+                         <Bell className="w-5 h-5" />
                       </div>
                       <div className="space-y-0.5">
                          <h4 className="font-bold text-[#1A1A3D] text-sm">{item.title}</h4>
-                         <p className="text-[10px] text-slate-400 font-medium">{item.desc}</p>
+                         <p className="text-[10px] text-slate-400 font-medium">{item.message}</p>
                       </div>
                    </div>
-                   <Switch defaultChecked={item.active} />
+                   <Badge className={cn("border-none font-black text-[9px] tracking-[0.2em] uppercase px-3 py-1.5 h-6", item.read ? "bg-slate-100 text-slate-500" : "bg-emerald-100 text-emerald-700")}>{item.read ? "Read" : "Unread"}</Badge>
+                        </button>
+              )) : (
+                <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-sm text-slate-400 font-medium">
+                  No live incident alerts yet.
                 </div>
-              ))}
+              )}
            </div>
         </SettingCard>
 
@@ -308,16 +751,20 @@ export const FieldWorkerProfile = () => {
               <div className="space-y-6">
                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
                     <div className="space-y-0.5">
-                       <p className="text-xs font-bold text-[#1A1A3D]">Active Edge Sync</p>
-                       <p className="text-[10px] text-slate-400 font-medium">Automatic background uploads</p>
+                       <p className="text-xs font-bold text-[#1A1A3D]">{navigator.onLine ? "Online" : "Offline"}</p>
+                       <p className="text-[10px] text-slate-400 font-medium">Automatic background uploads and local cache sync</p>
                     </div>
-                    <Switch defaultChecked />
+                    <Switch checked={navigator.onLine} disabled />
                  </div>
                  <div className="flex flex-col gap-3">
-                    <button className="w-full h-12 bg-indigo-50 text-[#5A57FF] font-bold text-xs rounded-2xl border border-indigo-100 flex items-center justify-center gap-3 group">
+                              <button
+                                 type="button"
+                                 onClick={() => zoneSettingsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                                 className="w-full h-12 bg-indigo-50 text-[#5A57FF] font-bold text-xs rounded-2xl border border-indigo-100 flex items-center justify-center gap-3 group"
+                              >
                        <MapPin className="w-4 h-4 group-hover:scale-110 transition-transform" /> Manage Zone Cache
                     </button>
-                    <p className="text-[9px] text-center font-bold text-slate-400 uppercase tracking-widest italic">{stats.zone} Node Cache Active</p>
+                    <p className="text-[9px] text-center font-bold text-slate-400 uppercase tracking-widest italic">{selectedOfflineZones.length ? `${selectedOfflineZones.length} offline zone(s) cached` : "No offline zones cached yet"}</p>
                  </div>
               </div>
            </SettingCard>

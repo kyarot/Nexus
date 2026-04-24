@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Camera,
   Edit2,
   Globe,
   Loader2,
@@ -22,6 +23,7 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { MapPicker } from "@/components/nexus/MapPicker";
 import {
   getVolunteerProfile,
   updateVolunteerProfile,
@@ -116,6 +118,7 @@ const VolunteerProfilePage = () => {
   const [phone, setPhone] = useState("");
   const [city, setCity] = useState("");
   const [zoneLabel, setZoneLabel] = useState("");
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const [isAvailable, setIsAvailable] = useState(true);
   const [radius, setRadius] = useState([12]);
@@ -130,6 +133,7 @@ const VolunteerProfilePage = () => {
     emailDigest: true,
     smsAlerts: false,
   });
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   const profileQuery = useQuery({
     queryKey: ["volunteer-profile"],
@@ -149,6 +153,7 @@ const VolunteerProfilePage = () => {
     setPhone(profile.phone || "");
     setCity(settings?.profileMeta?.city || "");
     setZoneLabel(settings?.profileMeta?.zoneLabel || profile.zones?.[0] || "");
+    setCurrentLocation((profile as any).currentLocation || null);
     setProfilePhoto(profile.profilePhoto || null);
     setIsAvailable((profile.availability || "available").toLowerCase() === "available");
     setRadius([Math.max(1, Math.min(25, profile.travelRadius || 12))]);
@@ -195,10 +200,23 @@ const VolunteerProfilePage = () => {
             zoneLabel,
           },
         },
+        currentLocation,
       }),
     onSuccess: () => {
       setIsDirty(false);
       setIsEditingPersonal(false);
+      const cached = localStorage.getItem("nexus_user");
+      const parsed = cached ? JSON.parse(cached) : {};
+      const updated = {
+        ...parsed,
+        name,
+        phone: phone || null,
+        profilePhoto,
+        photoUrl: profilePhoto,
+      };
+      localStorage.setItem("nexus_user", JSON.stringify(updated));
+      window.dispatchEvent(new Event("storage"));
+      window.dispatchEvent(new Event("userUpdate"));
       queryClient.invalidateQueries({ queryKey: ["volunteer-profile"] });
       toast({ title: "Profile updated", description: "Volunteer profile synced with Firestore." });
     },
@@ -263,6 +281,25 @@ const VolunteerProfilePage = () => {
     setSkills((prev) => [...prev, { name: `Skill ${prev.length + 1}`, level: 2 }]);
   };
 
+  const handleProfilePhotoUpload = (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Invalid file", description: "Please select an image file.", variant: "destructive" });
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast({ title: "File too large", description: "Please upload an image under 2MB.", variant: "destructive" });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setProfilePhoto(String(reader.result || ""));
+      setIsDirty(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
   if (profileQuery.isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F8F7FF]">
@@ -292,12 +329,25 @@ const VolunteerProfilePage = () => {
           <div className="h-[120px] bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] w-full" />
 
           <div className="px-8 -mt-10 relative flex flex-col items-center">
-            <div className="w-[80px] h-[80px] rounded-full border-[3px] border-white shadow-lg overflow-hidden bg-white mb-4">
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => handleProfilePhotoUpload(event.target.files?.[0])}
+            />
+            <div
+              className="w-[80px] h-[80px] rounded-full border-[3px] border-white shadow-lg overflow-hidden bg-white mb-4 relative cursor-pointer group"
+              onClick={() => photoInputRef.current?.click()}
+            >
               <img
                 src={profilePhoto || "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=150"}
                 alt={name || "Volunteer"}
                 className="w-full h-full object-cover"
               />
+              <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <Camera className="w-4 h-4 text-white" />
+              </div>
             </div>
             <h2 className="text-[20px] font-bold text-[#1A1A3D]">{name || "Volunteer"}</h2>
             <Badge className="mt-2 bg-[#4F46E5] text-white border-none py-1 px-4 rounded-full text-[10px] font-black uppercase tracking-widest ring-0">
@@ -582,16 +632,17 @@ const VolunteerProfilePage = () => {
           </div>
 
           <div className="w-full md:w-[260px] h-[300px] bg-[#E0E7FF] rounded-[1.5rem] overflow-hidden relative shadow-inner">
-            <div className="absolute inset-0 opacity-40 bg-[url('https://www.google.com/maps/vt/pb=!1m5!1m4!1i12!2i2365!2i1575!4i256!2m3!1e0!2sm!3i625206676!3m17!2sen!3sUS!5e18!12m4!1e68!2m2!1sset!2sRoadmap!12m3!1e37!2m1!1ssmartmaps!12m4!1e26!2m2!1s1i1!2s1!4e0!5m4!1e0!8m2!1i1100!2i1100!6m6!1e12!2i2!26b1!39b1!44e1!50e0!23i1301813')] bg-cover" />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-32 h-32 bg-[#4F46E5]/10 border-2 border-[#4F46E5]/40 rounded-full animate-pulse flex items-center justify-center">
-                <div className="w-2 h-2 bg-[#4F46E5] rounded-full shadow-[0_0_10px_#4F46E5]" />
-              </div>
-            </div>
-            <div className="absolute bottom-4 left-4 right-4 bg-white/80 backdrop-blur-sm p-3 rounded-xl border border-white/40">
-              <p className="text-[10px] font-black text-[#1A1A3D] uppercase tracking-widest">Active Coverage</p>
-              <p className="text-xs font-bold text-slate-500">{radius[0]}km around {zoneLabel || "assigned zone"}</p>
-            </div>
+            <MapPicker 
+              onLocationSelect={(loc) => {
+                setIsDirty(true);
+                setCurrentLocation({ lat: loc.lat, lng: loc.lng });
+                if (loc.areaName || loc.city) {
+                  setZoneLabel(loc.areaName || loc.city || "");
+                }
+              }}
+              initialLocation={currentLocation || undefined}
+              radiusMeters={radius[0] * 1000}
+            />
           </div>
         </div>
 

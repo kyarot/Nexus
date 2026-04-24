@@ -70,6 +70,11 @@ class ZoneDocument(BaseModel):
     lat: float = 0.0
     lng: float = 0.0
     radiusMeters: float = Field(default=1000, ge=500, le=6000)
+    language: str | None = None
+    primaryLanguage: str | None = None
+    localLanguages: list[str] = Field(default_factory=list)
+    additionalLanguages: list[str] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)
     updatedAt: str = ""
 
     class Config:

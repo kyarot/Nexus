@@ -46,7 +46,10 @@ import {
   MessageSquare,
 } from "lucide-react";
 import {
+  autoAssignCoordinatorPendingMissions,
   assignCoordinatorMission,
+  flagCoordinatorMissionForReview,
+  getCoordinatorWeeklyMissionReport,
   sendCoordinatorMissionMessage,
   renotifyCoordinatorMission,
   closeCoordinatorMission,
@@ -64,6 +67,7 @@ import {
 } from "@/lib/coordinator-api";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { downloadNexusPdfReport } from "@/lib/pdf-report";
 
 const statusLabel = (status: CoordinatorMission["status"]) => {
   switch (status) {
@@ -128,6 +132,8 @@ const CoordinatorMissions = () => {
   const [creationStep, setCreationStep] = useState(1);
   const [selectedVolunteerForMission, setSelectedVolunteerForMission] = useState<CoordinatorMissionCandidate | null>(null);
   const [selectedMission, setSelectedMission] = useState<CoordinatorMission | null>(null);
+  const [reviewMission, setReviewMission] = useState<CoordinatorMission | null>(null);
+  const [reviewReason, setReviewReason] = useState("");
   const [messageMission, setMessageMission] = useState<CoordinatorMission | null>(null);
   const [messageText, setMessageText] = useState("");
   const [assignMission, setAssignMission] = useState<CoordinatorMission | null>(null);
@@ -253,8 +259,13 @@ const CoordinatorMissions = () => {
   });
 
   const assignCandidatesQuery = useQuery({
-    queryKey: ["coordinator-mission-assign-candidates", assignMission?.id],
-    queryFn: () => getCoordinatorMissionCandidatesForAudience(assignMission!.zoneId, assignMission!.needType, "volunteer"),
+    queryKey: ["coordinator-mission-assign-candidates", assignMission?.id, assignMission?.targetAudience],
+    queryFn: () =>
+      getCoordinatorMissionCandidatesForAudience(
+        assignMission!.zoneId,
+        assignMission!.needType,
+        assignMission!.targetAudience || "fieldworker",
+      ),
     enabled: Boolean(assignMission?.zoneId && assignMission?.needType),
   });
 
@@ -313,10 +324,11 @@ const CoordinatorMissions = () => {
       setSelectedMission(response.mission);
       setAssignMission(null);
       setSelectedAssignCandidate(null);
-      toast.success("Volunteer assigned to mission");
+      const assigneeRole = getAssigneeRoleText(response.mission.targetAudience);
+      toast.success(`${assigneeRole} assigned to mission`);
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to assign volunteer");
+      toast.error(error instanceof Error ? error.message : "Failed to assign responder");
     },
   });
 
@@ -360,6 +372,98 @@ const CoordinatorMissions = () => {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to close mission");
+    },
+  });
+
+  const flagMissionMutation = useMutation({
+    mutationFn: ({ missionId, reason }: { missionId: string; reason: string }) =>
+      flagCoordinatorMissionForReview(missionId, reason),
+    onSuccess: async (mission) => {
+      await queryClient.invalidateQueries({ queryKey: ["coordinator-missions"] });
+      await queryClient.invalidateQueries({ queryKey: ["coordinator-dashboard"] });
+      if (selectedMission?.id === mission.id) {
+        setSelectedMission(mission);
+      }
+      setReviewMission(null);
+      setReviewReason("");
+      toast.success("Mission flagged for review");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to flag mission for review");
+    },
+  });
+
+  const autoAssignPendingMutation = useMutation({
+    mutationFn: autoAssignCoordinatorPendingMissions,
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["coordinator-missions"] });
+      await queryClient.invalidateQueries({ queryKey: ["coordinator-dashboard"] });
+      toast.success(`Auto-assigned ${result.assigned} pending mission(s)`);
+      if (result.failed > 0) {
+        toast.warning(`${result.failed} mission(s) could not be auto-assigned`);
+      }
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to auto-assign pending missions");
+    },
+  });
+
+  const weeklyReportMutation = useMutation({
+    mutationFn: getCoordinatorWeeklyMissionReport,
+    onSuccess: (report) => {
+      const generatedAt = report.generatedAt ? new Date(report.generatedAt) : new Date();
+      const stamp = `${generatedAt.getFullYear()}-${String(generatedAt.getMonth() + 1).padStart(2, "0")}-${String(generatedAt.getDate()).padStart(2, "0")}`;
+      const summary = report.summary;
+      const missions = Array.isArray(report.missions) ? report.missions : [];
+      downloadNexusPdfReport({
+        fileName: `weekly-mission-report-${stamp}.pdf`,
+        reportTitle: "Nexus Weekly Mission Report",
+        reportSubtitle: "Operational dispatch summary for coordinator review.",
+        generatedAt: report.generatedAt,
+        meta: [
+          { label: "Total", value: String(summary.total) },
+          { label: "Pending", value: String(summary.pending) },
+          { label: "Completed", value: String(summary.completed) },
+          { label: "Auto-Assigned", value: String(summary.autoAssigned) },
+        ],
+        metrics: [
+          { label: "Pending Missions", value: String(summary.pending), note: "Missions waiting for assignment." },
+          { label: "Active Missions", value: String(summary.active), note: "Currently in progress." },
+          { label: "Completed", value: String(summary.completed), note: "Verified closures this week." },
+          { label: "Families Helped", value: String(summary.familiesHelped), note: "Verified impact count." },
+        ],
+        sections: [
+          {
+            title: "Assignment Notes",
+            lines: missions.length
+              ? missions.slice(0, 6).map((mission) => {
+                  const missionLabel = String(mission?.missionId || "unknown mission").slice(0, 8);
+                  const statusLabel = String(mission?.status || "unknown");
+                  const assigneeLabel = mission?.assignee ? ` -> ${mission.assignee}` : "";
+                  return `${missionLabel}: ${statusLabel}${assigneeLabel}`;
+                })
+              : ["No mission rows were returned by the backend."],
+          },
+        ],
+        tables: [
+          {
+            title: "Weekly Mission Summary",
+            headers: ["Mission", "Zone", "Status", "Assignee", "Families"],
+            rows: missions.map((mission) => [
+              String(mission?.missionId || "unknown mission").slice(0, 8),
+              mission?.zone || "-",
+              mission?.status || "unknown",
+              mission?.assignee || "-",
+              String(mission?.familiesHelped ?? 0),
+            ]),
+          },
+        ],
+        footerNote: "Generated by Nexus coordinator console.",
+      });
+      toast.success("Weekly mission report downloaded as PDF");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to export weekly mission report");
     },
   });
 
@@ -626,7 +730,9 @@ const CoordinatorMissions = () => {
                           <div className="p-4 bg-[#FFFBEB] rounded-xl border border-[#FEF3C7] flex items-center justify-between gap-4">
                             <div className="flex items-center gap-3 min-w-0">
                               <AlertCircle className="w-5 h-5 text-amber-500 shrink-0" />
-                              <span className="text-sm font-bold text-[#92400E] truncate">No volunteer assigned yet</span>
+                              <span className="text-sm font-bold text-[#92400E] truncate">
+                                {mission.targetAudience === "volunteer" ? "No volunteer assigned yet" : "No field worker assigned yet"}
+                              </span>
                             </div>
                             <div className="flex items-center gap-2 bg-white/60 px-3 py-1.5 rounded-lg text-[10px] font-black text-[#4F46E5] uppercase tracking-widest border border-indigo-100 whitespace-nowrap">
                               <Sparkles className="w-3 h-3" /> Best match: {bestMatchByMission.get(mission.id)?.name || "Auto assign ready"}
@@ -637,7 +743,7 @@ const CoordinatorMissions = () => {
                               className="bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] text-white font-bold rounded-xl px-6"
                               onClick={() => setAssignMission(mission)}
                             >
-                              Assign Volunteer →
+                              {mission.targetAudience === "volunteer" ? "Assign Volunteer" : "Assign Field Worker"} →
                             </Button>
                             <Button
                               variant="outline"
@@ -650,7 +756,16 @@ const CoordinatorMissions = () => {
                               View Reports
                             </Button>
                             <div className="flex-1" />
-                            <Button variant="ghost" className="text-slate-400 font-bold">Edit Details</Button>
+                            <Button
+                              variant="ghost"
+                              className="text-slate-400 font-bold"
+                              onClick={() => {
+                                setSelectedMission(mission);
+                                setDetailTab("Overview");
+                              }}
+                            >
+                              Edit Details
+                            </Button>
                           </div>
                         </div>
                       ) : (
@@ -847,17 +962,22 @@ const CoordinatorMissions = () => {
                 </div>
 
                 <div className="space-y-3">
-                  <Button className="w-full bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold py-6 rounded-2xl flex justify-between items-center group">
+                  <Button
+                    className="w-full bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold py-6 rounded-2xl flex justify-between items-center group"
+                    onClick={() => autoAssignPendingMutation.mutate()}
+                    disabled={autoAssignPendingMutation.isPending}
+                  >
                     <div className="flex items-center gap-3"><Repeat className="w-4 h-4" /> Auto-assign all pending</div>
                     <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all" />
                   </Button>
-                  <Button variant="ghost" className="w-full bg-white border border-slate-100 text-slate-500 font-bold py-6 rounded-2xl flex justify-between items-center group hover:bg-slate-50">
+                  <Button
+                    variant="ghost"
+                    className="w-full bg-white border border-slate-100 text-slate-500 font-bold py-6 rounded-2xl flex justify-between items-center group hover:bg-slate-50"
+                    onClick={() => weeklyReportMutation.mutate()}
+                    disabled={weeklyReportMutation.isPending}
+                  >
                     <div className="flex items-center gap-3"><FileText className="w-4 h-4" /> Export Weekly Report</div>
                     <ChevronRight className="w-4 h-4 opacity-40 group-hover:translate-x-1 transition-all" />
-                  </Button>
-                  <Button variant="ghost" className="w-full bg-[#1E1B4B] text-white font-bold py-6 rounded-2xl flex justify-between items-center group hover:bg-[#1A1A3D]">
-                    <div className="flex items-center gap-3"><Send className="w-4 h-4" /> Send Field Broadcast</div>
-                    <Send className="w-4 h-4 opacity-40 -translate-y-1 translate-x-1 scale-75" />
                   </Button>
                 </div>
               </div>
@@ -971,6 +1091,14 @@ const CoordinatorMissions = () => {
                                   </p>
                                   <p className="text-[11px] font-medium text-slate-400">{selectedMission.assignedVolunteerMatch || 0}% Match · {selectedMission.assignedVolunteerDistance || "Nearby"}</p>
                                 </div>
+                                <Button
+                                  variant="outline"
+                                  className="h-8 rounded-lg border-slate-200 text-[#4F46E5] hover:bg-white px-2.5 text-[11px] font-bold"
+                                  onClick={() => setAssignMission(selectedMission)}
+                                  disabled={selectedMission.status === "completed"}
+                                >
+                                  {selectedMission.assignedTo ? "Reassign" : "Assign"}
+                                </Button>
                                 <Button
                                   variant="outline"
                                   className="h-8 w-8 p-0 rounded-lg border-slate-200 text-[#4F46E5] hover:bg-white"
@@ -1149,6 +1277,20 @@ const CoordinatorMissions = () => {
                             </p>
                             <p className="text-[11px] font-medium text-slate-400">{selectedMission.assignedVolunteerReason || "Auto-assigned by zone and skill match."}</p>
                           </div>
+                            <Button
+                              variant="outline"
+                              className="shrink-0 border-slate-200 text-[#4F46E5] font-bold"
+                              onClick={() => setAssignMission(selectedMission)}
+                              disabled={selectedMission.status === "completed"}
+                            >
+                              {selectedMission.assignedTo
+                                ? selectedMission.targetAudience === "volunteer"
+                                  ? "Reassign Volunteer"
+                                  : "Reassign Field Worker"
+                                : selectedMission.targetAudience === "volunteer"
+                                  ? "Assign Volunteer"
+                                  : "Assign Field Worker"}
+                            </Button>
                         </div>
                       </div>
                     )}
@@ -1181,7 +1323,19 @@ const CoordinatorMissions = () => {
                 </div>
 
                 <div className="p-8 border-t border-slate-50 bg-white absolute bottom-0 left-0 right-0 flex gap-4">
-                  <Button variant="outline" className="flex-1 border-slate-200 text-[#1A1A3D] font-bold py-7 rounded-2xl">Flag for Review</Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 border-slate-200 text-[#1A1A3D] font-bold py-7 rounded-2xl"
+                    disabled={!selectedMission || selectedMission.status === "completed" || flagMissionMutation.isPending || !!selectedMission?.reviewFlagged}
+                    onClick={() => {
+                      if (selectedMission) {
+                        setReviewMission(selectedMission);
+                        setReviewReason(selectedMission.reviewReason || "");
+                      }
+                    }}
+                  >
+                    {selectedMission?.reviewFlagged ? "Flagged for Review" : "Flag for Review"}
+                  </Button>
                   <Button
                     className="flex-1 bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] hover:opacity-90 text-white font-bold py-7 rounded-2xl shadow-lg"
                     disabled={!selectedMission || closeMissionMutation.isPending || selectedMission.status === "completed"}
@@ -1678,6 +1832,65 @@ const CoordinatorMissions = () => {
       </Dialog>
 
       <Dialog
+        open={!!reviewMission}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReviewMission(null);
+            setReviewReason("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Flag Mission for Review</DialogTitle>
+          </DialogHeader>
+
+          {reviewMission && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <span className="font-bold">{reviewMission.title}</span>
+                <span> will be flagged for coordinator review.</span>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Reason (optional)</p>
+                <Textarea
+                  value={reviewReason}
+                  onChange={(event) => setReviewReason(event.target.value)}
+                  placeholder="Describe why this mission needs review..."
+                  className="min-h-[120px] rounded-xl border-slate-200"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setReviewMission(null);
+                    setReviewReason("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  disabled={flagMissionMutation.isPending}
+                  onClick={() =>
+                    flagMissionMutation.mutate({
+                      missionId: reviewMission.id,
+                      reason: reviewReason,
+                    })
+                  }
+                >
+                  {flagMissionMutation.isPending ? "Flagging..." : "Confirm Flag"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={!!messageMission}
         onOpenChange={(open) => {
           if (!open) {
@@ -1741,7 +1954,9 @@ const CoordinatorMissions = () => {
       <Dialog open={!!assignMission} onOpenChange={(open) => !open && setAssignMission(null)}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Assign volunteer to mission</DialogTitle>
+            <DialogTitle>
+              {assignMission?.targetAudience === "volunteer" ? "Assign volunteer to mission" : "Assign field worker to mission"}
+            </DialogTitle>
           </DialogHeader>
 
           {assignMission && (
@@ -1754,13 +1969,13 @@ const CoordinatorMissions = () => {
 
               {assignCandidatesQuery.isLoading && (
                 <div className="rounded-xl border border-slate-100 bg-white px-4 py-6 text-sm text-slate-500">
-                  Loading volunteer recommendations...
+                  Loading {assignMission.targetAudience === "volunteer" ? "volunteer" : "field worker"} recommendations...
                 </div>
               )}
 
               {!assignCandidatesQuery.isLoading && !(assignCandidatesQuery.data?.length) && (
                 <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-6 text-sm text-amber-700">
-                  No volunteer candidates available for this mission.
+                  No {assignMission.targetAudience === "volunteer" ? "volunteer" : "field worker"} candidates available for this mission.
                 </div>
               )}
 

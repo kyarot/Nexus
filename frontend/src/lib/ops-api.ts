@@ -140,6 +140,23 @@ export const decideCoordinatorResourceRequest = (requestId: string, decision: "a
     body: JSON.stringify({ decision, note }),
   });
 
+export const autoAllocateCoordinatorResourceRequests = (limit = 25) =>
+  request<{
+    updated: boolean;
+    processed: number;
+    approved: number;
+    rejected: number;
+    strategy: string;
+    allocations: Array<{
+      requestId: string;
+      decision: string;
+      items: Array<{ itemId: string; allocatedQty: number }>;
+      note: string;
+    }>;
+  }>(`/coordinator/resource-requests/auto-allocate?limit=${encodeURIComponent(String(limit))}`, {
+    method: "POST",
+  });
+
 export const getVolunteerEmpathyBrief = (missionId?: string, regenerate = false) =>
   request<VolunteerEmpathyResponse>(
     `/volunteer/empathy-brief${missionId || regenerate ? `?${new URLSearchParams({ ...(missionId ? { missionId } : {}), ...(regenerate ? { regenerate: "true" } : {}) }).toString()}` : ""}`

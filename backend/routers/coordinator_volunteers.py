@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from core.dependencies import role_required
 from core.firebase import db
 from models.mission import MissionStatus
+from services.copilot_data_access import CoordinatorWriteLayer
 
 PREFIX = "/coordinator"
 TAGS = ["coordinator"]
@@ -103,6 +104,25 @@ class CoordinatorVolunteersResponse(BaseModel):
     filters: CoordinatorVolunteersFilters
     volunteers: list[CoordinatorVolunteerItem] = Field(default_factory=list)
     total: int
+
+
+class AddVolunteerRequest(BaseModel):
+    name: str = Field(min_length=1)
+    email: str = Field(min_length=3)
+    phone: str = ""
+    skills: list[str] = Field(default_factory=list)
+    availability: str = "available"
+    zones: list[str] = Field(default_factory=list)
+    primaryLanguage: str = "English"
+    additionalLanguages: list[str] = Field(default_factory=list)
+    travelRadius: int = Field(default=5, ge=1, le=50)
+    emotionalCapacity: str = "moderate"
+    avoidCategories: list[str] = Field(default_factory=list)
+
+
+class AddVolunteerResponse(BaseModel):
+    created: bool
+    volunteer: dict[str, Any]
 
 
 def _read_timestamp(value: Any) -> datetime | None:
@@ -485,3 +505,34 @@ async def get_coordinator_volunteers(
         volunteers=filtered,
         total=len(filtered),
     )
+
+
+@router.post("/volunteers", response_model=AddVolunteerResponse, status_code=status.HTTP_201_CREATED)
+async def add_coordinator_volunteer(
+    payload: AddVolunteerRequest,
+    user: dict[str, Any] = Depends(role_required("coordinator")),
+) -> AddVolunteerResponse:
+    ngo_id = str(user.get("ngoId") or user.get("ngo_id") or "").strip()
+    if not ngo_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User does not have an associated NGO")
+
+    write = CoordinatorWriteLayer(
+        ngo_id=ngo_id,
+        user_id=str(user.get("id") or user.get("uid") or "").strip(),
+        role=str(user.get("role") or ""),
+    )
+
+    volunteer = write.add_volunteer(
+        name=payload.name,
+        email=payload.email,
+        phone=payload.phone,
+        skills=payload.skills,
+        availability=payload.availability,
+        zones=payload.zones,
+        primary_language=payload.primaryLanguage,
+        additional_languages=payload.additionalLanguages,
+        travel_radius=payload.travelRadius,
+        emotional_capacity=payload.emotionalCapacity,
+        avoid_categories=payload.avoidCategories,
+    )
+    return AddVolunteerResponse(created=True, volunteer=volunteer)

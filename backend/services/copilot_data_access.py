@@ -492,22 +492,112 @@ class CoordinatorWriteLayer:
 
         return {"updated": True, "missionId": mission_id, "volunteerId": volunteer_id}
 
-    def add_volunteer(self, name: str, phone: str = "", skills: list[str] | None = None, availability: str = "available") -> dict[str, Any]:
+    def add_volunteer(
+        self,
+        name: str,
+        email: str = "",
+        phone: str = "",
+        skills: list[str] | None = None,
+        availability: str = "available",
+        zones: list[str] | None = None,
+        primary_language: str = "English",
+        additional_languages: list[str] | None = None,
+        travel_radius: int = 5,
+        emotional_capacity: str = "moderate",
+        avoid_categories: list[str] | None = None,
+    ) -> dict[str, Any]:
         normalized_name = str(name or "").strip()
         if not normalized_name:
             raise ValueError("Volunteer name is required")
+
+        normalized_email = str(email or "").strip().lower()
+        if not normalized_email:
+            raise ValueError("Volunteer email is required")
+
+        normalized_intensity = str(emotional_capacity or "moderate").strip().lower()
+        if normalized_intensity not in {"light", "moderate", "intensive"}:
+            normalized_intensity = "moderate"
+        emotional_score = {"light": 55.0, "moderate": 75.0, "intensive": 90.0}[normalized_intensity]
+
+        normalized_zones = [str(zone).strip() for zone in (zones or []) if str(zone).strip()]
+        normalized_skills = [str(skill).strip() for skill in (skills or []) if str(skill).strip()]
+        normalized_additional_languages = [
+            str(language).strip() for language in (additional_languages or []) if str(language).strip()
+        ]
+        normalized_avoid_categories = [
+            str(category).strip() for category in (avoid_categories or []) if str(category).strip()
+        ]
+
         now = self._now()
         payload = {
             "name": normalized_name,
+            "email": normalized_email,
             "phone": str(phone or "").strip(),
-            "skills": [str(skill).strip() for skill in (skills or []) if str(skill).strip()],
+            "skills": normalized_skills,
             "availability": str(availability or "available"),
             "role": "volunteer",
             "ngoId": self.ngo_id,
+            "zones": normalized_zones,
+            "language": str(primary_language or "English").strip() or "English",
+            "primaryLanguage": str(primary_language or "English").strip() or "English",
+            "additionalLanguages": normalized_additional_languages,
+            "travelRadius": max(1, int(travel_radius or 5)),
+            "emotionalCapacity": emotional_score,
+            "avoidCategories": normalized_avoid_categories,
+            "impactPoints": 0,
+            "missionsCompleted": 0,
+            "successRate": 0.0,
+            "totalHours": 0.0,
+            "burnoutRisk": "low",
+            "burnoutScore": 0.0,
+            "level": 1,
+            "xp": 0,
+            "badges": [],
+            "volunteerProfileSettings": {
+                "skillDetails": [{"name": skill, "level": 2} for skill in normalized_skills],
+                "availabilityWindows": {
+                    "monFri": {"morning": False, "afternoon": False, "evening": True},
+                    "satSun": {"morning": True, "afternoon": True, "evening": True},
+                },
+                "maxMissionsPerWeek": 5,
+                "travelPreferences": {"transportModes": ["Two Wheeler"]},
+                "emotionalPreferences": {"preferredMissionIntensity": normalized_intensity},
+                "notificationPreferences": {
+                    "pushNotifications": True,
+                    "emailDigest": True,
+                    "smsAlerts": False,
+                },
+                "accountMeta": {
+                    "connectedProvider": "coordinator_invite",
+                    "connectedEmail": normalized_email,
+                },
+                "profileMeta": {
+                    "city": None,
+                    "zoneLabel": normalized_zones[0] if normalized_zones else None,
+                },
+            },
             "createdAt": now,
             "updatedAt": now,
         }
         doc_ref = db.collection("users").document()
         doc_ref.set(payload)
+        db.collection("volunteers").document(doc_ref.id).set(
+            {
+                "userId": doc_ref.id,
+                "role": "volunteer",
+                "ngo_id": self.ngo_id,
+                "zones": normalized_zones,
+                "primary_language": payload["primaryLanguage"],
+                "skills": normalized_skills,
+                "travel_radius": payload["travelRadius"],
+                "emotional_capacity": normalized_intensity,
+                "avoid_categories": normalized_avoid_categories,
+                "additional_languages": normalized_additional_languages,
+                "phone": payload["phone"],
+                "email": normalized_email,
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        )
         payload["id"] = doc_ref.id
         return payload

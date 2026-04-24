@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { 
   Camera, 
   Upload, 
@@ -58,6 +58,7 @@ const ConfidenceDot = ({ level }: { level: "high" | "low" }) => (
 
 export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void }) => {
   const [step, setStep] = useState<"idle" | "processing" | "success" | "submitted">( "idle");
+  const [reportMode, setReportMode] = useState<"mission_update" | "independent">("independent");
   const [image, setImage] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string>("");
   const [progress, setProgress] = useState(0);
@@ -110,6 +111,33 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
   const [activeMission, setActiveMission] = useState<any | null>(null);
   const [detectedLocation, setDetectedLocation] = useState<string>("");
 
+  const mapInitialLocation = useMemo(
+    () => ({ lat: formData.lat, lng: formData.lng }),
+    [formData.lat, formData.lng]
+  );
+
+  const handleLocationSelect = useCallback((loc: { lat: number; lng: number; address?: string; pincode?: string; areaName?: string }) => {
+    setFormData((f) => {
+      const zoneInfo = deriveZoneInfo({
+        lat: loc.lat,
+        lng: loc.lng,
+        address: loc.address || f.address,
+        pincode: loc.pincode || f.pincode,
+        areaName: loc.areaName || f.areaName,
+      });
+
+      return {
+        ...f,
+        lat: loc.lat,
+        lng: loc.lng,
+        address: loc.address || f.address,
+        pincode: loc.pincode || f.pincode,
+        areaName: loc.areaName || f.areaName,
+        zone: zoneInfo.zoneLabel,
+      };
+    });
+  }, []);
+
   useEffect(() => {
     const fetchActiveMission = async () => {
       try {
@@ -125,6 +153,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
         const mission = data?.mission || null;
         setActiveMission(mission);
         if (mission) {
+          setReportMode("mission_update");
           setMissionId(mission.id || null);
           setFormData((prev) => ({
             ...prev,
@@ -300,7 +329,9 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
     const personsAffected = parseInt(formData.persons || "0", 10) > 0
       ? parseInt(formData.persons || "0", 10)
       : (Number(extractedResult?.personsAffected) > 0 ? Number(extractedResult.personsAffected) : familiesAffected * 4);
-    const needType = formData.needType;
+    const needType = reportMode === "mission_update"
+      ? (activeMission?.needType || formData.needType)
+      : formData.needType;
     const severity = formData.severity.toLowerCase();
     const safetySignals = splitCsv(formData.riskFlags || "");
     const requiredResourceName = `${String(needType).toLowerCase().replace(/\s+/g, "-")}-support`;
@@ -316,7 +347,8 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
     });
 
     const payload = {
-      zoneId: zoneInfo.zoneId,
+      missionId: reportMode === "mission_update" ? (activeMission?.id || null) : null,
+      zoneId: reportMode === "mission_update" ? (activeMission?.zoneId || zoneInfo.zoneId) : zoneInfo.zoneId,
       needType,
       severity,
       familiesAffected,
@@ -672,15 +704,54 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
               
               <div className="grid grid-cols-1 gap-5">
                  <div className="space-y-2">
+                    <Label className="text-xs font-bold text-slate-500">Report Option</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        type="button"
+                        variant={reportMode === "mission_update" ? "default" : "outline"}
+                        className="h-10 rounded-xl text-xs"
+                        disabled={!activeMission?.id}
+                        onClick={() => {
+                          if (!activeMission?.id) return;
+                          setReportMode("mission_update");
+                          if (activeMission?.needType) {
+                            setFormData((prev) => ({ ...prev, needType: activeMission.needType }));
+                          }
+                        }}
+                      >
+                        Assigned mission
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={reportMode === "independent" ? "default" : "outline"}
+                        className="h-10 rounded-xl text-xs"
+                        onClick={() => setReportMode("independent")}
+                      >
+                        Submit other report
+                      </Button>
+                    </div>
+                    {reportMode === "mission_update" && activeMission?.needType ? (
+                      <p className="text-[11px] text-indigo-700 font-medium">Need type is locked to mission: {activeMission.needType}.</p>
+                    ) : (
+                      <p className="text-[11px] text-indigo-700 font-medium">You can submit a different need report from this assigned mission.</p>
+                    )}
+                 </div>
+
+                 <div className="space-y-2">
                     <div className="flex items-center justify-between">
                        <Label className="text-xs font-bold text-slate-500">Need Type</Label>
                        <ConfidenceDot level="high" />
                     </div>
-                    <Select value={formData.needType} onValueChange={(val) => setFormData(prev => ({ ...prev, needType: val }))}>
+                    <Select
+                      value={formData.needType}
+                      onValueChange={(val) => setFormData(prev => ({ ...prev, needType: val }))}
+                      disabled={reportMode === "mission_update" && Boolean(activeMission?.needType)}
+                    >
                        <SelectTrigger className="h-12 rounded-xl bg-slate-50 border-transparent focus:ring-[#5A57FF] group">
                           <SelectValue />
                        </SelectTrigger>
                        <SelectContent>
+                          <SelectItem value="General">General</SelectItem>
                           <SelectItem value="Food Insecurity">Food Insecurity</SelectItem>
                           <SelectItem value="Sanitation">Sanitation</SelectItem>
                           <SelectItem value="Medical Aid">Medical Aid</SelectItem>
@@ -842,7 +913,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                        <ConfidenceDot level="high" />
                     </div>
                     <Input value={formData.address} onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))} className="h-12 rounded-xl bg-slate-50 border-transparent text-[#1A1A3D] font-medium" />
-                     {Boolean(detectedLocation && activeMission?.location?.address && detectedLocation !== activeMission.location.address) && (
+                     {Boolean(reportMode === "mission_update" && detectedLocation && activeMission?.location?.address && detectedLocation !== activeMission.location.address) && (
                        <p className="text-[11px] text-amber-700 font-medium italic mt-1">
                          OCR detected location: "{detectedLocation}". Report is locked to assigned mission location.
                        </p>
@@ -858,26 +929,9 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                        <Input value={formData.pincode} onChange={(e) => setFormData(prev => ({ ...prev, pincode: e.target.value }))} className="h-12 rounded-xl bg-amber-50/50 border-amber-200 text-[#1A1A3D] font-bold" />
                     </div>
                     <div className="relative rounded-2xl overflow-hidden h-44 border border-slate-100 group shadow-inner">
-                        <MapPicker 
-                          initialLocation={{ lat: formData.lat, lng: formData.lng }}
-                          onLocationSelect={(loc) => setFormData((f) => {
-                            const zoneInfo = deriveZoneInfo({
-                              lat: loc.lat,
-                              lng: loc.lng,
-                              address: loc.address || f.address,
-                              pincode: loc.pincode || f.pincode,
-                              areaName: loc.areaName || f.areaName,
-                            });
-                            return {
-                              ...f,
-                              lat: loc.lat,
-                              lng: loc.lng,
-                              address: loc.address || f.address,
-                              pincode: loc.pincode || f.pincode,
-                              areaName: loc.areaName || f.areaName,
-                              zone: zoneInfo.zoneLabel,
-                            };
-                          })}
+                        <MapPicker
+                          initialLocation={mapInitialLocation}
+                          onLocationSelect={handleLocationSelect}
                         />
                      </div>
                  </div>

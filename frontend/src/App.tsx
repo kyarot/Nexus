@@ -25,6 +25,7 @@ import LivingConstitution from "./pages/coordinator/LivingConstitution";
 import Forecast from "./pages/coordinator/Forecast";
 import CommunityEcho from "./pages/coordinator/CommunityEcho";
 import OrganisationSettings from "./pages/coordinator/OrganisationSettings";
+import CoordinatorProfile from "./pages/coordinator/CoordinatorProfile";
 import ResourceInventory from "@/pages/coordinator/ResourceInventory";
 import IntelligenceHub from "./pages/coordinator/IntelligenceHub";
 import { CommunityVoice } from "./pages/public/CommunityVoice";
@@ -62,6 +63,7 @@ const App = () => (
               <Route path="forecast" element={<Forecast />} />
               <Route path="echo" element={<CommunityEcho />} />
               <Route path="organisation" element={<OrganisationSettings />} />
+              <Route path="profile" element={<CoordinatorProfile />} />
             </Route>
 
             {/* Volunteer dashboard */}

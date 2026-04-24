@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { X, Users, Zap } from "lucide-react";
+import { Download, X, Users, Zap } from "lucide-react";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { NeedTerrainMap } from "@/components/coordinator/NeedTerrainMap";
 import { ZoneRiskBadge } from "@/components/coordinator/ZoneRiskBadge";
@@ -14,6 +14,7 @@ import {
   getCoordinatorZoneDetail,
   getCoordinatorZoneHistory,
 } from "@/lib/coordinator-api";
+import { downloadTerrainMapSnapshotPng } from "@/lib/terrain-map-export";
 
 const filters = ["All Needs", "Food", "Health", "Education", "Shelter", "Mental Health"];
 
@@ -154,6 +155,17 @@ export default function NeedTerrainMapPage() {
   const highZones = filteredZones.filter((zone) => zone.riskLevel === "high").length;
   const improvingZones = filteredZones.filter((zone) => zone.currentScore < 50).length;
 
+  const handleExportMap = () => {
+    downloadTerrainMapSnapshotPng({
+      fileName: `nexus-terrain-map-${new Date().toISOString().slice(0, 10)}.png`,
+      title: "Need Terrain Map",
+      subtitle: "Live community need terrain export",
+      filterLabel: activeFilter,
+      zones: filteredZones,
+      points: filteredHeatmapPoints,
+    });
+  };
+
   const historyBars = useMemo(() => {
     if ((selectedSidebar?.incidentFrequency || []).length > 0) {
       return selectedSidebar!.incidentFrequency.map((entry, index) => ({
@@ -188,8 +200,9 @@ export default function NeedTerrainMapPage() {
             </div>
           </div>
           <div className="flex gap-2">
-            <Button size="sm" variant="ghost">Export Map</Button>
-            <Button size="sm" variant="gradient">Add Report</Button>
+            <Button size="sm" variant="ghost" onClick={handleExportMap} disabled={!filteredZones.length && !filteredHeatmapPoints.length}>
+              <Download className="mr-2 h-4 w-4" /> Export Map
+            </Button>
           </div>
         </div>
 

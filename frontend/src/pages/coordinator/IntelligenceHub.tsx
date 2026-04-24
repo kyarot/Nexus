@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { downloadNexusPdfReport } from "@/lib/pdf-report";
 import {
   getCoordinatorDashboard,
   getCoordinatorDriftAlerts,
@@ -237,46 +238,60 @@ export default function IntelligenceHub() {
       return;
     }
 
-    const payload = {
+    downloadNexusPdfReport({
+      fileName: `nexus-intelligence-hub-${new Date().toISOString().slice(0, 10)}.pdf`,
+      reportTitle: "Nexus Intelligence Hub",
+      reportSubtitle: "Unified operational summary across trust, alerts, forecasts, and governance.",
       generatedAt: new Date().toISOString(),
-      dashboard,
-      trustFabric: {
-        trustScore,
-        verifiedNodes,
-        verificationsToday,
-      },
-      geminiInsights: {
-        activeAlertCount,
-        criticalAlertCount,
-        processingReports,
-        insightHeadline,
-      },
-      impactReports: {
-        reports: totalReports,
-        successRate,
-        familiesHelped,
-        completedMissions: completedCount,
-      },
-      communityForecast: {
-        forecastRiskLabel,
-        forecastTrendLabel,
-        nextUpdateHours,
-        forecastSummary,
-      },
-      livingConstitution: {
-        pendingVotes,
-        recentChanges,
-        activePolicies,
-        constitutionSummary,
-      },
-    };
-
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `nexus-intelligence-hub-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+      meta: [
+        { label: "Verified Zones", value: String(verifiedNodes) },
+        { label: "Volunteers", value: String(dashboard?.availableVolunteers ?? volunteers.length) },
+        { label: "Critical Alerts", value: String(criticalAlertCount) },
+      ],
+      metrics: [
+        { label: "Trust Score", value: String(trustScore), note: `Verified nodes: ${verifiedNodes}` },
+        { label: "Reports", value: String(totalReports), note: `Success rate ${successRate}%` },
+        { label: "Families Helped", value: String(familiesHelped), note: `Completed missions ${completedCount}` },
+        { label: "Forecast", value: forecastRiskLabel, note: forecastTrendLabel },
+      ],
+      sections: [
+        {
+          title: "Trust Fabric",
+          lines: [
+            `Trust score: ${trustScore}`,
+            `Verified nodes: ${verifiedNodes}`,
+            `Verifications today: ${verificationsToday}`,
+          ],
+        },
+        {
+          title: "Gemini Insights",
+          lines: [
+            `Active alerts: ${activeAlertCount}`,
+            `Critical alerts: ${criticalAlertCount}`,
+            `Processing reports: ${processingReports}`,
+            insightHeadline || "No headline available",
+          ],
+        },
+        {
+          title: "Community Forecast",
+          lines: [
+            `Trend: ${forecastTrendLabel}`,
+            `Next update in: ${nextUpdateHours} hours`,
+            forecastSummary,
+          ],
+        },
+        {
+          title: "Living Constitution",
+          lines: [
+            `Pending votes: ${pendingVotes}`,
+            `Recent changes: ${recentChanges}`,
+            `Active policies: ${activePolicies}`,
+            constitutionSummary,
+          ],
+        },
+      ],
+      footerNote: "Nexus intelligence hub export.",
+    });
   };
 
   return (

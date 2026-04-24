@@ -43,12 +43,14 @@ export const useFieldworkerLiveTranslation = ({
   apiBaseUrl,
   token,
   language,
+  enabled = true,
   refreshKey,
 }: {
   containerRef: RefObject<HTMLElement | null>;
   apiBaseUrl: string;
   token: string | null;
   language: string;
+  enabled?: boolean;
   refreshKey?: string;
 }) => {
   const inFlightRef = useRef(false);
@@ -58,6 +60,8 @@ export const useFieldworkerLiveTranslation = ({
   const normalizedLanguage = useMemo(() => (language || "en").toLowerCase(), [language]);
 
   useEffect(() => {
+    if (!enabled) return;
+
     const container = containerRef.current;
     if (!container || !token) return;
 
@@ -161,5 +165,5 @@ export const useFieldworkerLiveTranslation = ({
       }
       observer.disconnect();
     };
-  }, [containerRef, apiBaseUrl, token, normalizedLanguage, refreshKey]);
+  }, [containerRef, apiBaseUrl, token, normalizedLanguage, enabled, refreshKey]);
 };

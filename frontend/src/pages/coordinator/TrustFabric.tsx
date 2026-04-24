@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,13 +21,16 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { downloadNexusPdfReport } from "@/lib/pdf-report";
 import {
   getCoordinatorDashboard,
   getCoordinatorInsights,
   getCoordinatorMissions,
   getCoordinatorVolunteers,
   getCoordinatorZones,
+  getImpactReportSummary,
   getNgoProfile,
+  downloadImpactGrantReport,
   type CoordinatorVolunteerItem,
   type GeminiInsightItem,
   type NgoProfile,
@@ -71,6 +74,13 @@ const getPeriodDays = (period: string) => {
   return 30;
 };
 
+const mapTrustPeriodToImpactPeriod = (period: string) => {
+  if (period === "This Month") return "1m";
+  if (period === "3M") return "3m";
+  if (period === "6M") return "6m";
+  return "1y";
+};
+
 const isWithinPeriod = (value: string | null | undefined, period: string) => {
   const limitDays = getPeriodDays(period);
   if (!limitDays) {
@@ -105,20 +115,23 @@ type VolunteerQuickView = {
 const TrustFabric = () => {
   const [period, setPeriod] = useState("This Month");
   const [selectedVolunteer, setSelectedVolunteer] = useState<VolunteerQuickView | null>(null);
+  const [reportPreviewOpen, setReportPreviewOpen] = useState(false);
   const { toast } = useToast();
   const token = localStorage.getItem("nexus_access_token");
+  const impactPeriod = mapTrustPeriodToImpactPeriod(period);
 
   const trustQuery = useQuery({
     queryKey: ["coordinator-trust-fabric", token, period],
     enabled: Boolean(token),
     refetchInterval: 20_000,
     queryFn: async () => {
-      const [dashboard, missions, volunteers, zones, insights] = await Promise.allSettled([
+      const [dashboard, missions, volunteers, zones, insights, impactReport] = await Promise.allSettled([
         getCoordinatorDashboard(),
         getCoordinatorMissions(),
         getCoordinatorVolunteers({ availability: "available_now", sortBy: "match", minMatch: 55, maxDistanceKm: 25 }),
         getCoordinatorZones(),
         getCoordinatorInsights(),
+        getImpactReportSummary(impactPeriod),
       ]);
 
       const dashboardValue = dashboard.status === "fulfilled" ? dashboard.value : null;
@@ -126,6 +139,7 @@ const TrustFabric = () => {
       const volunteersValue = volunteers.status === "fulfilled" ? volunteers.value.volunteers : [];
       const zonesValue = zones.status === "fulfilled" ? zones.value.zones : [];
       const insightsValue = insights.status === "fulfilled" ? insights.value.insights : [];
+      const impactReportValue = impactReport.status === "fulfilled" ? impactReport.value : null;
 
       let ngoProfile: NgoProfile | null = null;
       const ngoId = missionsValue[0]?.ngoId || zonesValue[0]?.ngoIds?.[0];
@@ -144,6 +158,7 @@ const TrustFabric = () => {
         zones: zonesValue,
         insights: insightsValue,
         ngoProfile,
+        impactReport: impactReportValue,
       };
     },
   });
@@ -154,6 +169,7 @@ const TrustFabric = () => {
   const zones = trustQuery.data?.zones ?? [];
   const insights = trustQuery.data?.insights ?? [];
   const ngoProfile = trustQuery.data?.ngoProfile;
+  const impactReport = trustQuery.data?.impactReport;
 
   const zonesById = useMemo(() => new Map(zones.map((zone) => [zone.id, zone])), [zones]);
 
@@ -414,6 +430,62 @@ const TrustFabric = () => {
 
   const shareMessage = `Nexus Trust Fabric Update: Trust Score ${trustScore}/100 · ${completedMissions.length} verified missions · ${formatNumber(familiesImpacted)} families impacted · Avg need reduction ${avgNeedReduction}%.`;
 
+  const exportReportMutation = useMutation({
+    mutationFn: (selectedPeriod: string) => downloadImpactGrantReport(selectedPeriod),
+    onSuccess: (payload) => {
+      downloadNexusPdfReport({
+        fileName: `nexus-impact-transparency-${new Date().toISOString().slice(0, 10)}.pdf`,
+        reportTitle: "Nexus Impact Transparency Report",
+        reportSubtitle: "Branded trust ledger for donors, regulators, and internal review.",
+        generatedAt: payload.generatedAt,
+        meta: [
+          { label: "Organization", value: payload.organization?.name || ngoProfile?.name || "NGO" },
+          { label: "Trust Score", value: `${trustScore}/100` },
+          { label: "Tier", value: trustTier.toUpperCase() },
+        ],
+        metrics: [
+          { label: "Missions Verified", value: String(completedMissions.length), note: `Across ${zones.length} zones` },
+          { label: "Avg Need Reduction", value: `-${avgNeedReduction}%`, note: "Verified before/after change." },
+          { label: "Families Impacted", value: String(familiesImpacted), note: "From completed missions only." },
+          { label: "Trust Score", value: `${trustScore}/100`, note: trustTier.toUpperCase() },
+        ],
+        sections: [
+          {
+            title: "Integrity Breakdown",
+            lines: integrityBreakdown.map((item) => `${item.label}: ${item.value}%`),
+          },
+          {
+            title: "Top Zones",
+            lines: topZones.map((zone) => `${zone.name} - ${zone.status} - ${zone.reduction} - ${zone.missions} missions`),
+          },
+          {
+            title: "Top Volunteers",
+            lines: topVolunteers.map((volunteer) => `${volunteer.name} - ${volunteer.impact} - ${volunteer.missions} missions`),
+          },
+        ],
+        tables: [
+          {
+            title: "Verified Mission Outcomes",
+            headers: ["Mission", "Zone", "Need Type", "Before", "After", "Volunteer"],
+            rows: ledgerRows.map((row) => [row.id.slice(0, 8), row.zone, row.type, row.before, row.after, row.volunteer]),
+          },
+        ],
+        footerNote: "Nexus trust fabric ledger.",
+      });
+      toast({
+        title: "Impact report generated",
+        description: "Impact Transparency Report downloaded as PDF.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Report generation failed",
+        description: error instanceof Error ? error.message : "Unable to generate impact report right now.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleShare = async (channel: "whatsapp" | "email") => {
     const url = window.location.href;
     if (channel === "whatsapp") {
@@ -427,7 +499,7 @@ const TrustFabric = () => {
   };
 
   const downloadTrustReport = () => {
-    if (!trustQuery.data) {
+    if (!trustQuery.data || exportReportMutation.isPending) {
       toast({
         title: "Trust report not ready",
         description: "Connect to the backend to generate the latest report.",
@@ -435,26 +507,18 @@ const TrustFabric = () => {
       });
       return;
     }
+    exportReportMutation.mutate(impactPeriod);
+  };
 
-    const payload = {
-      generatedAt: new Date().toISOString(),
-      trustScore,
-      trustTier,
-      missionSuccessRate,
-      avgNeedReduction,
-      missionsVerified: completedMissions.length,
-      familiesImpacted,
-      integrityBreakdown,
-      topZones,
-      insights: activeInsight,
-    };
-
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `nexus-trust-fabric-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+  const openReportPreview = () => {
+    if (!impactReport) {
+      toast({
+        title: "Preview unavailable",
+        description: "Generate or refresh report data to preview the transparency report.",
+      });
+      return;
+    }
+    setReportPreviewOpen(true);
   };
 
   const trustScorePct = Math.min(100, Math.max(0, trustScore));
@@ -487,6 +551,10 @@ const TrustFabric = () => {
     const minutes = Math.floor((diffMs % 3600000) / 60000);
     return `${hours}h ${minutes}m`;
   }, [pendingVerification]);
+
+  const lastGeneratedLabel = impactReport?.generatedAt
+    ? new Date(impactReport.generatedAt).toLocaleString()
+    : "Not generated yet";
 
   return (
     <div className="flex flex-col min-h-screen bg-[#F8F7FF] font-['Plus_Jakarta_Sans']">
@@ -531,9 +599,9 @@ const TrustFabric = () => {
                 <Button
                   className="bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] hover:opacity-90 text-white font-bold h-11 px-6 rounded-xl shadow-lg shadow-indigo-200 transition-all active:scale-95"
                   onClick={downloadTrustReport}
-                  disabled={!trustQuery.data}
+                  disabled={!trustQuery.data || exportReportMutation.isPending}
                 >
-                  Generate Donor Report <ChevronRight className="w-4 h-4 ml-1" />
+                  {exportReportMutation.isPending ? "Generating..." : "Generate Donor Report"} <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               </div>
             </div>
@@ -900,20 +968,20 @@ const TrustFabric = () => {
                         <Button
                           className="bg-[#4F46E5] hover:bg-[#4338CA] text-white font-black py-7 px-10 rounded-[1.5rem] shadow-xl shadow-indigo-200 flex items-center gap-3 active:scale-[0.98] transition-all group"
                           onClick={downloadTrustReport}
-                          disabled={!trustQuery.data}
+                        disabled={!trustQuery.data || exportReportMutation.isPending}
                         >
                            <FileText className="w-5 h-5 group-hover:animate-pulse" />
-                           Generate & Sign PDF Report
+                        {exportReportMutation.isPending ? "Generating Report..." : "Generate & Sign PDF Report"}
                         </Button>
                         <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mt-4 flex items-center gap-2 justify-center md:justify-start">
-                           <Clock className="w-3.5 h-3.5" /> Last generated: March 2026 Monthly Summary
+                        <Clock className="w-3.5 h-3.5" /> Last generated: {lastGeneratedLabel}
                         </p>
                      </div>
                   </div>
                   
                   <div className="w-[280px] shrink-0 space-y-4">
                      <p className="text-[11px] font-black text-center text-slate-400 uppercase tracking-widest">Preview Preview</p>
-                     <div className="aspect-[3/4] bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 flex flex-col gap-4 relative overflow-hidden group cursor-zoom-in">
+                     <div className="aspect-[3/4] bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 flex flex-col gap-4 relative overflow-hidden group cursor-zoom-in" onClick={openReportPreview}>
                         <div className="w-full h-8 bg-indigo-50 rounded-lg animate-pulse" />
                         <div className="w-2/3 h-4 bg-slate-50 rounded-md animate-pulse" />
                         <div className="flex-1 border-y border-dashed border-slate-100 flex items-center justify-center">
@@ -967,10 +1035,10 @@ const TrustFabric = () => {
                    <p className="text-xs text-slate-400">No verified volunteer impact yet.</p>
                  ) : null}
               </div>
-              <button className="w-full text-center text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:underline pt-2">View all volunteers <ChevronRight className="w-3 h-3 inline-block -mt-0.5" /></button>
+                <button className="w-full text-center text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:underline pt-2">View all volunteers <ChevronRight className="w-3 h-3 inline-block -mt-0.5" /></button>
            </div>
 
-           <div className="pt-10 border-t border-slate-50 space-y-6">
+              <div className="pt-10 border-t border-slate-50 space-y-6">
               <h3 className="text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest mb-6">Quick Verification Digest</h3>
               <div className="space-y-4">
                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
@@ -1081,6 +1149,53 @@ const TrustFabric = () => {
               </div>
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reportPreviewOpen} onOpenChange={setReportPreviewOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold text-[#1A1A3D]">Impact Transparency Report Preview</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-slate-100 p-3">
+                <p className="text-[10px] font-black text-slate-400 uppercase">Organization</p>
+                <p className="text-sm font-semibold text-[#1A1A3D]">{impactReport?.organization?.name || ngoProfile?.name || "NGO"}</p>
+              </div>
+              <div className="rounded-xl border border-slate-100 p-3">
+                <p className="text-[10px] font-black text-slate-400 uppercase">Generated At</p>
+                <p className="text-sm font-semibold text-[#1A1A3D]">{lastGeneratedLabel}</p>
+              </div>
+              <div className="rounded-xl border border-slate-100 p-3">
+                <p className="text-[10px] font-black text-slate-400 uppercase">Missions Completed</p>
+                <p className="text-sm font-semibold text-[#1A1A3D]">{impactReport?.summary?.completedMissions ?? completedMissions.length}</p>
+              </div>
+              <div className="rounded-xl border border-slate-100 p-3">
+                <p className="text-[10px] font-black text-slate-400 uppercase">Families Reached</p>
+                <p className="text-sm font-semibold text-[#1A1A3D]">{impactReport?.metrics?.familiesReached ?? familiesImpacted}</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-100 p-4 space-y-2">
+              <p className="text-[10px] font-black text-slate-400 uppercase">Policy Brief Highlights</p>
+              {(impactReport?.policyBrief?.items?.length ? impactReport.policyBrief.items : ["No policy highlights generated yet."]).map((item, index) => (
+                <p key={`${item}-${index}`} className="text-sm text-[#1A1A3D]">
+                  {index + 1}. {item}
+                </p>
+              ))}
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                className="bg-[#4F46E5] hover:bg-[#4338CA] text-white"
+                onClick={downloadTrustReport}
+                disabled={exportReportMutation.isPending}
+              >
+                {exportReportMutation.isPending ? "Generating..." : "Download Full Report"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

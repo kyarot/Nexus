@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field
 from core.dependencies import role_required
 from core.firebase import db
 from models.inventory import MissionResourceRequestCreatePayload
-from models.mission import MissionDocument, MissionListResponse, MissionStatus
-from services.mission_intelligence import generate_empathy_brief
+from models.mission import MissionDocument, MissionListResponse, MissionPriority, MissionStatus
+from services.mission_intelligence import ensure_dynamic_empathy_brief, generate_empathy_brief
 
 PREFIX = "/volunteer"
 TAGS = ["volunteer"]
@@ -69,6 +69,16 @@ def _status_rank(status: str) -> int:
         MissionStatus.cancelled.value: 0,
     }
     return rank.get(status.lower(), 0)
+
+
+def _priority_rank(priority: str) -> int:
+    rank = {
+        MissionPriority.critical.value: 4,
+        MissionPriority.high.value: 3,
+        MissionPriority.medium.value: 2,
+        MissionPriority.low.value: 1,
+    }
+    return rank.get(str(priority or "").lower(), 2)
 
 
 def _to_completion_quote(mission: MissionDocument) -> str:
@@ -204,6 +214,18 @@ def _mission_sort_key(mission: dict[str, Any]) -> tuple[int, datetime]:
     priority = str(mission.get("priority") or "medium").lower()
     timestamp = _read_timestamp(mission.get("updatedAt") or mission.get("createdAt")) or datetime.min
     return (priority_rank.get(priority, 2), timestamp)
+
+
+def _mission_schedule_anchor(mission: MissionDocument) -> datetime | None:
+    return mission.startedAt or mission.dispatchedAt or mission.createdAt
+
+
+def _mission_deadline(mission: MissionDocument) -> datetime | None:
+    anchor = _mission_schedule_anchor(mission)
+    if not anchor:
+        return None
+    duration_minutes = max(1, int(mission.estimatedDurationMinutes or 45))
+    return anchor + timedelta(minutes=duration_minutes)
 
 
 def _mission_from_doc(doc_id: str, data: dict[str, Any]) -> MissionDocument:
@@ -587,6 +609,10 @@ async def list_volunteer_missions(
     user: dict[str, Any] = Depends(role_required("volunteer")),
     status_filter: str | None = Query(default=None, alias="status"),
 ) -> MissionListResponse:
+    uid = str(user.get("id") or user.get("uid") or "").strip()
+    if not uid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user context")
+
     ngo_id = str(user.get("ngoId") or user.get("ngo_id") or "").strip()
     if not ngo_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User does not have an associated NGO")
@@ -602,6 +628,8 @@ async def list_volunteer_missions(
     for doc in mission_docs:
         data = doc.to_dict() or {}
         data["id"] = doc.id
+        if str(data.get("assignedTo") or "").strip() != uid:
+            continue
         if status_filter and str(data.get("status") or "").lower() != status_filter.lower():
             continue
         missions.append(data)
@@ -698,17 +726,9 @@ async def get_volunteer_dashboard(
     )
 
     priority_pool = [
-        mission for mission in missions
-        if str(mission.status.value if isinstance(mission.status, MissionStatus) else mission.status)
-        in {MissionStatus.pending.value, MissionStatus.dispatched.value, MissionStatus.en_route.value}
+        mission for mission in assigned_missions
+        if str(mission.status.value if isinstance(mission.status, MissionStatus) else mission.status) == MissionStatus.pending.value
     ]
-    priority_pool.sort(
-        key=lambda mission: (
-            _status_rank(str(mission.status.value if isinstance(mission.status, MissionStatus) else mission.status)),
-            mission.updatedAt or mission.createdAt or datetime.min,
-        ),
-        reverse=True,
-    )
 
     active_pool = [
         mission for mission in assigned_missions
@@ -716,6 +736,23 @@ async def get_volunteer_dashboard(
         in ACTIVE_MISSION_STATUSES
     ]
     active_pool.sort(key=lambda mission: (mission.updatedAt or mission.createdAt or datetime.min), reverse=True)
+
+    if active_pool:
+        active_deadlines = [deadline for deadline in (_mission_deadline(mission) for mission in active_pool) if deadline]
+        if active_deadlines:
+            cutoff = max(active_deadlines)
+            priority_pool = [
+                mission
+                for mission in priority_pool
+                if (_mission_schedule_anchor(mission) or datetime.min) > cutoff
+            ]
+
+    priority_pool.sort(
+        key=lambda mission: (
+            -_priority_rank(str(mission.priority.value if hasattr(mission.priority, "value") else mission.priority)),
+            _mission_schedule_anchor(mission) or datetime.max,
+        ),
+    )
 
     completed_recent = [
         mission for mission in assigned_missions
@@ -809,7 +846,12 @@ async def get_volunteer_dashboard(
     )
 
 
-def _pick_volunteer_mission(uid: str, ngo_id: str, mission_id: str | None = None) -> tuple[str, dict[str, Any]]:
+def _pick_volunteer_mission(
+    uid: str,
+    ngo_id: str,
+    mission_id: str | None = None,
+    require_assignment: bool = True,
+) -> tuple[str, dict[str, Any]]:
     if mission_id:
         snapshot = db.collection("missions").document(mission_id).get()
         if not snapshot.exists:
@@ -817,6 +859,8 @@ def _pick_volunteer_mission(uid: str, ngo_id: str, mission_id: str | None = None
         data = snapshot.to_dict() or {}
         if str(data.get("ngoId") or "") != ngo_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mission does not belong to your NGO")
+        if str(data.get("targetAudience") or "") != "volunteer":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mission is not a volunteer mission")
         if str(data.get("assignedTo") or "") != uid:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mission is not assigned to you")
         return snapshot.id, data
@@ -852,7 +896,12 @@ async def get_volunteer_empathy_brief(
     if not uid or not ngo_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user context")
 
-    selected_mission_id, mission_data = _pick_volunteer_mission(uid, ngo_id, mission_id)
+    selected_mission_id, mission_data = _pick_volunteer_mission(
+        uid,
+        ngo_id,
+        mission_id,
+        require_assignment=False,
+    )
 
     zone_data: dict[str, Any] = {}
     zone_id = str(mission_data.get("zoneId") or "").strip()
@@ -861,12 +910,18 @@ async def get_volunteer_empathy_brief(
         if zone_snapshot.exists:
             zone_data = zone_snapshot.to_dict() or {}
 
-    empathy = mission_data.get("empathyBrief") if isinstance(mission_data.get("empathyBrief"), dict) else None
-    if regenerate or not empathy:
+    stored_empathy = mission_data.get("empathyBrief") if isinstance(mission_data.get("empathyBrief"), dict) else None
+    if regenerate or not stored_empathy:
         empathy = generate_empathy_brief(mission=mission_data, volunteer=user, zone=zone_data)
         db.collection("missions").document(selected_mission_id).update(
             {"empathyBrief": empathy, "updatedAt": datetime.utcnow()}
         )
+    else:
+        empathy = ensure_dynamic_empathy_brief(stored_empathy, mission_data, user, zone_data)
+        if empathy != stored_empathy:
+            db.collection("missions").document(selected_mission_id).update(
+                {"empathyBrief": empathy, "updatedAt": datetime.utcnow()}
+            )
 
     requests_docs = (
         db.collection("missionResourceRequests")

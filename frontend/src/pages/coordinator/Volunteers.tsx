@@ -1,14 +1,16 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { StatMetricCard } from "@/components/coordinator/StatMetricCard";
 import { VolunteerAvatarCard } from "@/components/coordinator/VolunteerAvatarCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { X, Grid3X3, List, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getCoordinatorVolunteers, type CoordinatorVolunteerItem } from "@/lib/coordinator-api";
+import { addCoordinatorVolunteer, getCoordinatorVolunteers, type CoordinatorVolunteerItem } from "@/lib/coordinator-api";
+import { toast } from "sonner";
 
 export default function Volunteers() {
   const [selectedVolunteer, setSelectedVolunteer] = useState<string | null>(null);
@@ -20,6 +22,18 @@ export default function Volunteers() {
   const [matchMin, setMatchMin] = useState([0]);
   const [distMax, setDistMax] = useState([10]);
   const [profileTab, setProfileTab] = useState("overview");
+  const [isAddVolunteerOpen, setIsAddVolunteerOpen] = useState(false);
+  const [newVolunteerName, setNewVolunteerName] = useState("");
+  const [newVolunteerEmail, setNewVolunteerEmail] = useState("");
+  const [newVolunteerPhone, setNewVolunteerPhone] = useState("");
+  const [newVolunteerSkills, setNewVolunteerSkills] = useState("");
+  const [newVolunteerZones, setNewVolunteerZones] = useState("");
+  const [newVolunteerPrimaryLanguage, setNewVolunteerPrimaryLanguage] = useState("English");
+  const [newVolunteerAdditionalLanguages, setNewVolunteerAdditionalLanguages] = useState("");
+  const [newVolunteerTravelRadius, setNewVolunteerTravelRadius] = useState("5");
+  const [newVolunteerAvoidCategories, setNewVolunteerAvoidCategories] = useState("");
+  const [newVolunteerEmotionalCapacity, setNewVolunteerEmotionalCapacity] = useState<"light" | "moderate" | "intensive">("moderate");
+  const queryClient = useQueryClient();
 
   const volunteersQuery = useQuery({
     queryKey: [
@@ -63,6 +77,82 @@ export default function Volunteers() {
   };
 
   const selectedVolunteerForPanel: CoordinatorVolunteerItem | undefined = selected;
+
+  const addVolunteerMutation = useMutation({
+    mutationFn: async () => {
+      const normalizedName = newVolunteerName.trim();
+      if (!normalizedName) {
+        throw new Error("Volunteer name is required");
+      }
+
+      const normalizedEmail = newVolunteerEmail.trim().toLowerCase();
+      if (!normalizedEmail) {
+        throw new Error("Volunteer email is required");
+      }
+
+      if (!normalizedEmail.includes("@")) {
+        throw new Error("Enter a valid volunteer email");
+      }
+
+      const skills = newVolunteerSkills
+        .split(",")
+        .map((skill) => skill.trim())
+        .filter(Boolean);
+
+      const zones = newVolunteerZones
+        .split(",")
+        .map((zone) => zone.trim())
+        .filter(Boolean);
+
+      const additionalLanguages = newVolunteerAdditionalLanguages
+        .split(",")
+        .map((language) => language.trim())
+        .filter(Boolean);
+
+      const avoidCategories = newVolunteerAvoidCategories
+        .split(",")
+        .map((category) => category.trim())
+        .filter(Boolean);
+
+      const travelRadius = Math.max(1, Math.min(50, Number(newVolunteerTravelRadius) || 5));
+
+      return addCoordinatorVolunteer({
+        name: normalizedName,
+        email: normalizedEmail,
+        phone: newVolunteerPhone.trim(),
+        skills,
+        availability: "available",
+        zones,
+        primaryLanguage: newVolunteerPrimaryLanguage.trim() || "English",
+        additionalLanguages,
+        travelRadius,
+        emotionalCapacity: newVolunteerEmotionalCapacity,
+        avoidCategories,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Volunteer added successfully");
+      setIsAddVolunteerOpen(false);
+      setNewVolunteerName("");
+      setNewVolunteerEmail("");
+      setNewVolunteerPhone("");
+      setNewVolunteerSkills("");
+      setNewVolunteerZones("");
+      setNewVolunteerPrimaryLanguage("English");
+      setNewVolunteerAdditionalLanguages("");
+      setNewVolunteerTravelRadius("5");
+      setNewVolunteerAvoidCategories("");
+      setNewVolunteerEmotionalCapacity("moderate");
+      queryClient.invalidateQueries({ queryKey: ["coordinator-volunteers"] });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to add volunteer");
+    },
+  });
+
+  const handleAddVolunteer = () => {
+    addVolunteerMutation.mutate();
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -159,7 +249,7 @@ export default function Volunteers() {
                 <button onClick={() => setView("grid")} className={cn("p-2", view === "grid" ? "bg-primary text-white" : "text-muted-foreground")}><Grid3X3 className="h-4 w-4" /></button>
                 <button onClick={() => setView("list")} className={cn("p-2", view === "list" ? "bg-primary text-white" : "text-muted-foreground")}><List className="h-4 w-4" /></button>
               </div>
-              <Button variant="gradient" size="sm">Add Volunteer</Button>
+              <Button variant="gradient" size="sm" onClick={() => setIsAddVolunteerOpen(true)}>Add Volunteer</Button>
             </div>
           </div>
 
@@ -343,6 +433,153 @@ export default function Volunteers() {
           </div>
         )}
       </div>
+
+      <Dialog
+        open={isAddVolunteerOpen}
+        onOpenChange={(open) => {
+          if (addVolunteerMutation.isPending) {
+            return;
+          }
+          setIsAddVolunteerOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add Volunteer</DialogTitle>
+            <DialogDescription>Create a volunteer profile in your NGO pool.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase">Name</p>
+              <Input
+                value={newVolunteerName}
+                onChange={(event) => setNewVolunteerName(event.target.value)}
+                placeholder="Enter volunteer name"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase">Email</p>
+              <Input
+                type="email"
+                value={newVolunteerEmail}
+                onChange={(event) => setNewVolunteerEmail(event.target.value)}
+                placeholder="volunteer@example.org"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase">Phone</p>
+              <Input
+                value={newVolunteerPhone}
+                onChange={(event) => setNewVolunteerPhone(event.target.value)}
+                placeholder="Optional phone number"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase">Skills</p>
+              <Input
+                value={newVolunteerSkills}
+                onChange={(event) => setNewVolunteerSkills(event.target.value)}
+                placeholder="Comma separated (e.g. first aid, logistics, counselling)"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase">Zones</p>
+              <Input
+                value={newVolunteerZones}
+                onChange={(event) => setNewVolunteerZones(event.target.value)}
+                placeholder="Comma separated zone IDs"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase">Primary Language</p>
+                <Input
+                  value={newVolunteerPrimaryLanguage}
+                  onChange={(event) => setNewVolunteerPrimaryLanguage(event.target.value)}
+                  placeholder="English"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase">Travel Radius (km)</p>
+                <Input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={newVolunteerTravelRadius}
+                  onChange={(event) => setNewVolunteerTravelRadius(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase">Additional Languages</p>
+              <Input
+                value={newVolunteerAdditionalLanguages}
+                onChange={(event) => setNewVolunteerAdditionalLanguages(event.target.value)}
+                placeholder="Comma separated (e.g. Hindi, Kannada)"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase">Avoid Categories</p>
+              <Input
+                value={newVolunteerAvoidCategories}
+                onChange={(event) => setNewVolunteerAvoidCategories(event.target.value)}
+                placeholder="Comma separated (optional)"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase">Emotional Capacity</p>
+              <div className="flex gap-2">
+                {[
+                  { value: "light", label: "Light" },
+                  { value: "moderate", label: "Moderate" },
+                  { value: "intensive", label: "Intensive" },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => setNewVolunteerEmotionalCapacity(item.value as "light" | "moderate" | "intensive")}
+                    className={cn(
+                      "rounded-pill border px-3 py-1.5 text-xs font-medium transition-colors",
+                      newVolunteerEmotionalCapacity === item.value
+                        ? "bg-primary-light border-primary/40 text-primary"
+                        : "text-foreground hover:bg-muted",
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsAddVolunteerOpen(false)}
+              disabled={addVolunteerMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="gradient"
+              onClick={handleAddVolunteer}
+              disabled={addVolunteerMutation.isPending || !newVolunteerName.trim() || !newVolunteerEmail.trim()}
+            >
+              {addVolunteerMutation.isPending ? "Adding..." : "Add Volunteer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

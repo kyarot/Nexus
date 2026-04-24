@@ -45,6 +45,7 @@ const coordinatorNav: NavSection[] = [
 
   { items: [
     { id: "org", label: "Organisation", icon: Building2, path: "/dashboard/organisation" },
+    { id: "profile", label: "My Profile", icon: UserCog, path: "/dashboard/profile" },
   ]},
 ];
 
@@ -229,14 +230,24 @@ export function GlobalSidebar({
             <TooltipTrigger asChild>
               <div 
                 className="relative group cursor-pointer" 
-                onClick={() => role === "fieldworker" ? (onTabChange ? onTabChange("Profile") : navigate("/fieldworker/profile")) : navigate("/team")}
+                onClick={() => {
+                  if (role === "fieldworker") {
+                    onTabChange ? onTabChange("Profile") : navigate("/fieldworker/profile");
+                    return;
+                  }
+                  if (role === "volunteer") {
+                    navigate("/volunteer/profile");
+                    return;
+                  }
+                  navigate("/dashboard/profile");
+                }}
               >
                 <div className={cn(
                   "w-10 h-10 rounded-[10px] overflow-hidden flex items-center justify-center text-sm font-bold text-white shadow-lg transition-transform hover:scale-110",
                   avatarColors[role]
                 )}>
-                  {user?.photoUrl ? (
-                    <img src={user.photoUrl} className="w-full h-full object-cover" alt={user.name} />
+                  {(user?.photoUrl || user?.profilePhoto) ? (
+                    <img src={user.photoUrl || user.profilePhoto} className="w-full h-full object-cover" alt={user.name} />
                   ) : (
                     getUserInitials()
                   )}

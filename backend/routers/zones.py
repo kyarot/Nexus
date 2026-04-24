@@ -476,6 +476,8 @@ async def get_terrain_snapshot(
                 "lng": float(zone.get("lng") or 0.0),
                 "riskLevel": zone.get("riskLevel", "low"),
                 "currentScore": float(zone.get("currentScore") or 0.0),
+                "forecastScore": float(zone.get("forecastScore") or 0.0),
+                "forecastConfidence": float(zone.get("forecastConfidence") or 0.0),
                 "trendDirection": zone.get("trendDirection") or "stable",
                 "terrainConfidence": float(zone.get("terrainConfidence") or 0.0),
                 "reportVolume7d": int(zone.get("reportVolume7d") or 0),

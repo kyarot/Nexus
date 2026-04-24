@@ -476,6 +476,10 @@ export interface CoordinatorMission {
   statusText?: string | null;
   familiesHelped: number;
   outcomeNotes?: string | null;
+  reviewFlagged?: boolean;
+  reviewReason?: string | null;
+  reviewFlaggedBy?: string | null;
+  reviewFlaggedAt?: string | null;
   mergedFrom?: {
     reports?: number;
     ngos?: number;
@@ -574,6 +578,54 @@ export interface CoordinatorMissionTrackingResponse {
   responders: CoordinatorMissionTrackedResponder[];
 }
 
+export interface CoordinatorAutoAssignPendingResult {
+  totalPending: number;
+  assigned: number;
+  skipped: number;
+  failed: number;
+  assignedMissionIds: string[];
+  details: Array<{
+    missionId: string;
+    status: "assigned" | "skipped" | "failed";
+    reason?: string;
+    assignee?: string;
+  }>;
+}
+
+export interface CoordinatorWeeklyMissionReport {
+  generatedAt: string;
+  windowStart: string;
+  windowEnd: string;
+  summary: {
+    total: number;
+    pending: number;
+    active: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    criticalPriority: number;
+    autoAssigned: number;
+    familiesHelped: number;
+  };
+  missions: Array<{
+    missionId: string;
+    title: string;
+    zone: string;
+    needType: string;
+    targetAudience: "fieldworker" | "volunteer" | string;
+    priority: CoordinatorMission["priority"] | string;
+    status: CoordinatorMission["status"] | string;
+    assignee: string;
+    familiesHelped: number;
+    newUpdates: number;
+    sourceReports: number;
+    createdAt?: string | null;
+    updatedAt?: string | null;
+    completedAt?: string | null;
+    autoAssigned: boolean;
+  }>;
+}
+
 export interface CoordinatorVolunteerScoreDimensions {
   skillMatch: number;
   proximity: number;
@@ -651,6 +703,25 @@ export interface CoordinatorVolunteersResponse {
   };
   volunteers: CoordinatorVolunteerItem[];
   total: number;
+}
+
+export interface CoordinatorAddVolunteerPayload {
+  name: string;
+  email: string;
+  phone?: string;
+  skills?: string[];
+  availability?: string;
+  zones?: string[];
+  primaryLanguage?: string;
+  additionalLanguages?: string[];
+  travelRadius?: number;
+  emotionalCapacity?: "light" | "moderate" | "intensive";
+  avoidCategories?: string[];
+}
+
+export interface CoordinatorAddVolunteerResponse {
+  created: boolean;
+  volunteer: Record<string, unknown>;
 }
 
 export interface CoordinatorDriftAlertSignal {
@@ -916,6 +987,7 @@ export type VolunteerProfilePatchPayload = Partial<{
   emotionalCapacity: number;
   avoidCategories: string[];
   volunteerProfileSettings: VolunteerProfileSettings;
+  currentLocation: { lat: number; lng: number } | null;
 }>;
 
 export const getCoordinatorDashboard = () => request<CoordinatorDashboardResponse>("/coordinator/dashboard");
@@ -1066,6 +1138,12 @@ export const closeCoordinatorMission = (missionId: string) =>
     method: "POST",
   });
 
+export const flagCoordinatorMissionForReview = (missionId: string, reason?: string) =>
+  request<CoordinatorMission>(`/coordinator/missions/${missionId}/flag-review`, {
+    method: "POST",
+    body: JSON.stringify({ reason: reason?.trim() || null }),
+  });
+
 export const sendCoordinatorMissionMessage = (missionId: string, message: string) =>
   request<{ sent: boolean }>(`/coordinator/missions/${missionId}/message`, {
     method: "POST",
@@ -1082,6 +1160,14 @@ export const getCoordinatorMissionSourceReports = (missionId: string) =>
 
 export const getCoordinatorMissionTracking = (missionId: string) =>
   request<CoordinatorMissionTrackingResponse>(`/coordinator/missions/${missionId}/tracking`);
+
+export const autoAssignCoordinatorPendingMissions = () =>
+  request<CoordinatorAutoAssignPendingResult>("/coordinator/missions/auto-assign-pending", {
+    method: "POST",
+  });
+
+export const getCoordinatorWeeklyMissionReport = () =>
+  request<CoordinatorWeeklyMissionReport>("/coordinator/missions/weekly-report");
 
 export const getCoordinatorVolunteers = (params?: {
   search?: string;
@@ -1117,6 +1203,24 @@ export const getCoordinatorVolunteers = (params?: {
   const suffix = query.toString();
   return request<CoordinatorVolunteersResponse>(`/coordinator/volunteers${suffix ? `?${suffix}` : ""}`);
 };
+
+export const addCoordinatorVolunteer = (payload: CoordinatorAddVolunteerPayload) =>
+  request<CoordinatorAddVolunteerResponse>("/coordinator/volunteers", {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.name,
+      email: payload.email,
+      phone: payload.phone || "",
+      skills: payload.skills || [],
+      availability: payload.availability || "available",
+      zones: payload.zones || [],
+      primaryLanguage: payload.primaryLanguage || "English",
+      additionalLanguages: payload.additionalLanguages || [],
+      travelRadius: payload.travelRadius || 5,
+      emotionalCapacity: payload.emotionalCapacity || "moderate",
+      avoidCategories: payload.avoidCategories || [],
+    }),
+  });
 
 export const getCoordinatorDriftAlerts = (params?: {
   status?: string;

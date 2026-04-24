@@ -6,7 +6,7 @@ import re
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from firebase_admin import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
@@ -15,6 +15,7 @@ from core.dependencies import get_current_user
 from core.firebase import db
 from core.gemini import client, GEMINI_FLASH
 from core.security import create_access_token, hash_password, verify_password
+from services.auto_assignment_service import auto_assign_mission_to_user
 from models.user import (
     CoordinatorSignup,
     DNAProfile,
@@ -109,11 +110,18 @@ class UserUpdateRequest(BaseModel):
     primaryLanguage: str | None = None
     offlineZones: list[str] | None = None
     lastActive: str | None = None
+    currentLocation: dict | None = None
 
 
 class PreseedRequest(BaseModel):
     city: str
     zones: list[str]
+
+
+class SignupNgoOption(BaseModel):
+    id: str
+    name: str
+    city: str | None = None
 
 
 USER_FORBIDDEN_FIELDS = {"id", "email", "role", "ngoId", "impactPoints"}
@@ -280,6 +288,39 @@ def _get_user_document(uid: str) -> UserDocument:
 
     data = user_snapshot.to_dict() or {}
     data.setdefault("id", uid)
+
+    # Backward compatibility for legacy user records that may miss newer required fields.
+    legacy_role = str(data.get("role") or "").strip().lower()
+    if legacy_role not in {UserRole.coordinator.value, UserRole.fieldworker.value, UserRole.volunteer.value}:
+        legacy_role = UserRole.fieldworker.value
+    data["role"] = legacy_role
+
+    if not str(data.get("name") or "").strip():
+        fallback_name = str(data.get("displayName") or "").strip()
+        if not fallback_name:
+            fallback_name = "Field Worker" if legacy_role == UserRole.fieldworker.value else "Nexus User"
+        data["name"] = fallback_name
+
+    if not str(data.get("email") or "").strip():
+        data["email"] = f"{uid}@nexus.local"
+
+    if not str(data.get("ngoId") or "").strip():
+        data["ngoId"] = str(data.get("ngo_id") or "unassigned")
+
+    if not data.get("profilePhoto") and data.get("photoUrl"):
+        data["profilePhoto"] = data.get("photoUrl")
+
+    if not isinstance(data.get("zones"), list):
+        data["zones"] = []
+    if not isinstance(data.get("offlineZones"), list):
+        data["offlineZones"] = []
+    if not isinstance(data.get("skills"), list):
+        data["skills"] = []
+    if not isinstance(data.get("additionalLanguages"), list):
+        data["additionalLanguages"] = []
+    if not isinstance(data.get("avoidCategories"), list):
+        data["avoidCategories"] = []
+
     return UserDocument.model_validate(data)
 
 
@@ -308,6 +349,30 @@ def _route_for_role(role: UserRole) -> str:
     if role == UserRole.fieldworker:
         return "/fieldworker"
     return "/volunteer"
+
+
+@router.get("/signup/ngos", response_model=list[SignupNgoOption])
+async def list_signup_ngos() -> list[SignupNgoOption]:
+    ngo_docs = db.collection("ngos").stream()
+    options: list[SignupNgoOption] = []
+
+    for ngo_doc in ngo_docs:
+        data = ngo_doc.to_dict() or {}
+        ngo_id = str(data.get("id") or ngo_doc.id or "").strip()
+        ngo_name = str(data.get("name") or "").strip()
+        if not ngo_id or not ngo_name:
+            continue
+
+        options.append(
+            SignupNgoOption(
+                id=ngo_id,
+                name=ngo_name,
+                city=str(data.get("city") or "").strip() or None,
+            )
+        )
+
+    options.sort(key=lambda item: (item.name.lower(), item.city or ""))
+    return options
 
 
 @router.post("/signup")
@@ -606,6 +671,7 @@ async def get_me(current_user: dict[str, Any] = Depends(get_current_user)) -> Us
 @router.patch("/me")
 async def patch_me(
     payload: dict[str, Any],
+    background_tasks: BackgroundTasks,
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
     forbidden_in_payload = sorted(USER_FORBIDDEN_FIELDS.intersection(payload.keys()))
@@ -631,9 +697,18 @@ async def patch_me(
         )
 
     uid = _get_uid_from_user(current_user)
+
+    # Backward compatibility: many frontend surfaces still read photoUrl.
+    if "profilePhoto" in update_data:
+        update_data["photoUrl"] = update_data.get("profilePhoto")
+
     update_data["updatedAt"] = firestore.SERVER_TIMESTAMP
 
     db.collection("users").document(uid).update(update_data)
+
+    # Trigger auto-assignment if location changed
+    if "currentLocation" in update_data and update_data["currentLocation"]:
+        background_tasks.add_task(auto_assign_mission_to_user, uid, update_data["currentLocation"])
 
     changed_fields = [field for field in update_data.keys() if field != "updatedAt"]
     return {"updated": True, "fields": changed_fields}

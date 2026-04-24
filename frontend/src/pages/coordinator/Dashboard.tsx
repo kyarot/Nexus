@@ -1,20 +1,20 @@
 import { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Camera, UserPlus, FileText, Map } from "lucide-react";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { StatMetricCard } from "@/components/coordinator/StatMetricCard";
 import { NeedTerrainMap } from "@/components/coordinator/NeedTerrainMap";
 import { GeminiInsightCard } from "@/components/coordinator/GeminiInsightCard";
-import { VolunteerAvatarCard } from "@/components/coordinator/VolunteerAvatarCard";
 import { CommunityPulseDonut } from "@/components/coordinator/CommunityPulseDonut";
 import { MissionStatusChip } from "@/components/coordinator/MissionStatusChip";
 import { ZoneRiskBadge } from "@/components/coordinator/ZoneRiskBadge";
 import { cn } from "@/lib/utils";
 import {
   getCoordinatorDashboard,
+  getCoordinatorMissions,
   getCoordinatorTerrainSnapshot,
   type CoordinatorInsight,
+  type CoordinatorMission,
   type CoordinatorTerrainZone,
 } from "@/lib/coordinator-api";
 
@@ -46,12 +46,13 @@ const timeAgo = (value?: string) => {
   return `${Math.floor(diffHours / 24)}d ago`;
 };
 
-const quickActions = [
-  { icon: Camera, label: "Scan Report" },
-  { icon: UserPlus, label: "Add Volunteer" },
-  { icon: FileText, label: "Gemini Insights", path: "/dashboard/insights" },
-  { icon: Map, label: "View Map" },
-];
+const missionStatusToChip = (status?: CoordinatorMission["status"]) => {
+  if (status === "dispatched") return "dispatched" as const;
+  if (status === "en_route" || status === "on_ground") return "in_progress" as const;
+  if (status === "completed") return "completed" as const;
+  if (status === "failed" || status === "cancelled") return "failed" as const;
+  return "queued" as const;
+};
 
 export default function Dashboard() {
   const token = localStorage.getItem("nexus_access_token");
@@ -60,18 +61,20 @@ export default function Dashboard() {
   const dashboardQuery = useQuery({
     queryKey: ["coordinator-dashboard", token],
     queryFn: async () => {
-      const [dashboard, terrainSnapshot] = await Promise.all([
+      const [dashboard, terrainSnapshot, missionsResponse] = await Promise.all([
         getCoordinatorDashboard(),
         getCoordinatorTerrainSnapshot({
           confidenceMin: 15,
           sinceHours: 168,
         }),
+        getCoordinatorMissions(),
       ]);
 
       return {
         dashboard,
         zones: terrainSnapshot.zones,
         heatmap: terrainSnapshot.points,
+        missions: missionsResponse.missions,
       };
     },
     enabled: Boolean(token),
@@ -111,11 +114,26 @@ export default function Dashboard() {
   const zones = data?.zones ?? [];
   const heatmapPoints = data?.heatmap ?? [];
   const dashboard = data?.dashboard;
+  const activeMissions = (data?.missions ?? []).filter((mission) =>
+    ["pending", "dispatched", "en_route", "on_ground"].includes(mission.status)
+  );
 
   const topZones = useMemo(
     () => [...zones].sort((left, right) => right.currentScore - left.currentScore).slice(0, 4),
     [zones]
   );
+
+  const forecastBars = useMemo(() => {
+    return [...zones]
+      .filter((zone) => Number.isFinite(zone.forecastScore))
+      .sort((left, right) => left.forecastScore - right.forecastScore)
+      .slice(-8)
+      .map((zone) => ({
+        id: zone.id,
+        name: zone.name,
+        value: Math.max(8, Math.min(100, Math.round(zone.forecastScore))),
+      }));
+  }, [zones]);
 
   const insights = dashboard?.recentInsights?.length ? dashboard.recentInsights : [];
   const insightCards = insights.map((insight: CoordinatorInsight, index: number) => ({
@@ -247,11 +265,6 @@ export default function Dashboard() {
                 )}
               </div>
 
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-foreground">Best Matched Volunteers</h3>
-                <VolunteerAvatarCard compact name="Priya R." initials="PR" matchPercent={97} distance="2.1 km" color="bg-primary" />
-                <VolunteerAvatarCard compact name="Arjun M." initials="AM" matchPercent={91} distance="3.4 km" color="bg-success" />
-              </div>
             </div>
           </div>
         </div>
@@ -261,50 +274,51 @@ export default function Dashboard() {
 
           <div>
             <h4 className="text-sm font-semibold text-foreground mb-3">2-Week Forecast</h4>
-            <div className="flex items-end gap-1 h-20">
-              {[30, 35, 42, 50, 58, 65, 72, 80].map((h, i) => (
-                <div key={i} className={cn("flex-1 rounded-t transition-all", h > 65 ? "bg-destructive/70" : h > 45 ? "bg-warning/70" : "bg-success/70")} style={{ height: `${h}%` }} />
-              ))}
-            </div>
-            <div className="flex justify-between mt-1 text-[10px] text-muted-foreground"><span>W15</span><span>W22</span></div>
+            {forecastBars.length ? (
+              <>
+                <div className="flex items-end gap-1 h-20">
+                  {forecastBars.map((bar) => (
+                    <div
+                      key={bar.id}
+                      className={cn(
+                        "flex-1 rounded-t transition-all",
+                        bar.value > 65 ? "bg-destructive/70" : bar.value > 45 ? "bg-warning/70" : "bg-success/70"
+                      )}
+                      style={{ height: `${bar.value}%` }}
+                      title={`${bar.name} · ${bar.value}`}
+                    />
+                  ))}
+                </div>
+                <div className="flex justify-between mt-1 text-[10px] text-muted-foreground">
+                  <span>{forecastBars[0]?.name ?? "-"}</span>
+                  <span>{forecastBars[forecastBars.length - 1]?.name ?? "-"}</span>
+                </div>
+              </>
+            ) : (
+              <div className="rounded-card border border-dashed bg-card p-3 text-xs text-muted-foreground">
+                No forecast data is available yet.
+              </div>
+            )}
           </div>
 
           <div>
             <h4 className="text-sm font-semibold text-foreground mb-3">Active Missions</h4>
-            <div className="space-y-2">
-              {(dashboard?.criticalZones?.length ? dashboard.criticalZones : [{ name: "Live NGO zones", score: 0, riskLevel: "low" }]).map((zone, index) => (
-                <div key={`${zone.name || index}`} className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">{zone.name || `Zone ${index + 1}`}</span>
-                  <MissionStatusChip status={index === 0 ? "in_progress" : index === 1 ? "dispatched" : "completed"} />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <h4 className="text-sm font-semibold text-foreground mb-3">Quick Actions</h4>
-            <div className="grid grid-cols-2 gap-2">
-              {quickActions.map((action, index) => {
-                const className =
-                  "flex flex-col items-center gap-1.5 rounded-card border p-3 text-xs font-medium text-muted-foreground hover:bg-primary-light hover:text-primary hover:border-primary/30 transition-all";
-
-                if (action.path) {
-                  return (
-                    <Link key={index} className={className} to={action.path}>
-                      <action.icon className="h-4 w-4" />
-                      {action.label}
-                    </Link>
-                  );
-                }
-
-                return (
-                  <button key={index} className={className}>
-                    <action.icon className="h-4 w-4" />
-                    {action.label}
-                  </button>
-                );
-              })}
-            </div>
+            {activeMissions.length ? (
+              <div className="space-y-2">
+                {activeMissions.slice(0, 4).map((mission) => (
+                  <div key={mission.id} className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground truncate" title={mission.title}>
+                      {mission.title}
+                    </span>
+                    <MissionStatusChip status={missionStatusToChip(mission.status)} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-card border border-dashed bg-card p-3 text-xs text-muted-foreground">
+                No active missions right now.
+              </div>
+            )}
           </div>
         </div>
       </div>

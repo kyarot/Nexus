@@ -18,10 +18,11 @@ import { cn } from "@/lib/utils";
 import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
 import {
   getVolunteerMissions,
-  getVolunteerMissionUpdates,
+  getVolunteerImpact,
   type CoordinatorMission,
-  type VolunteerMissionUpdateItem,
+  type VolunteerImpactResponse,
 } from "@/lib/coordinator-api";
+import { getVolunteerEmpathyBrief, type VolunteerEmpathyResponse } from "@/lib/ops-api";
 import { getNotificationStreamUrl, listNotifications, type NotificationItem } from "@/lib/ops-api";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -31,12 +32,12 @@ import {
   Clock,
   FileText,
   MapPin,
-  Mic,
   Navigation,
   Plus,
   ExternalLink,
   LocateFixed,
   Route,
+  Loader2,
   X,
 } from "lucide-react";
 
@@ -147,18 +148,6 @@ const VolunteerMissions = () => {
   const token = localStorage.getItem("nexus_access_token");
   const seenNotificationIds = useRef<Set<string>>(new Set());
 
-    const missionUpdatesQuery = useQuery({
-      queryKey: ["volunteer-mission-updates", selectedMission?.id],
-      queryFn: () => getVolunteerMissionUpdates(selectedMission!.id),
-      enabled: Boolean(selectedMission?.id && activeDetailTab === "fieldnotes"),
-      refetchInterval: selectedMission?.id && activeDetailTab === "fieldnotes" ? 10_000 : false,
-    });
-
-    const missionUpdates = useMemo<VolunteerMissionUpdateItem[]>(
-      () => missionUpdatesQuery.data?.updates ?? [],
-      [missionUpdatesQuery.data?.updates],
-    );
-
     useEffect(() => {
       if (!token) return;
       const streamUrl = getNotificationStreamUrl();
@@ -205,6 +194,20 @@ const VolunteerMissions = () => {
       };
     }, [token, toast]);
   const mapsApiKey = import.meta.env.VITE_GMAPS_KEY || "";
+
+  const empathyDetailQuery = useQuery<VolunteerEmpathyResponse>({
+    queryKey: ["volunteer-empathy-brief-inline", selectedMission?.id],
+    queryFn: () => getVolunteerEmpathyBrief(selectedMission!.id, false),
+    enabled: Boolean(selectedMission?.id && activeDetailTab === "empathybrief"),
+    staleTime: 30_000,
+  });
+
+  const impactDetailQuery = useQuery<VolunteerImpactResponse>({
+    queryKey: ["volunteer-impact-inline", "month"],
+    queryFn: () => getVolunteerImpact("month"),
+    enabled: Boolean(selectedMission?.id && activeDetailTab === "outcome"),
+    staleTime: 30_000,
+  });
 
   const { isLoaded: isMapLoaded } = useNexusGoogleMapsLoader();
 
@@ -431,9 +434,6 @@ const VolunteerMissions = () => {
                     >
                       <Navigation className="w-4 h-4" /> Navigate
                     </Button>
-                    <Button variant="outline" className="border-white/40 hover:bg-white/10 text-white font-bold px-6 py-6 rounded-2xl flex gap-2 bg-white/5">
-                      <Mic className="w-4 h-4" /> Log Update
-                    </Button>
                     <Button
                       variant="outline"
                       className="border-white/40 hover:bg-white/10 text-white font-bold px-6 py-6 rounded-2xl flex gap-2 bg-white/5"
@@ -529,7 +529,13 @@ const VolunteerMissions = () => {
                       <h3 className="text-xl font-bold text-[#1A1A3D]">No upcoming missions</h3>
                       <p className="text-slate-400 font-medium">You haven't been assigned any new volunteer missions yet.</p>
                     </div>
-                    <Button className="bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold px-8 py-6 rounded-2xl flex gap-2">
+                    <Button
+                      className="bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold px-8 py-6 rounded-2xl flex gap-2"
+                      type="button"
+                      onClick={() => {
+                        navigate("/volunteer");
+                      }}
+                    >
                       Browse available missions <ArrowRight className="w-4 h-4" />
                     </Button>
                   </div>
@@ -616,7 +622,7 @@ const VolunteerMissions = () => {
                 </SheetHeader>
 
                 <div className="flex border-b border-slate-100 mb-6">
-                  {["Overview", "Empathy Brief", "Field Notes", "Outcome"].map((tab) => (
+                  {["Overview", "Empathy Brief", "Outcome"].map((tab) => (
                     <button
                       key={tab}
                       onClick={() => setActiveDetailTab(tab.toLowerCase().replace(" ", ""))}
@@ -654,62 +660,65 @@ const VolunteerMissions = () => {
 
                   {activeDetailTab === "empathybrief" && (
                     <div className="space-y-6">
-                      <div className="p-6 bg-[#F5F3FF] rounded-[1.5rem] border border-indigo-100 relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-4 opacity-10">
-                          <FileText className="w-12 h-12 text-[#4F46E5]" />
+                      {empathyDetailQuery.isLoading ? (
+                        <div className="p-6 bg-slate-50 rounded-[1.5rem] border border-slate-100 flex items-center gap-2 text-sm text-slate-500">
+                          <Loader2 className="w-4 h-4 animate-spin" /> Loading empathy brief...
                         </div>
-                        <h4 className="text-sm font-bold text-[#1A1A3D] mb-3">Contextual Sentiment</h4>
-                        <p className="text-sm text-slate-600 leading-relaxed italic mb-6">
-                          {selectedMission.instructions || "Approach with calm communication and keep the coordination channel updated."}
-                        </p>
-                        <Button className="w-full bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold py-6 rounded-xl flex gap-2">
-                          Re-read Full Brief <ArrowRight className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {activeDetailTab === "fieldnotes" && (
-                    <div className="space-y-6">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">TIMELINE OF UPDATES</p>
-                      {missionUpdatesQuery.isLoading ? (
-                        <div className="text-xs text-slate-400">Loading updates...</div>
-                      ) : missionUpdates.length > 0 ? (
-                        <div className="space-y-6">
-                          {missionUpdates.map((update, index) => {
-                            const label = update.type === "mission_message"
-                              ? "Coordinator message"
-                              : update.type?.replace("_", " ") || "Update";
-                            const updateText = update.text || update.transcript || update.status || "Update received";
-                            return (
-                              <div key={update.id || `${index}-${updateText}`} className="flex gap-4 group">
-                                <div className="flex flex-col items-center">
-                                  <div className="w-2.5 h-2.5 rounded-full bg-[#4F46E5] mt-1.5 ring-4 ring-indigo-50" />
-                                  <div className="w-px flex-1 bg-slate-100 my-2" />
-                                </div>
-                                <div className="flex-1">
-                                  <div className="flex justify-between items-baseline mb-2">
-                                    <h4 className="text-[13px] font-bold text-[#1A1A3D]">{label}</h4>
-                                    <span className="text-[10px] text-slate-400 font-bold">{formatDate(update.timestamp || selectedMission.updatedAt || selectedMission.createdAt)}</span>
-                                  </div>
-                                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-medium text-slate-600 italic">
-                                    {updateText}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
+                      ) : empathyDetailQuery.isError ? (
+                        <div className="p-6 bg-rose-50 rounded-[1.5rem] border border-rose-100 text-sm text-rose-700 space-y-3">
+                          <p>Could not load empathy brief for this mission.</p>
+                          <Button type="button" variant="outline" onClick={() => empathyDetailQuery.refetch()}>
+                            Retry
+                          </Button>
                         </div>
                       ) : (
-                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-xs font-medium text-slate-600 italic">
-                          {selectedMission.statusText || selectedMission.notes || "No field notes have been logged yet."}
-                        </div>
+                        <>
+                          <div className="p-6 bg-[#F5F3FF] rounded-[1.5rem] border border-indigo-100 relative overflow-hidden">
+                            <div className="absolute top-0 right-0 p-4 opacity-10">
+                              <FileText className="w-12 h-12 text-[#4F46E5]" />
+                            </div>
+                            <h4 className="text-sm font-bold text-[#1A1A3D] mb-3">Contextual Sentiment</h4>
+                            <p className="text-sm text-slate-600 leading-relaxed italic mb-4">
+                              {empathyDetailQuery.data?.empathy?.sayFirst || selectedMission.instructions || "Approach with calm communication and keep the coordination channel updated."}
+                            </p>
+                            {empathyDetailQuery.data?.empathy?.missionContext?.triggerSummary ? (
+                              <p className="text-xs text-indigo-700 font-medium">
+                                Trigger: {empathyDetailQuery.data.empathy.missionContext.triggerSummary}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          <div className="p-4 bg-white rounded-2xl border border-slate-100 space-y-3">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Say First Tags</p>
+                            <div className="flex flex-wrap gap-2">
+                              {(empathyDetailQuery.data?.empathy?.sayTags || []).slice(0, 6).map((tag) => (
+                                <Badge key={tag} className="bg-indigo-50 text-indigo-700 border border-indigo-100">{tag}</Badge>
+                              ))}
+                              {(!empathyDetailQuery.data?.empathy?.sayTags || empathyDetailQuery.data.empathy.sayTags.length === 0) && (
+                                <span className="text-xs text-slate-400">No empathy tags available for this mission yet.</span>
+                              )}
+                            </div>
+                          </div>
+                        </>
                       )}
                     </div>
                   )}
 
                   {activeDetailTab === "outcome" && (
                     <div className="space-y-6">
+                      {impactDetailQuery.isLoading ? (
+                        <div className="p-6 bg-slate-50 rounded-[1.5rem] border border-slate-100 flex items-center gap-2 text-sm text-slate-500">
+                          <Loader2 className="w-4 h-4 animate-spin" /> Loading impact outcome...
+                        </div>
+                      ) : impactDetailQuery.isError ? (
+                        <div className="p-6 bg-rose-50 rounded-[1.5rem] border border-rose-100 text-sm text-rose-700 space-y-3">
+                          <p>Could not load impact data.</p>
+                          <Button type="button" variant="outline" onClick={() => impactDetailQuery.refetch()}>
+                            Retry
+                          </Button>
+                        </div>
+                      ) : null}
+
                       <div className="bg-[#1E1B4B] rounded-[2rem] p-6 text-white relative overflow-hidden">
                         <div className="absolute -bottom-4 -right-4 opacity-10">
                           <CheckCircle2 className="w-24 h-24" />
@@ -722,7 +731,7 @@ const VolunteerMissions = () => {
                           </div>
                           <ArrowRight className="w-6 h-6 opacity-20" />
                           <div className="text-center">
-                            <span className="text-2xl font-black text-[#10B981] block">{selectedMission.familiesHelped || 0}</span>
+                            <span className="text-2xl font-black text-[#10B981] block">{selectedMission.familiesHelped || Number(impactDetailQuery.data?.summaryCards?.familiesHelped?.value || 0) || 0}</span>
                             <span className="text-[10px] font-bold opacity-40 uppercase">Families helped</span>
                           </div>
                         </div>
@@ -732,22 +741,44 @@ const VolunteerMissions = () => {
                             <span>{selectedMission.status === "completed" ? "100%" : `${selectedMission.progress || 0}%`}</span>
                           </div>
                           <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-                            <div className="h-full bg-[#10B981] w-[92%] rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
+                            <div
+                              className="h-full bg-[#10B981] rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]"
+                              style={{ width: `${Math.max(0, Math.min(100, selectedMission.status === "completed" ? 100 : Number(selectedMission.progress || 0)))}%` }}
+                            />
                           </div>
                         </div>
                       </div>
+
+                      {impactDetailQuery.data ? (
+                        <div className="grid grid-cols-2 gap-3">
+                          {[impactDetailQuery.data.summaryCards.familiesHelped, impactDetailQuery.data.summaryCards.impactPoints, impactDetailQuery.data.summaryCards.totalHours, impactDetailQuery.data.summaryCards.needScoreReduced].map((card) => (
+                            <div key={card.label} className="p-3 bg-white border border-slate-100 rounded-xl">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{card.label}</p>
+                              <p className="text-base font-bold text-[#1A1A3D] mt-1">{card.value}</p>
+                              <p className="text-[11px] font-medium text-emerald-600 mt-1">{card.delta}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
 
                       <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">COORDINATOR FEEDBACK</p>
                         <div className="flex gap-1.5">
                           {[1, 2, 3, 4, 5].map((star) => (
-                            <div key={star} className={cn("w-3 h-3 rounded-full", star <= 5 ? "bg-[#F59E0B]" : "bg-slate-200")} />
+                            <div
+                              key={star}
+                              className={cn(
+                                "w-3 h-3 rounded-full",
+                                star <= Math.max(1, Math.min(5, Math.round((impactDetailQuery.data?.wellbeing?.score || 80) / 20))) ? "bg-[#F59E0B]" : "bg-slate-200"
+                              )}
+                            />
                           ))}
                         </div>
                         <p className="text-xs font-medium text-slate-500 italic leading-relaxed">
-                          {selectedMission.assignedToName
-                            ? `${selectedMission.assignedToName} is matched to this volunteer mission and can now see it in the volunteer feed.`
-                            : "This mission is available in the volunteer feed and will surface once assigned or accepted."}
+                          {impactDetailQuery.data?.wellbeing?.advice ||
+                            (selectedMission.assignedToName
+                              ? `${selectedMission.assignedToName} is matched to this volunteer mission and can now see it in the volunteer feed.`
+                              : "This mission is available in the volunteer feed and will surface once assigned or accepted.")}
                         </p>
                       </div>
                     </div>

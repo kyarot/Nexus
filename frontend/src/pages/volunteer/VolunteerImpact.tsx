@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useNexusGoogleMapsLoader } from "@/lib/google-maps";
 import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { GoogleMap, MarkerF } from "@react-google-maps/api";
+import { downloadNexusPdfReport } from "@/lib/pdf-report";
 
 type TimeRange = "month" | "3m" | "6m" | "all";
 
@@ -92,12 +93,52 @@ export default function MyImpact() {
     if (!impact) {
       return;
     }
-    const blob = new Blob([JSON.stringify(impact, null, 2)], { type: "application/json" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `nexus-impact-${range}.json`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+    downloadNexusPdfReport({
+      fileName: `nexus-impact-${range}.pdf`,
+      reportTitle: "Nexus Volunteer Impact Report",
+      reportSubtitle: "Personal impact summary with wellbeing, rank, and verified outcomes.",
+      generatedAt: new Date().toISOString(),
+      meta: [
+        { label: "Range", value: range },
+        { label: "Rank", value: impact.rank.title },
+        { label: "Level", value: String(impact.rank.level) },
+      ],
+      metrics: [
+        { label: "Families Helped", value: impact.summaryCards.familiesHelped.value, note: impact.summaryCards.familiesHelped.delta },
+        { label: "Need Reduced", value: impact.summaryCards.needScoreReduced.value, note: impact.summaryCards.needScoreReduced.delta },
+        { label: "Total Hours", value: impact.summaryCards.totalHours.value, note: impact.summaryCards.totalHours.delta },
+        { label: "Impact Points", value: impact.summaryCards.impactPoints.value, note: impact.summaryCards.impactPoints.delta },
+      ],
+      sections: [
+        {
+          title: "Wellbeing",
+          lines: [
+            `Risk: ${impact.wellbeing.risk}`,
+            `Score: ${impact.wellbeing.score}`,
+            `30d Missions: ${impact.wellbeing.activity30d.missions}`,
+            `30d Avg Duration: ${impact.wellbeing.activity30d.avgDurationMinutes} min`,
+            `Rest Days: ${impact.wellbeing.activity30d.restDays}`,
+            impact.wellbeing.advice,
+          ],
+        },
+        {
+          title: "Badges",
+          lines: impact.badges.length ? impact.badges : ["No badges yet."],
+        },
+        {
+          title: "Share Summary",
+          lines: [impact.share.headline, impact.share.shareText],
+        },
+      ],
+      tables: [
+        {
+          title: "Impact Ledger",
+          headers: ["Mission", "Zone", "Before", "After", "Delta", "Date"],
+          rows: impact.ledger.map((row) => [row.missionId.slice(0, 8), row.zone, row.beforeScore, row.afterScore, row.deltaScore, row.date]),
+        },
+      ],
+      footerNote: "Nexus volunteer impact report.",
+    });
   };
 
   const handleCopyShareLink = async () => {

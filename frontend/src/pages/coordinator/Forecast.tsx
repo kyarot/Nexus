@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
+import { NeedTerrainMap } from "@/components/coordinator/NeedTerrainMap";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -19,6 +20,7 @@ import {
   patchCommunityForecastSettings,
   recomputeCommunityForecast,
 } from "@/lib/forecast-api";
+import { getCoordinatorTerrainSnapshot } from "@/lib/coordinator-api";
 import { getNotificationStreamUrl, listNotifications, type NotificationItem } from "@/lib/ops-api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -65,6 +67,7 @@ export default function Forecast() {
   const seenNotificationIds = useRef<Set<string>>(new Set());
 
   const [selectedZoneId, setSelectedZoneId] = useState("all");
+  const [riskView, setRiskView] = useState<"map" | "grid">("map");
   const [threshold, setThreshold] = useState([75]);
   const [notificationMethods, setNotificationMethods] = useState({
     email: true,
@@ -88,6 +91,12 @@ export default function Forecast() {
     queryKey: ["community-forecast-backtesting"],
     queryFn: () => getCommunityForecastBacktesting(24),
     refetchInterval: 120_000,
+  });
+
+  const terrainSnapshotQuery = useQuery({
+    queryKey: ["community-forecast-terrain-map"],
+    queryFn: () => getCoordinatorTerrainSnapshot({ sinceHours: 168, confidenceMin: 0 }),
+    refetchInterval: 60_000,
   });
 
   const settingsQuery = useQuery({
@@ -271,6 +280,18 @@ export default function Forecast() {
     : backtesting?.series?.map((item) => item.accuracy).slice(-5) || [40, 50, 60, 65, 70];
 
   const riskRows = summary?.riskAssessmentRows || [];
+  const riskRowsForDisplay = riskRows.length
+    ? riskRows
+    : zoneRows.map((zone) => ({
+        zoneId: zone.zoneId,
+        zone: zone.zone,
+        atRisk: zone.needsAtRisk,
+        need: zone.dominantNeed || "general",
+        riskLevel: zone.riskLevel,
+      }));
+
+  const terrainMapZones = terrainSnapshotQuery.data?.zones || [];
+  const terrainHeatmapPoints = terrainSnapshotQuery.data?.points || [];
 
   const isBusy =
     summaryQuery.isLoading ||
@@ -515,68 +536,120 @@ export default function Forecast() {
                 <p className="text-xs font-medium text-slate-400 mt-1">2025–2030 Cohort Analysis</p>
               </div>
               <div className="bg-slate-100 p-1 rounded-xl flex gap-1">
-                <Button size="sm" variant="ghost" className="bg-white shadow-sm font-bold text-xs h-8">Map View</Button>
-                <Button size="sm" variant="ghost" className="text-slate-500 font-bold text-xs h-8">Grid View</Button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-[35%_1fr] gap-8">
-              <div className="bg-[#E0E7FF] rounded-2xl flex items-center justify-center relative overflow-hidden h-[280px]">
-                <div className="bg-[#1A1A3D] text-white text-[10px] font-bold px-4 py-2 rounded-full backdrop-blur-md shadow-lg z-10">
-                  Interactive Hotspots Active
-                </div>
-                <div className="absolute inset-0 opacity-20">
-                  <svg className="w-full h-full" viewBox="0 0 100 100">
-                    <circle cx="30" cy="40" r="10" fill="#5A57FF" />
-                    <circle cx="70" cy="60" r="15" fill="#5A57FF" />
-                  </svg>
-                </div>
-              </div>
-
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-none hover:bg-transparent">
-                    <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400">Zone</TableHead>
-                    <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400">At-Risk</TableHead>
-                    <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400">Need</TableHead>
-                    <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400 text-right">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {riskRows.map((row, i) => (
-                    <TableRow key={i} className="border-slate-50 hover:bg-slate-50/50 transition-colors">
-                      <TableCell className="font-bold text-[#1A1A3D]">{row.zone}</TableCell>
-                      <TableCell className="font-mono font-medium text-slate-600">{row.atRisk.toLocaleString()}</TableCell>
-                      <TableCell>
-                        <Badge className={cn(
-                          "rounded-lg border-none hover:bg-transparent px-3 py-1 text-[10px] font-bold",
-                          row.riskLevel === "critical" ? "text-[#EF4444] bg-[#FEF2F2]" : row.riskLevel === "high" ? "text-orange-600 bg-orange-50" : row.riskLevel === "medium" ? "text-[#5A57FF] bg-[#F3F2FF]" : "text-[#10B981] bg-[#ECFDF5]"
-                        )}>
-                          {titleCase(row.need)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => setSelectedZoneId(row.zoneId)}
-                          className="text-[#5A57FF] hover:bg-[#F3F2FF]"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {!riskRows.length && (
-                    <TableRow className="border-slate-50">
-                      <TableCell colSpan={4} className="py-8 text-center text-slate-400 font-medium">
-                        Risk assessment data will appear once forecasts are generated.
-                      </TableCell>
-                    </TableRow>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setRiskView("map")}
+                  className={cn(
+                    "font-bold text-xs h-8",
+                    riskView === "map" ? "bg-white shadow-sm text-[#1A1A3D]" : "text-slate-500"
                   )}
-                </TableBody>
-              </Table>
+                >
+                  Map View
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setRiskView("grid")}
+                  className={cn(
+                    "font-bold text-xs h-8",
+                    riskView === "grid" ? "bg-white shadow-sm text-[#1A1A3D]" : "text-slate-500"
+                  )}
+                >
+                  Grid View
+                </Button>
+              </div>
             </div>
+
+            {riskView === "map" ? (
+              <div className="grid grid-cols-[35%_1fr] gap-8">
+                <div className="rounded-2xl overflow-hidden h-[280px] border border-slate-100 bg-slate-50">
+                  <NeedTerrainMap
+                    zones={terrainMapZones}
+                    heatmapPoints={terrainHeatmapPoints}
+                    opacity={0.75}
+                    showLegend={false}
+                    className="h-full"
+                  />
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-none hover:bg-transparent">
+                      <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400">Zone</TableHead>
+                      <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400">At-Risk</TableHead>
+                      <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400">Need</TableHead>
+                      <TableHead className="uppercase text-[10px] font-black tracking-widest text-slate-400 text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {riskRowsForDisplay.map((row, i) => (
+                      <TableRow key={i} className="border-slate-50 hover:bg-slate-50/50 transition-colors">
+                        <TableCell className="font-bold text-[#1A1A3D]">{row.zone}</TableCell>
+                        <TableCell className="font-mono font-medium text-slate-600">{row.atRisk.toLocaleString()}</TableCell>
+                        <TableCell>
+                          <Badge className={cn(
+                            "rounded-lg border-none hover:bg-transparent px-3 py-1 text-[10px] font-bold",
+                            row.riskLevel === "critical" ? "text-[#EF4444] bg-[#FEF2F2]" : row.riskLevel === "high" ? "text-orange-600 bg-orange-50" : row.riskLevel === "medium" ? "text-[#5A57FF] bg-[#F3F2FF]" : "text-[#10B981] bg-[#ECFDF5]"
+                          )}>
+                            {titleCase(row.need)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => setSelectedZoneId(row.zoneId)}
+                            className="text-[#5A57FF] hover:bg-[#F3F2FF]"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {!riskRowsForDisplay.length && (
+                      <TableRow className="border-slate-50">
+                        <TableCell colSpan={4} className="py-8 text-center text-slate-400 font-medium">
+                          Risk assessment data will appear once forecasts are generated.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {riskRowsForDisplay.map((row) => (
+                  <div key={row.zoneId} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <h3 className="text-sm font-bold text-[#1A1A3D]">{row.zone}</h3>
+                      <Badge className={cn(
+                        "rounded-lg border-none px-2 py-1 text-[10px] font-bold",
+                        row.riskLevel === "critical" ? "text-[#EF4444] bg-[#FEF2F2]" : row.riskLevel === "high" ? "text-orange-600 bg-orange-50" : row.riskLevel === "medium" ? "text-[#5A57FF] bg-[#F3F2FF]" : "text-[#10B981] bg-[#ECFDF5]"
+                      )}>
+                        {titleCase(row.riskLevel)}
+                      </Badge>
+                    </div>
+                    <p className="mt-3 text-[11px] text-slate-500 font-semibold uppercase tracking-widest">At-Risk</p>
+                    <p className="text-2xl font-black text-[#1A1A3D]">{row.atRisk.toLocaleString()}</p>
+                    <p className="mt-2 text-xs text-slate-600">Primary Need: <span className="font-bold">{titleCase(row.need)}</span></p>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setSelectedZoneId(row.zoneId)}
+                      className="mt-3 w-full text-[#5A57FF] hover:bg-[#F3F2FF]"
+                    >
+                      Focus Zone <ExternalLink className="w-3.5 h-3.5 ml-1" />
+                    </Button>
+                  </div>
+                ))}
+                {!riskRowsForDisplay.length && (
+                  <div className="md:col-span-2 xl:col-span-3 rounded-2xl border border-dashed border-slate-200 p-8 text-center text-slate-400 font-medium">
+                    Risk assessment data will appear once forecasts are generated.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Alert Configuration Card */}
