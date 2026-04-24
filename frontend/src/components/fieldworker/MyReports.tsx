@@ -34,6 +34,7 @@ import {
    SelectTrigger,
    SelectValue,
 } from "@/components/ui/select";
+import { fetchWithOutbox } from "@/lib/offline-outbox";
 
 const StatusPill = ({ label, active, onClick, count }: { label: string; active: boolean; onClick: () => void; count?: number }) => (
    <button
@@ -280,7 +281,7 @@ export const MyReports = ({ onNewReport }: { onNewReport: () => void }) => {
             voiceUrl: selectedReport?.voiceUrl || null,
          };
 
-         const response = await fetch(`${apiBaseUrl}/fieldworker/reports/${selectedReport.id}`, {
+         const { response, queued } = await fetchWithOutbox(`${apiBaseUrl}/fieldworker/reports/${selectedReport.id}`, {
             method: "PATCH",
             headers: {
                "Content-Type": "application/json",
@@ -289,7 +290,25 @@ export const MyReports = ({ onNewReport }: { onNewReport: () => void }) => {
             body: JSON.stringify(payload),
          });
 
-         if (!response.ok) {
+         if (queued) {
+            const queuedReport = { ...selectedReport, status: "queued", updatedAt: new Date().toISOString() };
+            setReports((prev) => {
+               const next = prev.map((report) => (report.id === queuedReport.id ? queuedReport : report));
+               setCounts({
+                  synced: next.filter((r: any) => r.status === "synced" || !r.status).length,
+                  queued: next.filter((r: any) => r.status === "queued").length,
+                  processing: next.filter((r: any) => r.status === "processing").length,
+               });
+               return next;
+            });
+            setSelectedReport(queuedReport);
+            setFormState(makeFormState(queuedReport));
+            setEditMode(false);
+            setDialogOpen(false);
+            return;
+         }
+
+         if (!response?.ok) {
             throw new Error("Failed to resubmit report");
          }
 

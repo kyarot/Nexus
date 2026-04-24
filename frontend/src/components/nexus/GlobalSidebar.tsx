@@ -325,31 +325,101 @@ export function GlobalSidebar({
       </motion.aside>
 
       <nav className="fixed bottom-0 left-0 right-0 h-16 bg-[#1E1B4B] border-t border-white/10 flex lg:hidden items-center justify-around z-50 px-2 shadow-2xl">
-        <MobileTabItem 
-          icon={LayoutDashboard} label="Home" path={role === "coordinator" ? "/dashboard" : "/fieldworker"} 
-          active={role === "fieldworker" && activeTab ? activeTab === "Dashboard" : undefined}
-          onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Dashboard") : undefined}
-        />
-        <MobileTabItem 
-          icon={Target} label="Missions" path={role === "coordinator" ? "/dashboard/missions" : "/fieldworker/active"} 
-          active={role === "fieldworker" && activeTab ? activeTab === "Active" : undefined}
-          onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Active") : undefined}
-        />
-        <MobileTabItem 
-          icon={Sparkles} label="Nexus" path={role === "coordinator" ? "/dashboard/insights" : "/fieldworker/scan"} 
-          active={role === "fieldworker" && activeTab ? activeTab === "Scan" : undefined}
-          onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Scan") : undefined}
-        />
-        <MobileTabItem 
-          icon={BarChart3} label="Impact" path="/fieldworker/reports" 
-          active={role === "fieldworker" && activeTab ? activeTab === "Reports" : undefined}
-          onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Reports") : undefined}
-        />
-        <MobileTabItem 
-          icon={UserCog} label="Profile" path="/fieldworker/profile" 
-          active={role === "fieldworker" && activeTab ? activeTab === "Profile" : undefined}
-          onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Profile") : undefined}
-        />
+        {role === "coordinator" ? (
+          <>
+            <MobileTabItem 
+              icon={LayoutDashboard} 
+              label="Home" 
+              path="/dashboard" 
+            />
+            <MobileTabItem 
+              icon={Target} 
+              label="Missions" 
+              path="/dashboard/missions" 
+            />
+            <MobileTabItem 
+              icon={Sparkles} 
+              label="Insights" 
+              path="/dashboard/insights" 
+            />
+            <MobileTabItem 
+              icon={Map} 
+              label="Terrain" 
+              path="/dashboard/terrain" 
+            />
+            <MobileTabItem 
+              icon={Building2} 
+              label="Settings" 
+              path="/dashboard/organisation" 
+            />
+          </>
+        ) : role === "volunteer" ? (
+          <>
+            <MobileTabItem 
+              icon={LayoutDashboard} 
+              label="Home" 
+              path="/volunteer" 
+            />
+            <MobileTabItem 
+              icon={Target} 
+              label="Missions" 
+              path="/volunteer/missions" 
+            />
+            <MobileTabItem 
+              icon={Sparkles} 
+              label="Empathy" 
+              path="/volunteer/empathy" 
+            />
+            <MobileTabItem 
+              icon={BarChart3} 
+              label="Impact" 
+              path="/volunteer/impact" 
+            />
+            <MobileTabItem 
+              icon={UserCog} 
+              label="Profile" 
+              path="/volunteer/profile" 
+            />
+          </>
+        ) : (
+          <>
+            <MobileTabItem 
+              icon={LayoutDashboard} 
+              label="Home" 
+              path="/fieldworker" 
+              active={activeTab === "Dashboard"}
+              onClick={() => onTabChange && onTabChange("Dashboard")}
+            />
+            <MobileTabItem 
+              icon={Target} 
+              label="Missions" 
+              path="/fieldworker/active" 
+              active={activeTab === "Active"}
+              onClick={() => onTabChange && onTabChange("Active")}
+            />
+            <MobileTabItem 
+              icon={Sparkles} 
+              label="Nexus" 
+              path="/fieldworker/scan" 
+              active={activeTab === "Scan"}
+              onClick={() => onTabChange && onTabChange("Scan")}
+            />
+            <MobileTabItem 
+              icon={BarChart3} 
+              label="Impact" 
+              path="/fieldworker/reports" 
+              active={activeTab === "Reports"}
+              onClick={() => onTabChange && onTabChange("Reports")}
+            />
+            <MobileTabItem 
+              icon={UserCog} 
+              label="Profile" 
+              path="/fieldworker/profile" 
+              active={activeTab === "Profile"}
+              onClick={() => onTabChange && onTabChange("Profile")}
+            />
+          </>
+        )}
       </nav>
     </>
   );

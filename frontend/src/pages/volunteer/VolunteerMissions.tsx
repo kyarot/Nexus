@@ -25,6 +25,7 @@ import {
 import { getVolunteerEmpathyBrief, type VolunteerEmpathyResponse } from "@/lib/ops-api";
 import { getNotificationStreamUrl, listNotifications, type NotificationItem } from "@/lib/ops-api";
 import { useToast } from "@/hooks/use-toast";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import {
   ArrowRight,
   CheckCircle2,
@@ -146,10 +147,11 @@ const VolunteerMissions = () => {
   const [isRouteLoading, setIsRouteLoading] = useState(false);
   const [routeMeta, setRouteMeta] = useState<{ distance: string; duration: string } | null>(null);
   const token = localStorage.getItem("nexus_access_token");
+  const isOnline = useOnlineStatus();
   const seenNotificationIds = useRef<Set<string>>(new Set());
 
     useEffect(() => {
-      if (!token) return;
+      if (!token || !isOnline) return;
       const streamUrl = getNotificationStreamUrl();
       const source = new EventSource(streamUrl);
 
@@ -192,7 +194,7 @@ const VolunteerMissions = () => {
       return () => {
         source.close();
       };
-    }, [token, toast]);
+    }, [token, toast, isOnline]);
   const mapsApiKey = import.meta.env.VITE_GMAPS_KEY || "";
 
   const empathyDetailQuery = useQuery<VolunteerEmpathyResponse>({

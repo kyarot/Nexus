@@ -26,6 +26,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { MapPicker } from "@/components/nexus/MapPicker";
 import { useToast } from "@/hooks/use-toast";
 import { getNotificationStreamUrl, listNotifications, type NotificationItem } from "@/lib/ops-api";
+import { fetchWithOutbox } from "@/lib/offline-outbox";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 
 const UpdateRow = ({ time, status, text, type }: { time: string, status: string, text: string, type: "system" | "field" }) => (
   <div className="flex gap-4 relative pb-8 group last:pb-0">
@@ -70,6 +72,7 @@ export const ActiveMission = () => {
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const token = localStorage.getItem("nexus_access_token");
+   const isOnline = useOnlineStatus();
    const seenNotificationIds = useRef<Set<string>>(new Set());
 
   const fetchActiveMission = async () => {
@@ -101,7 +104,7 @@ export const ActiveMission = () => {
   }, []);
 
    useEffect(() => {
-      if (!token) return;
+      if (!token || !isOnline) return;
       const streamUrl = getNotificationStreamUrl();
       const source = new EventSource(streamUrl);
 
@@ -144,7 +147,7 @@ export const ActiveMission = () => {
       return () => {
          source.close();
       };
-   }, [token, toast]);
+   }, [token, toast, isOnline]);
 
   const handleStatusUpdate = async (newStatus: string) => {
     if (!activeMission) return;
@@ -162,53 +165,68 @@ export const ActiveMission = () => {
 
     const location = await getLocation();
     
-    try {
-      const response = await fetch(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/status`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({ status: newStatus, location })
-      });
-      
-      if (response.ok) {
-        setStatus(newStatus);
-        fetchActiveMission(); // Refresh timeline
+      try {
+         const { response, queued } = await fetchWithOutbox(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/status`, {
+            method: "POST",
+            headers: {
+               "Content-Type": "application/json",
+               "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({ status: newStatus, location })
+         });
+
+         if (queued) {
+            setStatus(newStatus);
+            toast({ title: "Status update queued", description: "Will sync when online." });
+            return;
+         }
+
+         if (response?.ok) {
+            setStatus(newStatus);
+            fetchActiveMission(); // Refresh timeline
+         } else {
+            throw new Error("Failed to update status");
+         }
+      } catch (err) {
+         console.error("Failed to update status", err);
+      } finally {
+         setIsSubmitting(false);
       }
-    } catch (err) {
-      console.error("Failed to update status", err);
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
   const handleCompleteMission = async (outcome: 'success' | 'failure') => {
     if (!activeMission) return;
     setIsSubmitting(true);
     
-    try {
-      const response = await fetch(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/complete`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          outcome,
-          familiesHelped,
-          notes: completionNotes
-        })
-      });
-      
-      if (response.ok) {
-        setActiveMission(null);
+      try {
+         const { response, queued } = await fetchWithOutbox(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/complete`, {
+            method: "POST",
+            headers: {
+               "Content-Type": "application/json",
+               "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+               outcome,
+               familiesHelped,
+               notes: completionNotes
+            })
+         });
+
+         if (queued) {
+            toast({ title: "Completion queued", description: "Will sync when online." });
+            return;
+         }
+
+         if (response?.ok) {
+            setActiveMission(null);
+         } else {
+            throw new Error("Failed to complete mission");
+         }
+      } catch (err) {
+         console.error("Failed to complete mission", err);
+      } finally {
+         setIsSubmitting(false);
       }
-    } catch (err) {
-      console.error("Failed to complete mission", err);
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
    const handleStartRecording = async () => {
@@ -249,7 +267,7 @@ export const ActiveMission = () => {
                return;
             }
 
-            const response = await fetch(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/text-update`, {
+            const { response, queued } = await fetchWithOutbox(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/text-update`, {
                method: "POST",
                headers: {
                   "Content-Type": "application/json",
@@ -258,7 +276,13 @@ export const ActiveMission = () => {
                body: JSON.stringify({ text: updateText.trim() }),
             });
 
-            if (!response.ok) {
+            if (queued) {
+              setUpdateText("");
+              toast({ title: "Update queued", description: "Will sync when online." });
+              return;
+            }
+
+            if (!response?.ok) {
                throw new Error("Failed to submit text update");
             }
             setUpdateText("");
@@ -270,7 +294,7 @@ export const ActiveMission = () => {
 
             const formData = new FormData();
             formData.append("file", recordedBlob, "mission-update.wav");
-            const response = await fetch(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/voice-update`, {
+            const { response, queued } = await fetchWithOutbox(`${apiBaseUrl}/fieldworker/mission/${activeMission.id}/voice-update`, {
                method: "POST",
                headers: {
                   "Authorization": `Bearer ${token}`,
@@ -278,7 +302,13 @@ export const ActiveMission = () => {
                body: formData,
             });
 
-            if (!response.ok) {
+            if (queued) {
+              setRecordedBlob(null);
+              toast({ title: "Voice update queued", description: "Will sync when online." });
+              return;
+            }
+
+            if (!response?.ok) {
                throw new Error("Failed to submit voice update");
             }
             setRecordedBlob(null);

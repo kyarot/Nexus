@@ -301,11 +301,11 @@ export default function IntelligenceHub() {
         subtext={token ? `Live backend sync · ${verifiedNodes} zones · ${dashboard?.availableVolunteers ?? volunteers.length} volunteers available` : "Sign in as coordinator to load live intelligence."}
       />
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        <div className="bg-card rounded-card border shadow-card p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6">
+        <div className="bg-card rounded-card border shadow-card p-4 md:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 md:mb-6">
             <div>
-              <h1 className="text-2xl font-bold text-foreground">Intelligence Overview</h1>
+              <h1 className="text-xl md:text-2xl font-bold text-foreground">Intelligence Overview</h1>
               <p className="text-sm text-muted-foreground mt-1">Real-time insights from all coordination systems</p>
             </div>
             <div className="flex items-center gap-2">
@@ -327,8 +327,8 @@ export default function IntelligenceHub() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          <div className="bg-card rounded-card border shadow-card p-6 relative overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
+          <div className="bg-card rounded-card border shadow-card p-4 md:p-6 relative overflow-hidden">
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
@@ -526,8 +526,8 @@ export default function IntelligenceHub() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <div className="bg-card rounded-card border shadow-card p-6">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 md:gap-6">
+          <div className="bg-card rounded-card border shadow-card p-4 md:p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-foreground">Verified Mission Outcomes</h3>
               <Link to="/dashboard/impact" className="text-xs text-primary hover:underline font-medium">View ledger →</Link>
@@ -555,7 +555,7 @@ export default function IntelligenceHub() {
             </div>
           </div>
 
-          <div className="bg-card rounded-card border shadow-card p-6">
+          <div className="bg-card rounded-card border shadow-card p-4 md:p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-foreground">Best Matched Volunteers</h3>
               <Link to="/dashboard/volunteers" className="text-xs text-primary hover:underline font-medium">Open roster →</Link>
@@ -579,7 +579,7 @@ export default function IntelligenceHub() {
           </div>
         </div>
 
-        <div className="bg-card rounded-card border shadow-card p-6">
+        <div className="bg-card rounded-card border shadow-card p-4 md:p-6">
           <h3 className="text-sm font-semibold text-foreground mb-4">Top Urgent Needs</h3>
           <div className="space-y-3">
             {topZones.map((zone, index) => {
@@ -606,7 +606,7 @@ export default function IntelligenceHub() {
           </div>
         </div>
 
-        <div className="bg-card rounded-card border shadow-card p-6">
+        <div className="bg-card rounded-card border shadow-card p-4 md:p-6">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
             <div>
               <h3 className="text-sm font-semibold text-foreground">Quick Intelligence Actions</h3>

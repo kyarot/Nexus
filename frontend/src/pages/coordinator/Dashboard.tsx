@@ -9,6 +9,7 @@ import { CommunityPulseDonut } from "@/components/coordinator/CommunityPulseDonu
 import { MissionStatusChip } from "@/components/coordinator/MissionStatusChip";
 import { ZoneRiskBadge } from "@/components/coordinator/ZoneRiskBadge";
 import { cn } from "@/lib/utils";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import {
   getCoordinatorDashboard,
   getCoordinatorMissions,
@@ -57,6 +58,7 @@ const missionStatusToChip = (status?: CoordinatorMission["status"]) => {
 export default function Dashboard() {
   const token = localStorage.getItem("nexus_access_token");
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const isOnline = useOnlineStatus();
 
   const dashboardQuery = useQuery({
     queryKey: ["coordinator-dashboard", token],
@@ -84,7 +86,7 @@ export default function Dashboard() {
   const { data, isLoading } = dashboardQuery;
 
   useEffect(() => {
-    if (!token) {
+    if (!token || !isOnline) {
       return;
     }
 
@@ -109,7 +111,7 @@ export default function Dashboard() {
     return () => {
       source.close();
     };
-  }, [apiBaseUrl, dashboardQuery, token]);
+  }, [apiBaseUrl, dashboardQuery, token, isOnline]);
 
   const zones = data?.zones ?? [];
   const heatmapPoints = data?.heatmap ?? [];
@@ -156,8 +158,8 @@ export default function Dashboard() {
       />
 
       <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-card-gap">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
             <StatMetricCard
               label="Avg Zone Score"
               value={isLoading ? "--" : Math.round(dashboard?.avgZoneScore ?? 0)}
@@ -189,23 +191,23 @@ export default function Dashboard() {
             />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-card-gap">
-            <div className="lg:col-span-3 space-y-card-gap">
-              <div className="rounded-card border bg-card p-5 shadow-card">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6">
+            <div className="lg:col-span-3 space-y-4 md:space-y-6">
+              <div className="rounded-card border bg-card p-4 md:p-5 shadow-card">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-semibold text-foreground">Need Terrain Map</h3>
                     <span className="flex items-center gap-1 text-[11px] text-success font-medium"><span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />Live</span>
                   </div>
                 </div>
-                <NeedTerrainMap zones={zones} heatmapPoints={heatmapPoints} opacity={0.95} className="h-[260px]" />
+                <NeedTerrainMap zones={zones} heatmapPoints={heatmapPoints} opacity={0.95} className="h-[200px] md:h-[260px]" />
                 {!token ? <p className="mt-2 text-[11px] text-muted-foreground">Sign in as coordinator to load live terrain hotspots.</p> : null}
                 {token && !isLoading && zones.length === 0 && heatmapPoints.length === 0 ? (
                   <p className="mt-2 text-[11px] text-muted-foreground">Live terrain stream connected, but no recent signals are available yet.</p>
                 ) : null}
               </div>
 
-              <div className="rounded-card border bg-card p-5 shadow-card">
+              <div className="rounded-card border bg-card p-4 md:p-5 shadow-card">
                 <h3 className="text-sm font-semibold text-foreground mb-4">Top Urgent Needs</h3>
                 {topZones.length ? topZones.map((zone, index) => {
                   const dominantSignal = Object.entries(zone.signalCounts || {}).sort((left, right) => right[1] - left[1])[0];
@@ -235,7 +237,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="lg:col-span-2 space-y-card-gap">
+            <div className="lg:col-span-2 space-y-4 md:space-y-6">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-foreground">Gemini Insights</h3>
@@ -269,7 +271,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="hidden xl:block w-panel-w border-l bg-card overflow-y-auto p-5 space-y-6 shrink-0">
+        <div className="hidden xl:block w-panel-w border-l bg-card overflow-y-auto p-4 md:p-5 space-y-4 md:space-y-6 shrink-0">
           <CommunityPulseDonut score={Math.round(dashboard?.avgZoneScore ?? 0)} trend="up" />
 
           <div>

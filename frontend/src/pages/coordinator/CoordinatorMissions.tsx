@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { isQueuedResult } from "@/lib/offline-outbox";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import {
   AlertCircle,
   AlertTriangle,
@@ -150,6 +152,7 @@ const CoordinatorMissions = () => {
   });
   const sseRefetchTimerRef = useRef<number | null>(null);
   const token = localStorage.getItem("nexus_access_token");
+  const isOnline = useOnlineStatus();
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -188,7 +191,7 @@ const CoordinatorMissions = () => {
   const refetchZones = zonesQuery.refetch;
 
   useEffect(() => {
-    if (!token) {
+    if (!token || !isOnline) {
       return;
     }
 
@@ -235,7 +238,8 @@ const CoordinatorMissions = () => {
         sseRefetchTimerRef.current = null;
       }
     };
-  }, [apiBaseUrl, refetchMissions, refetchZones, token]);
+
+  }, [apiBaseUrl, refetchMissions, refetchZones, token, isOnline]);
 
   const selectedZone = useMemo(
     () => zonesQuery.data?.zones.find((zone) => zone.id === missionForm.zoneId) ?? null,
@@ -302,6 +306,14 @@ const CoordinatorMissions = () => {
   const createMissionMutation = useMutation({
     mutationFn: (payload: CoordinatorMissionCreatePayload) => createCoordinatorMission(payload),
     onSuccess: async (response) => {
+      if (isQueuedResult(response)) {
+        setShowCreateMission(false);
+        setCreationStep(1);
+        setSelectedVolunteerForMission(null);
+        setMissionForm(defaultMissionForm);
+        toast.success("Mission queued for sync");
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: ["coordinator-missions"] });
       await queryClient.invalidateQueries({ queryKey: ["coordinator-dashboard"] });
       setSelectedMission(response.mission);
@@ -319,6 +331,12 @@ const CoordinatorMissions = () => {
   const assignVolunteerMutation = useMutation({
     mutationFn: (candidateId: string) => assignCoordinatorMission(assignMission!.id, candidateId),
     onSuccess: async (response) => {
+      if (isQueuedResult(response)) {
+        setAssignMission(null);
+        setSelectedAssignCandidate(null);
+        toast.success("Assignment queued for sync");
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: ["coordinator-missions"] });
       await queryClient.invalidateQueries({ queryKey: ["coordinator-dashboard"] });
       setSelectedMission(response.mission);
@@ -335,8 +353,12 @@ const CoordinatorMissions = () => {
   const missionMessageMutation = useMutation({
     mutationFn: ({ missionId, message }: { missionId: string; message: string }) =>
       sendCoordinatorMissionMessage(missionId, message),
-    onSuccess: () => {
-      toast.success("Message sent to responder");
+    onSuccess: (response) => {
+      if (isQueuedResult(response)) {
+        toast.success("Message queued for sync");
+      } else {
+        toast.success("Message sent to responder");
+      }
       setMessageText("");
       setMessageMission(null);
     },
@@ -352,8 +374,12 @@ const CoordinatorMissions = () => {
 
   const missionRenotifyMutation = useMutation({
     mutationFn: (missionId: string) => renotifyCoordinatorMission(missionId),
-    onSuccess: () => {
-      toast.success("Responder renotified");
+    onSuccess: (response) => {
+      if (isQueuedResult(response)) {
+        toast.success("Renotify queued for sync");
+      } else {
+        toast.success("Responder renotified");
+      }
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to send reminder");
@@ -363,6 +389,10 @@ const CoordinatorMissions = () => {
   const closeMissionMutation = useMutation({
     mutationFn: (missionId: string) => closeCoordinatorMission(missionId),
     onSuccess: async (mission) => {
+      if (isQueuedResult(mission)) {
+        toast.success("Close queued for sync");
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: ["coordinator-missions"] });
       await queryClient.invalidateQueries({ queryKey: ["coordinator-dashboard"] });
       if (selectedMission?.id === mission.id) {
@@ -588,15 +618,15 @@ const CoordinatorMissions = () => {
         <div className="flex-1 flex flex-col overflow-y-auto">
           <DashboardTopBar breadcrumb="Operations / Missions" />
 
-          <div className="p-8 space-y-8">
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div className="p-6 md:p-8 space-y-6 md:space-y-8">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 md:gap-6">
               <div className="space-y-1">
-                <h1 className="text-[32px] font-bold text-[#1A1A3D]">Missions</h1>
-                <p className="text-[#64748B] font-medium text-base">Create, monitor, and close all field missions across your zones</p>
+                <h1 className="text-2xl md:text-[32px] font-bold text-[#1A1A3D]">Missions</h1>
+                <p className="text-[#64748B] font-medium text-sm md:text-base">Create, monitor, and close all field missions across your zones</p>
               </div>
 
-              <div className="flex items-center gap-4">
-                <div className="relative w-64">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 md:gap-4">
+                <div className="relative w-full sm:w-64">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <Input
                     placeholder="Search missions..."
@@ -614,13 +644,13 @@ const CoordinatorMissions = () => {
               </div>
             </div>
 
-            <div className="flex gap-3 flex-wrap">
+            <div className="flex gap-2 md:gap-3 flex-wrap">
               {["All", "Active", "Pending", "Completed", "Failed"].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab.toLowerCase())}
                   className={cn(
-                    "px-5 py-2.5 rounded-full text-xs font-black uppercase tracking-widest transition-all border",
+                    "px-4 md:px-5 py-2.5 rounded-full text-xs font-black uppercase tracking-widest transition-all border",
                     activeTab === tab.toLowerCase()
                       ? "bg-[#4F46E5] text-white border-[#4F46E5] shadow-md"
                       : "bg-transparent text-[#64748B] border-slate-200 hover:border-slate-300",
@@ -631,7 +661,7 @@ const CoordinatorMissions = () => {
               ))}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
               {stats.map((stat) => (
                 <div
                   key={stat.label}
@@ -652,10 +682,10 @@ const CoordinatorMissions = () => {
               ))}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2 space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
+              <div className="lg:col-span-2 space-y-4 md:space-y-6">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-bold text-[#1A1A3D]">Recent Activity <span className="text-slate-300 ml-2 font-medium text-sm">• Updated live</span></h3>
+                  <h3 className="text-base md:text-lg font-bold text-[#1A1A3D]">Recent Activity <span className="text-slate-300 ml-2 font-medium text-xs md:text-sm">• Updated live</span></h3>
                 </div>
 
                 {searchedMissions.map((mission) => {
@@ -668,7 +698,7 @@ const CoordinatorMissions = () => {
                     <div
                       key={mission.id}
                       className={cn(
-                        "bg-white rounded-[1.25rem] border-l-[3px] border border-slate-100 shadow-[0_4px_24px_rgba(79,70,229,0.06)] p-6 space-y-6 transition-all hover:shadow-lg",
+                        "bg-white rounded-2xl md:rounded-[1.25rem] border-l-[3px] border border-slate-100 shadow-[0_4px_24px_rgba(79,70,229,0.06)] p-4 md:p-6 space-y-4 md:space-y-6 transition-all hover:shadow-lg",
                         mission.status === "completed"
                           ? "border-l-[#10B981]"
                           : mission.status === "pending"
@@ -676,12 +706,12 @@ const CoordinatorMissions = () => {
                             : "border-l-[#4F46E5]",
                       )}
                     >
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-4 min-w-0">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+                        <div className="flex items-center gap-3 md:gap-4 min-w-0">
                           <Badge variant="outline" className="bg-slate-50 text-slate-500 border-none font-mono text-[11px] px-2 py-0.5">{mission.id}</Badge>
-                          <h4 className="text-lg font-bold text-[#1A1A3D] truncate">{mission.title}</h4>
+                          <h4 className="text-base md:text-lg font-bold text-[#1A1A3D] truncate">{mission.title}</h4>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center gap-2 shrink-0 flex-wrap">
                           <Badge className={cn("rounded-full px-3 py-1 font-bold text-[10px] uppercase tracking-wider", statusBadgeClasses[mission.status])}>
                             <div className={cn("w-1.5 h-1.5 rounded-full mr-1.5 inline-block", mission.status === "pending" ? "bg-amber-500" : mission.status === "completed" ? "bg-green-500" : "bg-green-500 animate-pulse")} />
                             {statusLabel(mission.status)}
@@ -740,14 +770,14 @@ const CoordinatorMissions = () => {
                           </div>
                           <div className="flex gap-4 flex-wrap">
                             <Button
-                              className="bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] text-white font-bold rounded-xl px-6"
+                              className="bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] text-white font-bold rounded-xl px-4 md:px-6"
                               onClick={() => setAssignMission(mission)}
                             >
                               {mission.targetAudience === "volunteer" ? "Assign Volunteer" : "Assign Field Worker"} →
                             </Button>
                             <Button
                               variant="outline"
-                              className="border-slate-200 text-[#4F46E5] font-bold px-6"
+                              className="border-slate-200 text-[#4F46E5] font-bold px-4 md:px-6"
                               onClick={() => {
                                 setSelectedMission(mission);
                                 setDetailTab("Source Reports");
@@ -766,6 +796,8 @@ const CoordinatorMissions = () => {
                             >
                               Edit Details
                             </Button>
+                            <div className="flex-1 hidden md:block" />
+                            <Button variant="ghost" className="text-slate-400 font-bold hidden md:flex">Edit Details</Button>
                           </div>
                         </div>
                       ) : (

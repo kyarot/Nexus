@@ -23,6 +23,7 @@ import {
 import { getCoordinatorTerrainSnapshot } from "@/lib/coordinator-api";
 import { getNotificationStreamUrl, listNotifications, type NotificationItem } from "@/lib/ops-api";
 import { useToast } from "@/hooks/use-toast";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 
 const fallbackChart = [
   { weekLabel: "W12", score: 42, confidence: 100, isForecast: false },
@@ -64,6 +65,7 @@ const titleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice
 export default function Forecast() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const isOnline = useOnlineStatus();
   const seenNotificationIds = useRef<Set<string>>(new Set());
 
   const [selectedZoneId, setSelectedZoneId] = useState("all");
@@ -166,6 +168,9 @@ export default function Forecast() {
   });
 
   useEffect(() => {
+    if (!isOnline) {
+      return;
+    }
     const streamUrl = getCommunityForecastStreamUrl();
     if (!streamUrl.includes("token=")) {
       return;
@@ -192,9 +197,12 @@ export default function Forecast() {
     return () => {
       source.close();
     };
-  }, [queryClient]);
+  }, [queryClient, isOnline]);
 
   useEffect(() => {
+    if (!isOnline) {
+      return;
+    }
     const token = localStorage.getItem("nexus_access_token") || "";
     if (!token) {
       return;
@@ -243,7 +251,7 @@ export default function Forecast() {
     return () => {
       source.close();
     };
-  }, [toast]);
+  }, [toast, isOnline]);
 
   const summary = summaryQuery.data;
   const backtesting = backtestingQuery.data;
@@ -304,19 +312,19 @@ export default function Forecast() {
     <div className="flex flex-col h-full bg-[#F8F9FE]">
       <DashboardTopBar breadcrumb="Community Forecast" />
       
-      <div className="flex-1 overflow-y-auto p-8 space-y-8">
+      <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8">
         {/* Header Section */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-[2.5rem] font-bold text-[#1A1A3D] tracking-tight">Community Forecast</h1>
-            <p className="text-lg text-slate-500 mt-1 font-medium">Predicted need intensity for next 4 weeks across all zones</p>
+            <h1 className="text-3xl md:text-[2.5rem] font-bold text-[#1A1A3D] tracking-tight">Community Forecast</h1>
+            <p className="text-base md:text-lg text-slate-500 mt-1 font-medium">Predicted need intensity for next 4 weeks across all zones</p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <div className="bg-slate-100 rounded-xl px-4 h-11 flex items-center gap-2">
               <select
                 value={selectedZoneId}
                 onChange={(event) => setSelectedZoneId(event.target.value)}
-                className="bg-transparent text-slate-700 font-bold outline-none text-sm"
+                className="bg-transparent text-slate-700 font-bold outline-none text-sm w-full"
               >
                 {zoneOptions.map((option) => (
                   <option key={option.id} value={option.id}>
@@ -329,28 +337,28 @@ export default function Forecast() {
             <Button
               onClick={() => recomputeMutation.mutate()}
               disabled={recomputeMutation.isPending}
-              className="bg-[#5A57FF] hover:bg-[#4845E0] text-white font-bold px-6 rounded-xl"
+              className="bg-[#5A57FF] hover:bg-[#4845E0] text-white font-bold px-6 rounded-xl h-11"
             >
-              {recomputeMutation.isPending ? "Recomputing..." : "Recompute Forecast"}
+              {recomputeMutation.isPending ? "Recomputing..." : "Recompute"}
             </Button>
             <Button
               variant="ghost"
               onClick={() => calibrateMutation.mutate()}
               disabled={calibrateMutation.isPending}
-              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-6"
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-6 h-11 hidden md:flex"
             >
-              {calibrateMutation.isPending ? "Calibrating..." : "Monthly Calibration"}
+              {calibrateMutation.isPending ? "Calibrating..." : "Calibrate"}
             </Button>
           </div>
         </div>
 
         {/* Top Grid: Main Chart & Performance Card */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
           {/* Main Forecast Chart */}
-          <div className="lg:col-span-2 bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 relative">
-            <div className="flex items-center justify-between mb-12">
-              <h2 className="text-xl font-bold text-[#1A1A3D]">Predictive Intensity Map</h2>
-              <div className="flex gap-6 text-xs font-bold uppercase tracking-widest">
+          <div className="lg:col-span-2 bg-white rounded-2xl md:rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100 relative">
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 md:mb-12 gap-4">
+              <h2 className="text-lg md:text-xl font-bold text-[#1A1A3D]">Predictive Intensity Map</h2>
+              <div className="flex gap-4 md:gap-6 text-xs font-bold uppercase tracking-widest">
                 <span className="flex items-center gap-2 text-slate-400">
                   <span className="w-2.5 h-2.5 rounded-full bg-[#5A57FF]" /> HISTORICAL
                 </span>
@@ -360,7 +368,7 @@ export default function Forecast() {
               </div>
             </div>
 
-            <div className="relative h-[300px] w-full mt-8">
+            <div className="relative h-[250px] md:h-[300px] w-full mt-6 md:mt-8">
               <div className="absolute right-0 top-0 z-10 bg-[#1A1A3D] text-white text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-widest">
                 Pre-position Resources
               </div>
@@ -423,15 +431,15 @@ export default function Forecast() {
               </ResponsiveContainer>
             </div>
 
-            <div className="mt-12 flex items-end justify-between">
-              <div className="flex gap-12">
+            <div className="mt-8 md:mt-12 flex flex-col md:flex-row items-start md:items-end justify-between gap-6">
+              <div className="flex gap-8 md:gap-12">
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Peak Confidence</p>
-                  <p className="text-3xl font-bold text-[#5A57FF] mt-1">{summary ? `${summary.mainChart.peakConfidence.toFixed(1)}%` : "--"}</p>
+                  <p className="text-2xl md:text-3xl font-bold text-[#5A57FF] mt-1">{summary ? `${summary.mainChart.peakConfidence.toFixed(1)}%` : "--"}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Drift Ratio</p>
-                  <p className="text-3xl font-bold text-[#1A1A3D] mt-1">{summary ? summary.mainChart.driftRatio.toFixed(2) : "--"}</p>
+                  <p className="text-2xl md:text-3xl font-bold text-[#1A1A3D] mt-1">{summary ? summary.mainChart.driftRatio.toFixed(2) : "--"}</p>
                 </div>
               </div>
               <div className="flex -space-x-2">
@@ -448,7 +456,7 @@ export default function Forecast() {
           </div>
 
           {/* Forecast Performance Card */}
-          <div className="bg-gradient-to-br from-[#4F46E5] to-[#3730A3] rounded-[2rem] p-8 text-white flex flex-col shadow-lg">
+          <div className="bg-gradient-to-br from-[#4F46E5] to-[#3730A3] rounded-2xl md:rounded-[2rem] p-6 md:p-8 text-white flex flex-col shadow-lg">
             <div className="flex justify-between items-start">
               <h2 className="text-xl font-bold leading-tight max-w-[180px]">Last Month's Forecast Performance</h2>
               <div className="bg-white/10 p-2 rounded-xl backdrop-blur-md">
@@ -486,9 +494,9 @@ export default function Forecast() {
         </div>
 
         {/* Zone Forecasts: 3 Column Layout */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
           {displayedZones.map((z, i) => (
-            <div key={z.zoneId} className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-col">
+            <div key={z.zoneId} className="bg-white rounded-2xl md:rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100 flex flex-col">
               <div className="flex justify-between items-start mb-6">
                 <h3 className="text-xl font-bold text-[#1A1A3D]">{z.zone}</h3>
                 <span className={cn("text-[10px] font-black px-3 py-1 rounded-full", z.badgeTone)}>{z.peakLabel}</span>
@@ -527,12 +535,12 @@ export default function Forecast() {
         </div>
 
         {/* Bottom Grid: Risk Assessment & Alert Config */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-12">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8 pb-8 md:pb-12">
           {/* Risk Assessment Table */}
-          <div className="lg:col-span-2 bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100">
-            <div className="flex items-center justify-between mb-8">
+          <div className="lg:col-span-2 bg-white rounded-2xl md:rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100">
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 md:mb-8 gap-4">
               <div>
-                <h2 className="text-xl font-bold text-[#1A1A3D]">Generational Risk Assessment</h2>
+                <h2 className="text-lg md:text-xl font-bold text-[#1A1A3D]">Generational Risk Assessment</h2>
                 <p className="text-xs font-medium text-slate-400 mt-1">2025–2030 Cohort Analysis</p>
               </div>
               <div className="bg-slate-100 p-1 rounded-xl flex gap-1">
@@ -653,7 +661,7 @@ export default function Forecast() {
           </div>
 
           {/* Alert Configuration Card */}
-          <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-col">
+          <div className="bg-white rounded-2xl md:rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100 flex flex-col">
             <div className="flex items-center gap-4 mb-10">
               <div className="p-3 bg-amber-50 rounded-2xl">
                 <Bell className="w-6 h-6 text-amber-500" />
@@ -705,14 +713,14 @@ export default function Forecast() {
         </div>
 
         {/* Footer Status Bar */}
-        <div className="border-t border-slate-200 mt-12 py-6 flex flex-wrap items-center justify-between text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">
-          <div className="flex gap-8">
+        <div className="border-t border-slate-200 mt-8 md:mt-12 py-4 md:py-6 flex flex-col md:flex-row flex-wrap items-start md:items-center justify-between text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 gap-4">
+          <div className="flex flex-wrap gap-4 md:gap-8">
             <span className="flex items-center gap-2">
               <span className={cn("w-2 h-2 rounded-full", isBusy ? "bg-amber-400 animate-pulse" : "bg-[#10B981] animate-pulse")} /> CORE ENGINE: {isBusy ? "SYNCING" : "LIVE"}
             </span>
             <span>LAST UPDATE: {summary?.generatedAt ? toRelativeTime(summary.generatedAt) : "--"}</span>
           </div>
-          <div className="flex gap-8">
+          <div className="flex flex-wrap gap-4 md:gap-8">
             <span>API Response: <span className="text-[#5A57FF]">{summary?.telemetry?.lastComputeDurationMs ?? "--"}ms</span></span>
             <span>Uptime: <span className="text-[#10B981]">{summary?.telemetry?.uptimePercent?.toFixed(2) ?? "99.95"}%</span></span>
           </div>

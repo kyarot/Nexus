@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+import { fetchWithOutbox } from "@/lib/offline-outbox";
 
 const MAX_SCAN_FILE_SIZE = 10 * 1024 * 1024;
 const ALLOWED_SCAN_MIMES = new Set(["image/png", "image/jpeg", "application/pdf"]);
@@ -106,6 +107,7 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
   const token = localStorage.getItem("nexus_access_token");
 
   const [isMerged, setIsMerged] = useState(false);
+  const [isQueued, setIsQueued] = useState(false);
   const [reportId, setReportId] = useState<string | null>(null);
   const [missionId, setMissionId] = useState<string | null>(null);
   const [activeMission, setActiveMission] = useState<any | null>(null);
@@ -408,7 +410,8 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
     };
 
     try {
-      const response = await fetch(`${apiBaseUrl}/fieldworker/reports`, {
+      setIsQueued(false);
+      const { response, queued } = await fetchWithOutbox(`${apiBaseUrl}/fieldworker/reports`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -417,7 +420,16 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
         body: JSON.stringify(payload)
       });
 
-      if (!response.ok) throw new Error("Failed to submit report");
+      if (queued) {
+        setIsQueued(true);
+        setIsMerged(false);
+        setReportId(queued.outboxId);
+        setMissionId(null);
+        setStep("submitted");
+        return;
+      }
+
+      if (!response?.ok) throw new Error("Failed to submit report");
 
       const data = await response.json();
       setIsMerged(data.merged);
@@ -441,10 +453,14 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
            
            <div className="space-y-2">
               <h2 className="text-3xl font-bold text-[#1A1A3D]">
-                {isMerged ? "Report added to active mission!" : "Report submitted!"}
+                {isMerged ? "Report added to active mission!" : isQueued ? "Report queued" : "Report submitted!"}
               </h2>
               <p className="text-slate-500 font-medium">
-                {isMerged ? "Your field data was automatically linked to an ongoing mission." : "Your field data has been successfully digitized."}
+                {isMerged
+                  ? "Your field data was automatically linked to an ongoing mission."
+                  : isQueued
+                  ? "Will sync automatically when you are back online."
+                  : "Your field data has been successfully digitized."}
               </p>
            </div>
            
@@ -462,11 +478,11 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
              </div>
            ) : (
              <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-left">
-                <Database className="w-5 h-5 text-emerald-600" />
-                <div>
-                   <p className="text-sm font-bold text-emerald-900">Syncing to Nexus...</p>
-                   <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Transaction ID: {reportId || "Pending"}</p>
-                </div>
+               <Database className="w-5 h-5 text-emerald-600" />
+               <div>
+                 <p className="text-sm font-bold text-emerald-900">{isQueued ? "Queued for sync" : "Syncing to Nexus..."}</p>
+                 <p className="text-[10px] text-emerald-700/70 font-bold uppercase tracking-widest">Transaction ID: {reportId || "Pending"}</p>
+               </div>
              </div>
            )}
 

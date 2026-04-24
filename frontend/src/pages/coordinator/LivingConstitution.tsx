@@ -223,53 +223,54 @@ const LivingConstitution = () => {
       <div className="flex-1 flex flex-col overflow-hidden">
         <DashboardTopBar breadcrumb="Reports / Living Constitution" />
         
-        <div className="flex-1 overflow-y-auto p-8 space-y-8 max-w-[1600px] mx-auto w-full">
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8 max-w-[1600px] mx-auto w-full">
           {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-            <div className="space-y-4 max-w-2xl">
+          <div className="flex flex-col gap-4 md:gap-6">
+            <div className="space-y-3 md:space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-indigo-100 rounded-2xl flex items-center justify-center text-[#4F46E5] shadow-sm">
-                  <FileText className="w-7 h-7" />
+                <div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-100 rounded-2xl flex items-center justify-center text-[#4F46E5] shadow-sm">
+                  <FileText className="w-6 h-6 md:w-7 md:h-7" />
                 </div>
-                <h1 className="text-[32px] font-bold text-[#1A1A3D]">Living Constitution</h1>
+                <h1 className="text-2xl md:text-[32px] font-bold text-[#1A1A3D]">Living Constitution</h1>
               </div>
-              <p className="text-[#64748B] text-lg leading-relaxed">
+              <p className="text-[#64748B] text-base md:text-lg leading-relaxed">
                 Auto-generated monthly policy brief — community ground truth flowing directly into government decision-making.
               </p>
               
               {/* Success Acknowledgment Bar */}
-              <div className="flex items-center justify-between px-4 py-3 bg-[#F0FDF4] rounded-xl border border-[#DCFCE7] text-[#166534] text-sm font-bold shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 md:px-4 py-3 bg-[#F0FDF4] rounded-xl border border-[#DCFCE7] text-[#166534] text-sm font-bold shadow-sm">
                 <div className="flex items-center gap-2">
                   <Shield className="w-4 h-4" />
-                           {briefStatusLabel}
+                  <span className="text-xs sm:text-sm">{briefStatusLabel}</span>
                 </div>
-                        <span className="text-[10px] font-black opacity-40 font-mono tracking-tighter">REF ID: {refId}</span>
+                <span className="text-[9px] md:text-[10px] font-black opacity-40 font-mono tracking-tighter">REF ID: {refId}</span>
               </div>
             </div>
             
-                  <Button
-                     className="bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] hover:opacity-90 text-white font-bold h-12 px-6 rounded-xl shadow-lg shadow-indigo-200"
-                     disabled={sending}
-                     onClick={handleSendBrief}
-                  >
-               <Building2 className="w-4 h-4 mr-2" /> Send to District Collector →
+            <Button
+              className="bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] hover:opacity-90 text-white font-bold h-11 md:h-12 px-4 md:px-6 rounded-xl shadow-lg shadow-indigo-200 w-full sm:w-auto"
+              disabled={sending}
+              onClick={handleSendBrief}
+            >
+              <Building2 className="w-4 h-4 mr-2" /> 
+              <span className="text-sm md:text-base">Send to District Collector →</span>
             </Button>
           </div>
 
           {/* How it Works Banner */}
-          <div className="bg-white rounded-[2rem] p-8 shadow-[0_4px_24px_rgba(79,70,229,0.04)] border border-indigo-50/50">
-             <div className="grid grid-cols-1 md:grid-cols-3 gap-12 relative">
+          <div className="bg-white rounded-2xl md:rounded-[2rem] p-6 md:p-8 shadow-[0_4px_24px_rgba(79,70,229,0.04)] border border-indigo-50/50">
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-12 relative">
                 {[
                   { step: 1, title: "Data Analysis", desc: "Nexus analyses all field reports this month", icon: LayoutDashboard },
                   { step: 2, title: "Gemini Identifies Needs", desc: "Gemini identifies top 10 unmet needs", icon: Sparkles },
                   { step: 3, title: "Auto-Formatted", desc: "Brief auto-formatted to govt standards", icon: FileText },
                 ].map((item, i) => (
                   <div key={item.step} className="flex gap-4 relative z-10">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-[#4F46E5] font-black text-sm shrink-0">
+                    <div className="w-8 h-8 md:w-10 md:h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-[#4F46E5] font-black text-sm shrink-0">
                        {item.step}
                     </div>
                     <div className="space-y-1">
-                       <h4 className="text-sm font-black text-[#1A1A3D] uppercase tracking-widest">{item.title}</h4>
+                       <h4 className="text-xs md:text-sm font-black text-[#1A1A3D] uppercase tracking-widest">{item.title}</h4>
                        <p className="text-xs text-slate-400 font-medium leading-relaxed">{item.desc}</p>
                     </div>
                     {i < 2 && (
@@ -280,31 +281,31 @@ const LivingConstitution = () => {
                   </div>
                 ))}
              </div>
-             <p className="text-[11px] text-slate-400 font-bold italic mt-6 text-center">"Takes 4 seconds. Used to take 3 months."</p>
+             <p className="text-[10px] md:text-[11px] text-slate-400 font-bold italic mt-4 md:mt-6 text-center">"Takes 4 seconds. Used to take 3 months."</p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 md:gap-8">
             {/* Left Column - Document Preview */}
-            <div className="lg:col-span-3 space-y-6">
-               <div className="bg-white rounded-[2rem] p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-8">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-50">
+            <div className="lg:col-span-3 space-y-4 md:space-y-6">
+               <div className="bg-white rounded-2xl md:rounded-[2rem] p-6 md:p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-6 md:space-y-8">
+                  <div className="flex flex-col gap-4 md:gap-6 pb-4 md:pb-6 border-b border-slate-50">
                      <div className="space-y-1">
-                        <h3 className="text-lg font-bold text-[#1A1A3D]">{briefTitle}</h3>
+                        <h3 className="text-base md:text-lg font-bold text-[#1A1A3D]">{briefTitle}</h3>
                         <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                            <Calendar className="w-3.5 h-3.5" /> Period: {briefPeriodLabel}
                         </div>
                      </div>
-                     <div className="flex items-center gap-3">
+                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                         <Button
                           variant="ghost"
-                          className="h-9 px-3 rounded-lg text-[#4F46E5] hover:bg-indigo-50 font-bold text-xs"
+                          className="h-9 px-3 rounded-lg text-[#4F46E5] hover:bg-indigo-50 font-bold text-xs w-full sm:w-auto"
                           onClick={handleRefresh}
                           disabled={reportQuery.isFetching || insightsQuery.isFetching}
                         >
                            <RefreshCw className="w-3.5 h-3.5 mr-2" /> Regenerate
                         </Button>
                         <select
-                          className="h-9 bg-slate-50 border-none rounded-lg px-3 text-xs font-bold text-slate-600 focus:ring-1 ring-indigo-100"
+                          className="h-9 bg-slate-50 border-none rounded-lg px-3 text-xs font-bold text-slate-600 focus:ring-1 ring-indigo-100 w-full sm:w-auto"
                           value={language}
                           onChange={(event) => setLanguage(event.target.value)}
                         >
@@ -315,7 +316,7 @@ const LivingConstitution = () => {
                      </div>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                      {[
                        { id: "formal", label: "Formal (Government)" },
                        { id: "accessible", label: "Accessible (Public)" },
@@ -325,7 +326,7 @@ const LivingConstitution = () => {
                           key={t.id}
                           onClick={() => setTone(t.id)}
                           className={cn(
-                            "px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border",
+                            "px-3 md:px-4 py-2 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all border",
                             tone === t.id ? "bg-[#4F46E5] text-white border-[#4F46E5] shadow-md" : "text-slate-400 border-slate-100 hover:border-slate-200"
                           )}
                         >
@@ -335,23 +336,23 @@ const LivingConstitution = () => {
                   </div>
 
                   {/* Document Preview Area */}
-                  <div className="bg-white rounded-3xl border border-slate-200 shadow-inner overflow-hidden min-h-[900px] flex flex-col">
+                  <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-200 shadow-inner overflow-hidden min-h-[600px] md:min-h-[900px] flex flex-col">
                      {/* Doc Header */}
-                     <div className="bg-[#1E1B4B] p-10 text-white space-y-6 relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-10 opacity-10">
-                           <Building2 className="w-32 h-32" />
+                     <div className="bg-[#1E1B4B] p-6 md:p-10 text-white space-y-4 md:space-y-6 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-6 md:p-10 opacity-10">
+                           <Building2 className="w-20 h-20 md:w-32 md:h-32" />
                         </div>
                         <div className="space-y-1 relative z-10">
-                           <p className="text-[10px] font-black opacity-60 uppercase tracking-[0.2em]">OFFICIAL POLICY BRIEF • {refId}</p>
-                           <h2 className="text-3xl font-black">Executive Summary</h2>
+                           <p className="text-[9px] md:text-[10px] font-black opacity-60 uppercase tracking-[0.2em]">OFFICIAL POLICY BRIEF • {refId}</p>
+                           <h2 className="text-2xl md:text-3xl font-black">Executive Summary</h2>
                         </div>
-                        <div className="flex gap-3 relative z-10">
-                           <Badge className="bg-white/10 hover:bg-white/10 text-white border-white/20 font-bold px-3 py-1">Priority: {priorityLabel}</Badge>
-                           <Badge className="bg-white/10 hover:bg-white/10 text-white border-white/20 font-bold px-3 py-1">Organization: {orgName}</Badge>
+                        <div className="flex flex-wrap gap-2 md:gap-3 relative z-10">
+                           <Badge className="bg-white/10 hover:bg-white/10 text-white border-white/20 font-bold px-2 md:px-3 py-1 text-xs">Priority: {priorityLabel}</Badge>
+                           <Badge className="bg-white/10 hover:bg-white/10 text-white border-white/20 font-bold px-2 md:px-3 py-1 text-xs">Organization: {orgName}</Badge>
                         </div>
                      </div>
 
-                     <div className="p-12 flex-1 space-y-12">
+                     <div className="p-6 md:p-12 flex-1 space-y-8 md:space-y-12">
                         {/* Section 1 */}
                         <div className="space-y-6">
                            <h4 className="text-[12px] font-black text-[#4F46E5] uppercase tracking-[0.2em] border-b border-indigo-50 pb-2">TOP 10 UNMET NEEDS</h4>
@@ -392,36 +393,36 @@ const LivingConstitution = () => {
                         </div>
 
                         {/* Section 3 - Stats */}
-                        <div className="space-y-6">
+                        <div className="space-y-4 md:space-y-6">
                            <h4 className="text-[12px] font-black text-[#4F46E5] uppercase tracking-[0.2em] border-b border-indigo-50 pb-2">SUPPORTING DATA</h4>
-                           <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                           <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 md:p-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
                               <div className="space-y-1">
                                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Completed Missions</p>
-                                 <p className="text-xl font-black text-[#1A1A3D]">{summary?.completedMissions ?? 0}</p>
+                                 <p className="text-lg md:text-xl font-black text-[#1A1A3D]">{summary?.completedMissions ?? 0}</p>
                               </div>
                               <div className="space-y-1">
                                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Families Reached</p>
-                                 <p className="text-xl font-black text-[#1A1A3D]">{metrics?.familiesReached ?? 0}</p>
+                                 <p className="text-lg md:text-xl font-black text-[#1A1A3D]">{metrics?.familiesReached ?? 0}</p>
                               </div>
                               <div className="space-y-1">
                                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Need Score Shift</p>
-                                 <p className="text-xl font-black text-[#1A1A3D]">-{metrics?.avgNeedReduction ?? 0}%</p>
+                                 <p className="text-lg md:text-xl font-black text-[#1A1A3D]">-{metrics?.avgNeedReduction ?? 0}%</p>
                               </div>
                            </div>
                         </div>
 
                         {/* Footer Section */}
-                        <div className="flex items-center justify-between pt-12 mt-12 border-t border-slate-50">
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-8 md:pt-12 mt-8 md:mt-12 border-t border-slate-50">
                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center text-green-500">
-                                 <CheckCircle2 className="w-5 h-5" />
+                              <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-green-50 flex items-center justify-center text-green-500">
+                                 <CheckCircle2 className="w-4 h-4 md:w-5 md:h-5" />
                               </div>
                               <div className="space-y-0.5">
                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">TRUST FABRIC SCORE</p>
-                                 <p className="text-lg font-black text-[#1A1A3D]">{trustScore}</p>
+                                 <p className="text-base md:text-lg font-black text-[#1A1A3D]">{trustScore}</p>
                               </div>
                            </div>
-                           <div className="text-right space-y-0.5">
+                           <div className="text-center sm:text-right space-y-0.5">
                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">NGO VERIFICATION</p>
                               <p className="text-sm font-black text-indigo-600">{orgName} Verified</p>
                            </div>
@@ -429,7 +430,7 @@ const LivingConstitution = () => {
                      </div>
                   </div>
 
-                  <div className="flex justify-between items-center pt-4">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-4">
                      <button className="text-xs font-bold text-slate-400 hover:text-slate-600 flex items-center gap-1.5 transition-colors">
                         Edit manually
                      </button>
@@ -441,20 +442,20 @@ const LivingConstitution = () => {
             </div>
 
             {/* Right Column - Controls + History */}
-            <div className="lg:col-span-2 space-y-8">
+            <div className="lg:col-span-2 space-y-6 md:space-y-8">
                {/* Send to Government Card */}
-               <div className="bg-white rounded-[2rem] p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-8">
+               <div className="bg-white rounded-2xl md:rounded-[2rem] p-6 md:p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-6 md:space-y-8">
                   <div className="flex items-center gap-3 mb-2">
                      <div className="w-8 h-8 bg-indigo-50 rounded-lg flex items-center justify-center text-[#4F46E5]">
                         <Send className="w-4 h-4" />
                      </div>
-                     <h3 className="text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest">Send to Government</h3>
+                     <h3 className="text-[12px] md:text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest">Send to Government</h3>
                   </div>
 
-                  <div className="space-y-6">
+                  <div className="space-y-4 md:space-y-6">
                      <div className="space-y-3">
                         <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">RECIPIENT</label>
-                        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 group">
+                        <div className="flex items-center justify-between p-3 md:p-4 bg-slate-50 rounded-xl border border-slate-100 group">
                            <div className="flex items-center gap-3">
                               <Building2 className="w-4 h-4 text-slate-400" />
                               <span className="text-sm font-bold text-[#1A1A3D]">District Collector Office (Bengaluru)</span>
@@ -485,7 +486,7 @@ const LivingConstitution = () => {
                      </div>
 
                      <Button
-                       className="w-full bg-[#4F46E5] hover:bg-[#4338CA] text-white font-black py-7 rounded-2xl shadow-xl shadow-indigo-100 flex items-center justify-center gap-3 group transition-all active:scale-[0.98]"
+                       className="w-full bg-[#4F46E5] hover:bg-[#4338CA] text-white font-black py-6 md:py-7 rounded-2xl shadow-xl shadow-indigo-100 flex items-center justify-center gap-3 group transition-all active:scale-[0.98]"
                        disabled={sending || reportQuery.isFetching}
                        onClick={handleSendBrief}
                      >
@@ -495,9 +496,9 @@ const LivingConstitution = () => {
                </div>
 
                {/* Gemini Intelligence */}
-               <div className="bg-white rounded-[2rem] p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-6 bg-gradient-to-br from-white to-indigo-50/30">
+               <div className="bg-white rounded-2xl md:rounded-[2rem] p-6 md:p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-4 md:space-y-6 bg-gradient-to-br from-white to-indigo-50/30">
                   <div className="flex items-center justify-between">
-                     <h3 className="text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest flex items-center gap-2">Gemini Intelligence <Sparkles className="w-4 h-4 text-indigo-400" /></h3>
+                     <h3 className="text-[12px] md:text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest flex items-center gap-2">Gemini Intelligence <Sparkles className="w-4 h-4 text-indigo-400" /></h3>
                   </div>
                   <div className="space-y-4">
                      {intelligenceItems.length ? (
@@ -514,12 +515,12 @@ const LivingConstitution = () => {
                </div>
 
                {/* Outcome History */}
-               <div className="bg-white rounded-[2rem] p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-6">
-                  <h3 className="text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest">Outcome History</h3>
+               <div className="bg-white rounded-2xl md:rounded-[2rem] p-6 md:p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-4 md:space-y-6">
+                  <h3 className="text-[12px] md:text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest">Outcome History</h3>
                   <div className="space-y-4">
                      {outcomeHistory.length ? (
                        outcomeHistory.map((outcome, index) => (
-                         <div key={`${outcome}-${index}`} className="p-5 bg-green-50/50 rounded-2xl border border-green-100 border-l-[3px] border-l-green-500 space-y-2">
+                         <div key={`${outcome}-${index}`} className="p-4 md:p-5 bg-green-50/50 rounded-2xl border border-green-100 border-l-[3px] border-l-green-500 space-y-2">
                             <div className="flex items-center gap-2">
                                <TrendingDown className="w-3.5 h-3.5 text-green-600" />
                                <span className="text-[9px] font-black text-green-700 uppercase tracking-widest">RECENT OUTCOME</span>
@@ -534,28 +535,28 @@ const LivingConstitution = () => {
                </div>
 
                {/* SDG Alignment */}
-               <div className="bg-white rounded-[2rem] p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-6">
-                  <h3 className="text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest">Global Alignment</h3>
-                           <div className="flex flex-wrap gap-2">
-                               {sdgBadges.length ? (
-                                  sdgBadges.map((badge) => (
-                                     <Badge
-                                        key={badge.label}
-                                        className={`${badge.color} text-white border-none font-bold text-[9px] uppercase px-3 py-1`}
-                                     >
-                                        {badge.label}
-                                     </Badge>
-                                  ))
-                               ) : (
-                                  <p className="text-[11px] font-bold text-slate-400">No SDG alignment generated yet.</p>
-                               )}
-                           </div>
+               <div className="bg-white rounded-2xl md:rounded-[2rem] p-6 md:p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-4 md:space-y-6">
+                  <h3 className="text-[12px] md:text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest">Global Alignment</h3>
+                  <div className="flex flex-wrap gap-2">
+                      {sdgBadges.length ? (
+                         sdgBadges.map((badge) => (
+                            <Badge
+                               key={badge.label}
+                               className={`${badge.color} text-white border-none font-bold text-[9px] uppercase px-2 md:px-3 py-1`}
+                            >
+                               {badge.label}
+                            </Badge>
+                         ))
+                      ) : (
+                         <p className="text-[11px] font-bold text-slate-400">No SDG alignment generated yet.</p>
+                      )}
+                  </div>
                </div>
 
                {/* Past Briefs List */}
-               <div className="bg-white rounded-[2rem] p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-6">
+               <div className="bg-white rounded-2xl md:rounded-[2rem] p-6 md:p-8 shadow-[0_4px_24px_rgba(79,70,229,0.06)] border border-slate-100 space-y-4 md:space-y-6">
                   <div className="flex items-center justify-between">
-                     <h3 className="text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest">Past Briefs</h3>
+                     <h3 className="text-[12px] md:text-[13px] font-black text-[#1A1A3D] uppercase tracking-widest">Past Briefs</h3>
                      <button className="text-[10px] font-black text-[#4F46E5] uppercase tracking-widest hover:underline">View All</button>
                   </div>
                   <div className="space-y-4">

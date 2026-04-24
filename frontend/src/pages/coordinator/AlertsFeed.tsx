@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import {
   createMissionFromDriftAlert,
   dismissCoordinatorDriftAlert,
@@ -16,6 +17,7 @@ import {
   getCoordinatorDriftAlerts,
   type CoordinatorDriftAlert,
 } from "@/lib/coordinator-api";
+import { isQueuedResult } from "@/lib/offline-outbox";
 
 const relativeTime = (value?: string | null) => {
   if (!value) return "just now";
@@ -41,6 +43,7 @@ export default function AlertsFeed() {
   const token = localStorage.getItem("nexus_access_token");
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
   const { toast } = useToast();
+  const isOnline = useOnlineStatus();
 
   const [filter, setFilter] = useState("All");
   const [expandedResolved, setExpandedResolved] = useState<string[]>([]);
@@ -62,6 +65,13 @@ export default function AlertsFeed() {
   const createMissionMutation = useMutation({
     mutationFn: (alertId: string) => createMissionFromDriftAlert(alertId),
     onSuccess: (payload) => {
+      if (isQueuedResult(payload)) {
+        toast({
+          title: "Mission queued",
+          description: "Will sync when connectivity returns.",
+        });
+        return;
+      }
       alertsQuery.refetch();
       toast({
         title: payload.created ? "Mission created" : "Mission already linked",
@@ -77,7 +87,11 @@ export default function AlertsFeed() {
 
   const dismissMutation = useMutation({
     mutationFn: ({ alertId, reason }: { alertId: string; reason: string }) => dismissCoordinatorDriftAlert(alertId, reason),
-    onSuccess: () => {
+    onSuccess: (payload) => {
+      if (isQueuedResult(payload)) {
+        toast({ title: "Dismissal queued", description: "Will sync when connectivity returns." });
+        return;
+      }
       alertsQuery.refetch();
       toast({ title: "Alert dismissed", description: "Dismiss reason saved." });
     },
@@ -87,7 +101,7 @@ export default function AlertsFeed() {
   });
 
   useEffect(() => {
-    if (!token) {
+    if (!token || !isOnline) {
       return;
     }
 
@@ -112,7 +126,7 @@ export default function AlertsFeed() {
     return () => {
       source.close();
     };
-  }, [alertsQuery, apiBaseUrl, token]);
+  }, [alertsQuery, apiBaseUrl, token, isOnline]);
 
   const alerts = alertsQuery.data?.alerts ?? [];
   const counts = alertsQuery.data?.counts;
@@ -179,18 +193,18 @@ export default function AlertsFeed() {
         </div>
 
         {/* Main content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="flex items-center justify-between mb-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 md:mb-6 gap-4">
             <div>
               <h1 className="text-xl font-bold text-foreground">Drift Alerts</h1>
               <p className="text-sm text-muted-foreground">
                 {counts ? `${counts.active + counts.actioned} active this week · ${counts.critical} critical` : "Live trend and prediction feed"}
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex gap-1">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <div className="flex gap-1 overflow-x-auto">
                 {["All", "Critical", "High", "Watch", "Actioned", "Resolved"].map((f) => (
-                  <button key={f} onClick={() => setFilter(f)} className={cn("rounded-pill px-3 py-1 text-xs font-medium transition-all", filter === f ? "bg-primary text-white" : "text-muted-foreground hover:bg-muted")}>{f}</button>
+                  <button key={f} onClick={() => setFilter(f)} className={cn("rounded-pill px-3 py-1 text-xs font-medium transition-all whitespace-nowrap", filter === f ? "bg-primary text-white" : "text-muted-foreground hover:bg-muted")}>{f}</button>
                 ))}
               </div>
               <button className="text-xs text-primary font-medium hover:underline" onClick={() => alertsQuery.refetch()}>Refresh</button>
@@ -210,7 +224,7 @@ export default function AlertsFeed() {
                 const createLabel = alert.severity === "watch" ? "Schedule Follow-up Survey →" : "Create Mission →";
 
                 return (
-                <div key={alert.id} className={cn("rounded-card border border-l-4 bg-card p-5 shadow-card transition-opacity", borderColor[zoneRisk], isResolvedLike && "opacity-80")}>
+                <div key={alert.id} className={cn("rounded-card border border-l-4 bg-card p-4 md:p-5 shadow-card transition-opacity", borderColor[zoneRisk], isResolvedLike && "opacity-80")}>
                   {showCollapsed ? (
                     <button onClick={() => setExpandedResolved((prev) => [...prev, alert.id])} className="flex w-full items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -221,7 +235,7 @@ export default function AlertsFeed() {
                     </button>
                   ) : (
                     <>
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
                           <span className="text-sm font-semibold text-foreground">{alert.title}</span>
                           <ZoneRiskBadge level={zoneRisk} />
@@ -251,9 +265,9 @@ export default function AlertsFeed() {
                       ) : null}
 
                       {!isResolvedLike && (
-                        <div className="mt-4 flex items-center gap-3">
+                        <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
                           <span className="text-xs text-muted-foreground">Detected {relativeTime(alert.triggeredAt || alert.createdAt)}</span>
-                          <div className="ml-auto flex gap-2">
+                          <div className="flex flex-wrap gap-2 sm:ml-auto">
                             <Button size="sm" variant="gradient" onClick={() => createMissionMutation.mutate(alert.id)} disabled={createMissionMutation.isPending}>
                               {createLabel}
                             </Button>

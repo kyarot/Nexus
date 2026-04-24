@@ -9,6 +9,9 @@ import {
   type NotificationItem,
 } from "@/lib/ops-api";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
+import { isQueuedResult } from "@/lib/offline-outbox";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 
 type NotificationFilter = "all" | "unread" | "missions" | "alerts";
 
@@ -46,11 +49,13 @@ function relativeTime(timestamp?: string | null): string {
 }
 
 export function NotificationPanel() {
+  const { toast } = useToast();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<NotificationFilter>("all");
   const [actingId, setActingId] = useState<string | null>(null);
+  const isOnline = useOnlineStatus();
 
   const role = useMemo(() => {
     try {
@@ -83,6 +88,12 @@ export function NotificationPanel() {
 
     void load();
 
+    if (!isOnline) {
+      return () => {
+        mounted = false;
+      };
+    }
+
     const streamUrl = getNotificationStreamUrl();
     const source = new EventSource(streamUrl);
     source.onmessage = () => {
@@ -96,7 +107,7 @@ export function NotificationPanel() {
       mounted = false;
       source.close();
     };
-  }, []);
+  }, [isOnline]);
 
   const markOne = async (item: NotificationItem) => {
     if (item.read) {
@@ -114,8 +125,12 @@ export function NotificationPanel() {
   const decideRequest = async (requestId: string, decision: "approved" | "rejected") => {
     setActingId(requestId);
     try {
-      await decideCoordinatorResourceRequest(requestId, decision);
-      await refresh();
+      const result = await decideCoordinatorResourceRequest(requestId, decision);
+      if (isQueuedResult(result)) {
+        toast({ title: "Decision queued", description: "Will sync when connectivity returns." });
+      } else {
+        await refresh();
+      }
     } finally {
       setActingId(null);
     }

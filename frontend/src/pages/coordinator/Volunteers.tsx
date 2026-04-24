@@ -236,8 +236,8 @@ export default function Volunteers() {
         </div>
 
         {/* Main content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="flex items-center justify-between mb-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 md:mb-6 gap-4">
             <div>
               <h1 className="text-xl font-bold text-foreground">Volunteers</h1>
               <p className="text-sm text-muted-foreground">
@@ -250,11 +250,12 @@ export default function Volunteers() {
                 <button onClick={() => setView("list")} className={cn("p-2", view === "list" ? "bg-primary text-white" : "text-muted-foreground")}><List className="h-4 w-4" /></button>
               </div>
               <Button variant="gradient" size="sm" onClick={() => setIsAddVolunteerOpen(true)}>Add Volunteer</Button>
+              <Button variant="gradient" size="sm" className="hidden sm:flex">Add Volunteer</Button>
             </div>
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4 md:mb-6">
             <StatMetricCard label="Total Volunteers" value={String(volunteersQuery.data?.summary.totalVolunteers ?? 0)} accent="indigo" />
             <StatMetricCard label="Available Now" value={String(volunteersQuery.data?.summary.availableNow ?? 0)} accent="green" />
             <StatMetricCard label="On Mission" value={String(volunteersQuery.data?.summary.onMission ?? 0)} accent="amber" />
@@ -268,7 +269,7 @@ export default function Volunteers() {
           </div>
 
           {/* Grid */}
-          <div className={cn(view === "grid" ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6" : "space-y-4")}>
+          <div className={cn(view === "grid" ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6" : "space-y-4")}>
             {volunteers.map(v => (
               view === "grid" ? (
                 <VolunteerAvatarCard key={v.id} {...v} onViewProfile={() => setSelectedVolunteer(v.id)} className="h-full flex flex-col" />
@@ -284,8 +285,8 @@ export default function Volunteers() {
 
         {/* Profile slide-over */}
         {selectedVolunteerForPanel && (
-          <div className="w-[420px] shrink-0 border-l bg-card overflow-y-auto">
-            <div className="p-6">
+          <div className="fixed inset-0 lg:relative lg:w-[420px] lg:shrink-0 lg:border-l bg-card overflow-y-auto z-50 lg:z-auto">
+            <div className="p-4 md:p-6">
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <div className={cn("flex h-14 w-14 items-center justify-center rounded-full text-lg font-bold text-white", selectedVolunteerForPanel.color)}>{selectedVolunteerForPanel.initials}</div>
