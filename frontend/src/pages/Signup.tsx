@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Building2, ClipboardList, Heart, Eye, EyeOff, Hexagon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { detectFaceDescriptor, loadFaceModels, startCamera, stopCamera } from "@/lib/face-auth";
 
 const roles = [
   { id: "coordinator", label: "NGO Coordinator", icon: Building2, desc: "Manage teams and operations" },
@@ -19,6 +20,7 @@ const dataChannels = ["paper", "voice", "sms", "digital"];
 export default function Signup() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
+  const [faceSetupMode, setFaceSetupMode] = useState<"prompt" | "capture">("prompt");
   const [selectedRole, setSelectedRole] = useState("coordinator");
 
   const [name, setName] = useState("");
@@ -46,8 +48,16 @@ export default function Signup() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [faceSetupStatus, setFaceSetupStatus] = useState("You can enable face login now or skip this step.");
+  const [faceSetupError, setFaceSetupError] = useState("");
+  const [isFaceSubmitting, setIsFaceSubmitting] = useState(false);
+  const [faceModelsReady, setFaceModelsReady] = useState(false);
+  const [postSignupToken, setPostSignupToken] = useState("");
+  const [postSignupRedirectPath, setPostSignupRedirectPath] = useState("/dashboard");
   const [ngoOptions, setNgoOptions] = useState<Array<{ id: string; name: string; city?: string | null }>>([]);
   const [loadingNgos, setLoadingNgos] = useState(false);
+  const faceVideoRef = useRef<HTMLVideoElement | null>(null);
+  const faceCameraStreamRef = useRef<MediaStream | null>(null);
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
   const zones = zoneInput.split(",").map((v) => v.trim()).filter(Boolean);
@@ -83,6 +93,158 @@ export default function Signup() {
 
     void loadNgos();
   }, [apiBaseUrl]);
+
+  useEffect(() => {
+    if (step !== 3 || faceSetupMode !== "capture") {
+      return;
+    }
+
+    let active = true;
+    const prepareFaceModels = async () => {
+      try {
+        await loadFaceModels("/models");
+        if (!active) {
+          return;
+        }
+        setFaceModelsReady(true);
+        setFaceSetupStatus("Camera ready. Keep your face centered and capture.");
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        console.error("[FaceAuth] Signup model load failed", error);
+        setFaceSetupError("Face setup is unavailable right now. You can skip and continue.");
+      }
+    };
+
+    void prepareFaceModels();
+
+    return () => {
+      active = false;
+    };
+  }, [faceSetupMode, step]);
+
+  useEffect(() => {
+    if (step !== 3 || faceSetupMode !== "capture" || !faceModelsReady) {
+      stopCamera(faceCameraStreamRef.current);
+      faceCameraStreamRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    const openCamera = async () => {
+      const video = faceVideoRef.current;
+      if (!video) {
+        return;
+      }
+
+      try {
+        const stream = await startCamera(video);
+        if (cancelled) {
+          stopCamera(stream);
+          return;
+        }
+        faceCameraStreamRef.current = stream;
+      } catch (error) {
+        console.error("[FaceAuth] Signup camera failed", error);
+        if (!cancelled) {
+          setFaceSetupError("Camera permission is required for face login setup.");
+        }
+      }
+    };
+
+    void openCamera();
+
+    return () => {
+      cancelled = true;
+      stopCamera(faceCameraStreamRef.current);
+      faceCameraStreamRef.current = null;
+    };
+  }, [faceModelsReady, faceSetupMode, step]);
+
+  const updateCachedUserFaceState = (faceEnrolled: boolean) => {
+    const raw = localStorage.getItem("nexus_user");
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      localStorage.setItem("nexus_user", JSON.stringify({ ...parsed, faceEnrolled }));
+      window.dispatchEvent(new Event("userUpdate"));
+    } catch {
+      // Keep flow resilient even if local storage cache is malformed.
+    }
+  };
+
+  const saveFaceEnrollment = async (enable: boolean, descriptor?: number[]) => {
+    const token = postSignupToken || localStorage.getItem("nexus_access_token") || "";
+    if (!token) {
+      throw new Error("Missing session token for face setup");
+    }
+
+    const response = await fetch(`${apiBaseUrl}/auth/face/enroll`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify(enable ? { enable: true, descriptor } : { enable: false }),
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error((payload as { detail?: string })?.detail || "Could not update face login setting");
+    }
+
+    updateCachedUserFaceState(enable);
+  };
+
+  const completePostSignup = () => {
+    navigate(postSignupRedirectPath || "/dashboard");
+  };
+
+  const handleSkipFaceSetup = async () => {
+    setFaceSetupError("");
+    setIsFaceSubmitting(true);
+    try {
+      await saveFaceEnrollment(false);
+      completePostSignup();
+    } catch (error) {
+      console.error("[FaceAuth] Skip enrollment failed", error);
+      setFaceSetupError(error instanceof Error ? error.message : "Could not skip face setup");
+    } finally {
+      setIsFaceSubmitting(false);
+    }
+  };
+
+  const handleCaptureAndEnroll = async () => {
+    setFaceSetupError("");
+    setIsFaceSubmitting(true);
+
+    try {
+      const video = faceVideoRef.current;
+      if (!video) {
+        throw new Error("Camera not ready yet. Please try again.");
+      }
+
+      setFaceSetupStatus("Capturing face descriptor...");
+      const descriptor = await detectFaceDescriptor(video);
+      if (!descriptor) {
+        throw new Error("No clear face detected. Please align your face with the guide.");
+      }
+
+      await saveFaceEnrollment(true, descriptor);
+      setFaceSetupStatus("Face login enabled successfully.");
+      completePostSignup();
+    } catch (error) {
+      console.error("[FaceAuth] Enrollment failed", error);
+      setFaceSetupError(error instanceof Error ? error.message : "Could not enable face login");
+      setFaceSetupStatus("Face setup failed. You can retry or skip.");
+    } finally {
+      setIsFaceSubmitting(false);
+    }
+  };
 
   const handleSignup = async () => {
     setErrorMessage("");
@@ -145,7 +307,12 @@ export default function Signup() {
 
       localStorage.setItem("nexus_access_token", data.accessToken);
       localStorage.setItem("nexus_user", JSON.stringify(data.user));
-      navigate(data.redirectPath || "/dashboard");
+      setPostSignupToken(data.accessToken);
+      setPostSignupRedirectPath(data.redirectPath || "/dashboard");
+      setFaceSetupMode("prompt");
+      setFaceSetupStatus("Would you like to enable face login now?");
+      setFaceSetupError("");
+      setStep(3);
     } catch (error) {
       console.error("[Auth] Signup failed", error);
       setErrorMessage(error instanceof Error ? error.message : "Signup failed");
@@ -211,7 +378,7 @@ export default function Signup() {
 
             <Button variant="gradient" className="w-full" size="lg" onClick={() => setStep(2)}>Continue →</Button>
           </>
-        ) : (
+        ) : step === 2 ? (
           <>
             <h2 className="text-xl font-bold text-foreground">
               {selectedRole === "coordinator" ? "Coordinator Setup" : selectedRole === "fieldworker" ? "Field Worker Setup" : "Volunteer Setup"}
@@ -340,6 +507,63 @@ export default function Signup() {
                 {isSubmitting ? "Creating account..." : "Create account →"}
               </Button>
             </div>
+          </>
+        ) : (
+          <>
+            <h2 className="text-xl font-bold text-foreground">Enable Face Login (Optional)</h2>
+            <p className="text-sm text-muted-foreground">
+              Face login keeps the same account and routing flow, but signs in faster. Only a 128-number descriptor is stored.
+            </p>
+
+            {faceSetupMode === "prompt" ? (
+              <div className="space-y-4 rounded-card border border-border bg-background p-5">
+                <p className="text-sm text-foreground">Would you like to enable face login now?</p>
+                <div className="flex gap-3">
+                  <Button
+                    variant="gradient"
+                    className="flex-1"
+                    onClick={() => {
+                      setFaceSetupMode("capture");
+                      setFaceSetupError("");
+                      setFaceSetupStatus("Opening camera for face setup...");
+                    }}
+                    disabled={isFaceSubmitting}
+                  >
+                    Enable Face Login
+                  </Button>
+                  <Button variant="outline" className="flex-1" onClick={handleSkipFaceSetup} disabled={isFaceSubmitting}>
+                    {isFaceSubmitting ? "Skipping..." : "Skip for now"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4 rounded-card border border-border bg-background p-5">
+                <div className="relative aspect-video overflow-hidden rounded-xl border border-border bg-[#0b1020]">
+                  <video
+                    ref={faceVideoRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className="h-full w-full object-cover"
+                  />
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <div className="h-[190px] w-[140px] rounded-[999px] border-2 border-cyan-200/80 animate-pulse" />
+                  </div>
+                  <div className="pointer-events-none absolute inset-x-10 top-1/2 h-px -translate-y-1/2 bg-cyan-200/70 animate-pulse" />
+                </div>
+
+                <p className="text-xs text-foreground">{faceSetupStatus}</p>
+                {faceSetupError ? <p className="text-xs text-destructive">{faceSetupError}</p> : null}
+
+                <div className="flex gap-3">
+                  <Button variant="ghost" onClick={() => setFaceSetupMode("prompt")} disabled={isFaceSubmitting}>← Back</Button>
+                  <Button variant="gradient" className="flex-1" onClick={handleCaptureAndEnroll} disabled={isFaceSubmitting || !faceModelsReady}>
+                    {isFaceSubmitting ? "Enabling..." : "Capture & Enable"}
+                  </Button>
+                  <Button variant="outline" onClick={handleSkipFaceSetup} disabled={isFaceSubmitting}>Skip</Button>
+                </div>
+              </div>
+            )}
           </>
         )}
 

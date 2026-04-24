@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from typing import Any
 from uuid import uuid4
@@ -52,6 +53,20 @@ class SignInRequest(BaseModel):
     email: str
     password: str
     role: UserRole | None = None
+
+
+class FaceCandidatesRequest(BaseModel):
+    role: UserRole
+
+
+class FaceSigninRequest(BaseModel):
+    user_id: str = Field(min_length=1)
+    role: UserRole | None = None
+
+
+class FaceEnrollRequest(BaseModel):
+    enable: bool = True
+    descriptor: list[float] | None = None
 
 
 class NGOCreateRequest(BaseModel):
@@ -351,6 +366,33 @@ def _route_for_role(role: UserRole) -> str:
     return "/volunteer"
 
 
+def _sanitize_face_descriptor(values: list[float] | None) -> list[float]:
+    if not isinstance(values, list) or len(values) != 128:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="descriptor must contain exactly 128 numbers",
+        )
+
+    cleaned: list[float] = []
+    for value in values:
+        try:
+            parsed = float(value)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="descriptor contains invalid values",
+            ) from exc
+
+        if not math.isfinite(parsed):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="descriptor contains non-finite values",
+            )
+        cleaned.append(parsed)
+
+    return cleaned
+
+
 @router.get("/signup/ngos", response_model=list[SignupNgoOption])
 async def list_signup_ngos() -> list[SignupNgoOption]:
     ngo_docs = db.collection("ngos").stream()
@@ -592,6 +634,91 @@ async def signin(payload: SignInRequest) -> dict[str, Any]:
 
     token = create_access_token(user_snapshot.id)
     logger.info("Signin successful uid=%s role=%s", user_snapshot.id, user.role.value)
+    return {
+        "accessToken": token,
+        "tokenType": "bearer",
+        "redirectPath": _route_for_role(user.role),
+        "user": user,
+    }
+
+
+@router.post("/face/candidates")
+async def face_candidates(payload: FaceCandidatesRequest) -> dict[str, Any]:
+    # Keep candidate response minimal to avoid exposing unnecessary user data.
+    snapshots = list(
+        db.collection("users")
+        .where(filter=FieldFilter("role", "==", payload.role.value))
+        .stream()
+    )
+
+    candidates: list[dict[str, Any]] = []
+    for snapshot in snapshots:
+        data = snapshot.to_dict() or {}
+        if not bool(data.get("faceEnrolled")):
+            continue
+
+        descriptor = data.get("faceDescriptor")
+        if not isinstance(descriptor, list) or len(descriptor) != 128:
+            continue
+
+        candidates.append(
+            {
+                "id": snapshot.id,
+                "faceDescriptor": descriptor,
+            }
+        )
+
+    return {"candidates": candidates}
+
+
+@router.post("/face/enroll")
+async def face_enroll(
+    payload: FaceEnrollRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    uid = _get_uid_from_user(current_user)
+
+    update_data: dict[str, Any]
+    if payload.enable:
+        descriptor = _sanitize_face_descriptor(payload.descriptor)
+        update_data = {
+            "faceEnrolled": True,
+            "faceDescriptor": descriptor,
+            "faceUpdatedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+    else:
+        update_data = {
+            "faceEnrolled": False,
+            "faceDescriptor": firestore.DELETE_FIELD,
+            "faceUpdatedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+
+    db.collection("users").document(uid).update(update_data)
+    return {"updated": True, "faceEnrolled": bool(payload.enable)}
+
+
+@router.post("/face/signin")
+async def face_signin(payload: FaceSigninRequest) -> dict[str, Any]:
+    user_snapshot = db.collection("users").document(payload.user_id).get()
+    if not user_snapshot.exists:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Face sign-in failed")
+
+    user_data = user_snapshot.to_dict() or {}
+    if not bool(user_data.get("faceEnrolled")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Face login is not enabled")
+
+    user_data["id"] = user_snapshot.id
+    user = UserDocument.model_validate(user_data)
+
+    if payload.role and payload.role != user.role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Account is registered as {user.role.value}",
+        )
+
+    token = create_access_token(user_snapshot.id)
     return {
         "accessToken": token,
         "tokenType": "bearer",
