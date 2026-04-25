@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "@/lib/config";
 import React, { useEffect, useState } from "react";
 import {
    AlertTriangle,
@@ -144,7 +145,7 @@ export const MyReports = ({ onNewReport }: { onNewReport: () => void }) => {
       processing: 0,
    });
 
-   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+   const apiBaseUrl = API_BASE_URL;
    const token = localStorage.getItem("nexus_access_token");
 
    const fetchReports = async () => {

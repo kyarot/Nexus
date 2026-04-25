@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "@/lib/config";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
@@ -41,7 +42,7 @@ const toZoneRiskLevel = (alert: CoordinatorDriftAlert): "critical" | "high" | "m
 
 export default function AlertsFeed() {
   const token = localStorage.getItem("nexus_access_token");
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const apiBaseUrl = API_BASE_URL;
   const { toast } = useToast();
   const isOnline = useOnlineStatus();
 

@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "@/lib/config";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Hand, MicOff, Sparkles, Volume2, X } from "lucide-react";
@@ -36,7 +37,8 @@ type CopilotActionConfirmResponse = {
   suggestions: string[];
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+// Use centralized API_BASE_URL from @/lib/config
+
 const DEFAULT_SUGGESTIONS: string[] = [];
 const VOICE_SILENCE_DELAY_MS = 2200;
 const VOICE_MIN_RECORD_MS = 500;
