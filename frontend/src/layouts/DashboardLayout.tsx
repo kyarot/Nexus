@@ -2,6 +2,7 @@ import { Outlet } from "react-router-dom";
 import { GlobalSidebar } from "@/components/nexus/GlobalSidebar";
 import { NexusCopilot } from "@/features/nexus-copilot";
 import { useSidebarStore } from "@/hooks/use-sidebar-store";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
@@ -11,13 +12,14 @@ interface DashboardLayoutProps {
 
 export function DashboardLayout({ role = "coordinator" }: DashboardLayoutProps) {
   const { isOpen } = useSidebarStore();
+  const isMobile = useIsMobile();
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <GlobalSidebar role={role} />
       <motion.main 
         initial={false}
-        animate={{ marginLeft: isOpen ? 64 : 0 }}
+        animate={{ marginLeft: isMobile ? 0 : isOpen ? 64 : 0 }}
         transition={{ type: "tween", duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
         className="flex-1 overflow-y-auto"
       >

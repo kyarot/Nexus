@@ -60,6 +60,7 @@ const toRelativeTime = (value?: string) => {
 };
 
 const titleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+const baseCardClass = "bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100";
 
 export default function Forecast() {
   const queryClient = useQueryClient();
@@ -247,7 +248,7 @@ export default function Forecast() {
 
   const summary = summaryQuery.data;
   const backtesting = backtestingQuery.data;
-  const zoneRows = zonesQuery.data?.zones || [];
+  const zoneRows = useMemo(() => zonesQuery.data?.zones ?? [], [zonesQuery.data?.zones]);
 
   const chartData = useMemo(() => {
     const points = summary?.mainChart.points?.length ? summary.mainChart.points : fallbackChart;
@@ -279,7 +280,7 @@ export default function Forecast() {
     ? summary.performance.trendBars
     : backtesting?.series?.map((item) => item.accuracy).slice(-5) || [40, 50, 60, 65, 70];
 
-  const riskRows = summary?.riskAssessmentRows || [];
+  const riskRows = useMemo(() => summary?.riskAssessmentRows ?? [], [summary?.riskAssessmentRows]);
   const riskRowsForDisplay = riskRows.length
     ? riskRows
     : zoneRows.map((zone) => ({
@@ -347,7 +348,7 @@ export default function Forecast() {
         {/* Top Grid: Main Chart & Performance Card */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main Forecast Chart */}
-          <div className="lg:col-span-2 bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 relative">
+          <div className={cn("lg:col-span-2 relative", baseCardClass)}>
             <div className="flex items-center justify-between mb-12">
               <h2 className="text-xl font-bold text-[#1A1A3D]">Predictive Intensity Map</h2>
               <div className="flex gap-6 text-xs font-bold uppercase tracking-widest">
@@ -440,9 +441,11 @@ export default function Forecast() {
                     {(zone.zone || "N").slice(0, 2).toUpperCase()}
                   </div>
                 ))}
-                <div className="h-10 w-10 rounded-full border-2 border-white bg-[#E0E7FF] text-[#5A57FF] text-xs font-bold flex items-center justify-center">
-                  +{Math.max(0, summary?.overview.totalZones ? summary.overview.totalZones - 3 : 0)}
-                </div>
+                {summary?.overview.totalZones && summary.overview.totalZones > 3 ? (
+                  <div className="h-10 w-10 rounded-full border-2 border-white bg-[#E0E7FF] text-[#5A57FF] text-xs font-bold flex items-center justify-center">
+                    +{summary.overview.totalZones - 3}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -488,7 +491,7 @@ export default function Forecast() {
         {/* Zone Forecasts: 3 Column Layout */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {displayedZones.map((z, i) => (
-            <div key={z.zoneId} className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-col">
+            <div key={z.zoneId} className={cn(baseCardClass, "flex flex-col")}>
               <div className="flex justify-between items-start mb-6">
                 <h3 className="text-xl font-bold text-[#1A1A3D]">{z.zone}</h3>
                 <span className={cn("text-[10px] font-black px-3 py-1 rounded-full", z.badgeTone)}>{z.peakLabel}</span>
@@ -520,7 +523,7 @@ export default function Forecast() {
             </div>
           ))}
           {!displayedZones.length && (
-            <div className="md:col-span-3 bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 text-center text-slate-500 font-medium">
+            <div className={cn("md:col-span-3 text-center text-slate-500 font-medium", baseCardClass)}>
               No forecast zones available yet.
             </div>
           )}
@@ -529,7 +532,7 @@ export default function Forecast() {
         {/* Bottom Grid: Risk Assessment & Alert Config */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-12">
           {/* Risk Assessment Table */}
-          <div className="lg:col-span-2 bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100">
+          <div className={cn("lg:col-span-2", baseCardClass)}>
             <div className="flex items-center justify-between mb-8">
               <div>
                 <h2 className="text-xl font-bold text-[#1A1A3D]">Generational Risk Assessment</h2>
@@ -653,7 +656,7 @@ export default function Forecast() {
           </div>
 
           {/* Alert Configuration Card */}
-          <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-col">
+          <div className={cn(baseCardClass, "flex flex-col")}>
             <div className="flex items-center gap-4 mb-10">
               <div className="p-3 bg-amber-50 rounded-2xl">
                 <Bell className="w-6 h-6 text-amber-500" />

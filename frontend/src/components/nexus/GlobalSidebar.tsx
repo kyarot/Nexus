@@ -45,7 +45,6 @@ const coordinatorNav: NavSection[] = [
 
   { items: [
     { id: "org", label: "Organisation", icon: Building2, path: "/dashboard/organisation" },
-    { id: "profile", label: "My Profile", icon: UserCog, path: "/dashboard/profile" },
   ]},
 ];
 
@@ -60,7 +59,6 @@ const fieldworkerNav = [
     { id: "active", label: "Active Mission", icon: Zap, path: "/fieldworker/active", badge: "!", badgeVariant: "amber" },
   ]},
   { items: [
-    { id: "profile", label: "My Profile", icon: User, path: "/fieldworker/profile" },
   ]},
 ];
 
@@ -72,7 +70,6 @@ const volunteerNav = [
   ]},
   { items: [
     { id: "vol-impact", label: "My Impact", icon: Star, path: "/volunteer/impact" },
-    { id: "vol-profile", label: "My Profile", icon: User, path: "/volunteer/profile" },
   ]},
 ];
 
@@ -190,7 +187,7 @@ export function GlobalSidebar({
   return (
     <>
       <div 
-        className="fixed left-0 top-0 bottom-0 w-[20px] z-[51]"
+        className="hidden lg:block fixed left-0 top-0 bottom-0 w-[20px] z-[51]"
         onMouseEnter={handleMouseEnter}
       />
 
@@ -200,7 +197,7 @@ export function GlobalSidebar({
         initial={{ x: -64 }}
         animate={{ x: isOpen ? 0 : -64 }}
         transition={{ type: "tween", duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
-        className="fixed left-0 top-0 bottom-0 w-16 bg-gradient-to-b from-[#1E1B4B] to-[#16133A] border-r border-white/10 z-50 flex flex-col py-5 scrollbar-thin scrollbar-thumb-[#4F46E5]/50 overflow-y-auto"
+        className="hidden lg:flex fixed left-0 top-0 bottom-0 w-16 bg-gradient-to-b from-[#1E1B4B] to-[#16133A] border-r border-white/10 z-50 flex-col py-5 scrollbar-thin scrollbar-thumb-[#4F46E5]/50 overflow-y-auto"
       >
         <div className="flex justify-center mb-3">
           <Tooltip delayDuration={0}>
@@ -239,7 +236,9 @@ export function GlobalSidebar({
                     navigate("/volunteer/profile");
                     return;
                   }
-                  navigate("/dashboard/profile");
+                  if (role === "coordinator") {
+                    navigate("/dashboard/profile");
+                  }
                 }}
               >
                 <div className={cn(
@@ -265,7 +264,7 @@ export function GlobalSidebar({
           </Tooltip>
         </div>
 
-        <div className="flex-1 space-y-3 px-3">
+        <div className={cn(role === "fieldworker" ? "space-y-3 px-3" : "flex-1 space-y-3 px-3")}>
           {sections.map((section, sIdx) => (
             <div key={sIdx} className="space-y-1">
               {section.items.map((item) => {
@@ -304,7 +303,7 @@ export function GlobalSidebar({
           ))}
         </div>
 
-        <div className="mt-auto px-3 border-t border-white/10 pt-4 space-y-2">
+        <div className={cn(role === "fieldworker" ? "mt-4 px-3 border-t border-white/10 pt-4 space-y-2" : "mt-auto px-3 border-t border-white/10 pt-4 space-y-2")}>
           {role === "fieldworker" && (
             <NavIconButton 
               item={{ id: "sync", label: "All synced ✓", icon: CloudUpload, path: "#", badgeVariant: "indigo" }} 
@@ -324,38 +323,81 @@ export function GlobalSidebar({
         </div>
       </motion.aside>
 
-      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-[#1E1B4B] border-t border-white/10 flex lg:hidden items-center justify-around z-50 px-2 shadow-2xl">
-        <MobileTabItem 
-          icon={LayoutDashboard} label="Home" path={role === "coordinator" ? "/dashboard" : "/fieldworker"} 
-          active={role === "fieldworker" && activeTab ? activeTab === "Dashboard" : undefined}
-          onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Dashboard") : undefined}
-        />
-        <MobileTabItem 
-          icon={Target} label="Missions" path={role === "coordinator" ? "/dashboard/missions" : "/fieldworker/active"} 
-          active={role === "fieldworker" && activeTab ? activeTab === "Active" : undefined}
-          onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Active") : undefined}
-        />
-        <MobileTabItem 
-          icon={Sparkles} label="Nexus" path={role === "coordinator" ? "/dashboard/insights" : "/fieldworker/scan"} 
-          active={role === "fieldworker" && activeTab ? activeTab === "Scan" : undefined}
-          onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Scan") : undefined}
-        />
-        <MobileTabItem 
-          icon={BarChart3} label="Impact" path="/fieldworker/reports" 
-          active={role === "fieldworker" && activeTab ? activeTab === "Reports" : undefined}
-          onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Reports") : undefined}
-        />
-        <MobileTabItem 
-          icon={UserCog} label="Profile" path="/fieldworker/profile" 
-          active={role === "fieldworker" && activeTab ? activeTab === "Profile" : undefined}
-          onClick={() => role === "fieldworker" && onTabChange ? onTabChange("Profile") : undefined}
-        />
-      </nav>
+      {role === "fieldworker" ? (
+        <nav className="fixed bottom-0 left-0 right-0 bg-[#1E1B4B] border-t border-white/10 grid grid-cols-3 gap-y-2 z-50 px-2 py-2 shadow-2xl lg:hidden">
+          <MobileTabItem
+            icon={LayoutDashboard}
+            label="Home"
+            path="/fieldworker"
+            active={activeTab ? activeTab === "Dashboard" : undefined}
+            onClick={() => (onTabChange ? onTabChange("Dashboard") : undefined)}
+            compact
+          />
+          <MobileTabItem
+            icon={Camera}
+            label="Scan"
+            path="/fieldworker/scan"
+            active={activeTab ? activeTab === "Scan" : undefined}
+            onClick={() => (onTabChange ? onTabChange("Scan") : undefined)}
+            compact
+          />
+          <MobileTabItem
+            icon={Mic}
+            label="Voice"
+            path="/fieldworker/voice"
+            active={activeTab ? activeTab === "Voice" : undefined}
+            onClick={() => (onTabChange ? onTabChange("Voice") : undefined)}
+            compact
+          />
+          <MobileTabItem
+            icon={BarChart3}
+            label="Reports"
+            path="/fieldworker/reports"
+            active={activeTab ? activeTab === "Reports" : undefined}
+            onClick={() => (onTabChange ? onTabChange("Reports") : undefined)}
+            compact
+          />
+          <MobileTabItem
+            icon={Target}
+            label="Active"
+            path="/fieldworker/active"
+            active={activeTab ? activeTab === "Active" : undefined}
+            onClick={() => (onTabChange ? onTabChange("Active") : undefined)}
+            compact
+          />
+          <MobileTabItem
+            icon={UserCog}
+            label="Profile"
+            path="/fieldworker/profile"
+            active={activeTab ? activeTab === "Profile" : undefined}
+            onClick={() => (onTabChange ? onTabChange("Profile") : undefined)}
+            compact
+          />
+        </nav>
+      ) : (
+        <nav className="fixed bottom-0 left-0 right-0 h-16 bg-[#1E1B4B] border-t border-white/10 flex lg:hidden items-center justify-around z-50 px-2 shadow-2xl">
+          <MobileTabItem 
+            icon={LayoutDashboard} label="Home" path={role === "coordinator" ? "/dashboard" : "/volunteer"} 
+          />
+          <MobileTabItem 
+            icon={Target} label="Missions" path={role === "coordinator" ? "/dashboard/missions" : "/volunteer/missions"} 
+          />
+          <MobileTabItem 
+            icon={Sparkles} label="Nexus" path={role === "coordinator" ? "/dashboard/insights" : "/volunteer/empathy"} 
+          />
+          <MobileTabItem 
+            icon={BarChart3} label="Impact" path={role === "coordinator" ? "/dashboard/impact" : "/volunteer/impact"} 
+          />
+          <MobileTabItem 
+            icon={UserCog} label="Profile" path={role === "coordinator" ? "/dashboard/profile" : "/volunteer/profile"} 
+          />
+        </nav>
+      )}
     </>
   );
 }
 
-const MobileTabItem = ({ icon: Icon, label, path, active, onClick }: { icon: any, label: string, path: string, active?: boolean, onClick?: () => void }) => {
+const MobileTabItem = ({ icon: Icon, label, path, active, onClick, compact = false }: { icon: any, label: string, path: string, active?: boolean, onClick?: () => void, compact?: boolean }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const isActive = active !== undefined ? active : location.pathname === path;
@@ -366,12 +408,12 @@ const MobileTabItem = ({ icon: Icon, label, path, active, onClick }: { icon: any
         if (onClick) onClick();
         else navigate(path);
       }}
-      className={cn("flex flex-col items-center gap-1", isActive ? "text-[#4F46E5]" : "text-white/50")}
+      className={cn("flex flex-col items-center gap-1", compact ? "w-full justify-center py-1" : "", isActive ? "text-[#4F46E5]" : "text-white/50")}
     >
-      <div className={cn("p-1.5 rounded-lg", isActive && "bg-[#4F46E5]/10")}>
-        <Icon className="w-5 h-5" />
+        <div className={cn("p-1.5 rounded-lg", isActive && "bg-[#4F46E5]/10") }>
+          <Icon className={compact ? "w-4.5 h-4.5" : "w-5 h-5"} />
       </div>
-      {isActive && <span className="text-[10px] font-bold text-white">{label}</span>}
+        <span className={cn(compact ? "text-[9px]" : "text-[10px]", isActive ? "font-bold text-white" : "font-medium")}>{label}</span>
     </button>
   );
 }

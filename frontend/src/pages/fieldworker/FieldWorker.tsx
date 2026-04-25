@@ -35,6 +35,7 @@ import { ActiveMission } from "@/components/fieldworker/ActiveMission";
 import { FieldWorkerProfile } from "@/components/fieldworker/FieldWorkerProfile";
 import { GlobalSidebar } from "@/components/nexus/GlobalSidebar";
 import { useFieldworkerLiveTranslation } from "@/hooks/use-fieldworker-live-translation";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useSidebarStore } from "@/hooks/use-sidebar-store";
 import { motion } from "framer-motion";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -57,6 +58,7 @@ const formatTimeAgo = (dateString: string) => {
 
 const FieldWorker = () => {
     const translationContainerRef = useRef<HTMLDivElement | null>(null);
+  const isMobile = useIsMobile();
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -292,7 +294,7 @@ const FieldWorker = () => {
   };
 
   return (
-    <div ref={translationContainerRef} className="flex h-screen bg-[#F8F9FE] font-['Plus_Jakarta_Sans'] overflow-hidden text-[#1A1A3D]">
+    <div ref={translationContainerRef} className="flex min-h-screen bg-[#F8F9FE] font-['Plus_Jakarta_Sans'] overflow-x-hidden text-[#1A1A3D]">
       
       <GlobalSidebar 
         role="fieldworker" 
@@ -303,15 +305,15 @@ const FieldWorker = () => {
       {/* MAIN CONTENT */}
       <motion.main 
         initial={false}
-        animate={{ marginLeft: isOpen ? 64 : 0 }}
+        animate={{ marginLeft: isMobile ? 0 : isOpen ? 64 : 0 }}
         transition={{ type: "tween", duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
         className="flex-1 flex flex-col overflow-hidden pb-20 lg:pb-0"
       >
         
-        <header className="h-16 bg-white border-b border-slate-100 px-8 flex items-center justify-between shrink-0 z-10">
+        <header className="h-16 bg-white border-b border-slate-100 px-4 sm:px-6 lg:px-8 flex items-center justify-between shrink-0 z-10">
           <div className="flex items-center gap-3">
              <div className="w-1 h-6 bg-[#5A57FF] rounded-full" />
-             <h2 className="font-bold text-[#1A1A3D]">
+             <h2 className="font-bold text-[#1A1A3D] text-sm sm:text-base">
                 {activeTab === "Scan" ? "Scan Survey" : 
                  activeTab === "Voice" ? "Voice Feed" : 
                  activeTab === "Reports" ? "Intelligence History" :
@@ -334,7 +336,7 @@ const FieldWorker = () => {
         </header>
 
         <div className="flex-1 overflow-y-auto bg-[#F8F9FE]">
-          <div className="max-w-[1400px] mx-auto p-4 lg:p-10">
+          <div className="max-w-[1400px] mx-auto p-4 sm:p-6 lg:p-10">
             {activeTab === "Scan" ? (
               <ScanSurvey onGoToDashboard={() => setActiveTab("Dashboard")} />
             ) : activeTab === "Voice" ? (
@@ -351,15 +353,15 @@ const FieldWorker = () => {
                   
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
                      <div>
-                        <h1 className="text-[2.5rem] font-bold text-[#1A1A3D] tracking-tight leading-tight">
+                        <h1 className="text-3xl sm:text-4xl lg:text-[2.5rem] font-bold text-[#1A1A3D] tracking-tight leading-tight">
                           {greeting.text}, {firstName}
                         </h1>
-                        <p className="text-lg text-slate-500 mt-1 font-medium">
+                        <p className="text-sm sm:text-base lg:text-lg text-slate-500 mt-1 font-medium">
                           {stats.activeMissions} active mission{stats.activeMissions !== 1 ? 's' : ''} · {stats.pendingSyncs} pending sync{stats.pendingSyncs !== 1 ? 's' : ''} in {stats.zone}
                         </p>
                      </div>
                     <div className="flex items-center gap-4 w-full md:w-auto">
-                      <div data-no-translate="true" className="bg-white rounded-2xl border border-slate-100 p-3 shadow-sm min-w-[190px]">
+                      <div data-no-translate="true" className="bg-white rounded-2xl border border-slate-100 p-3 shadow-sm min-w-0 sm:min-w-[190px] w-full sm:w-auto">
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Language</p>
                         <Select value={uiLanguage} onValueChange={handleLanguageChange}>
                           <SelectTrigger className="h-10 rounded-xl border-slate-100 text-sm font-semibold">
@@ -373,7 +375,7 @@ const FieldWorker = () => {
                         </Select>
                         </div>
 
-                      <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm flex items-center gap-4">
+                      <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm flex items-center gap-4 w-full sm:w-auto">
                         <div className="text-right">
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Local Time</p>
                           <p className="text-lg font-bold text-[#1A1A3D]">{currentTime}</p>
@@ -392,16 +394,16 @@ const FieldWorker = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div 
                       onClick={() => setActiveTab("Scan")}
-                      className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-100 hover:border-[#5A57FF]/30 hover:shadow-xl hover:shadow-indigo-500/5 transition-all group cursor-pointer relative overflow-hidden"
+                      className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 shadow-sm border border-slate-100 hover:border-[#5A57FF]/30 hover:shadow-xl hover:shadow-indigo-500/5 transition-all group cursor-pointer relative overflow-hidden"
                     >
                       <div className="absolute top-0 right-0 p-6 opacity-0 group-hover:opacity-100 transition-opacity">
                          <Sparkles className="w-6 h-6 text-[#5A57FF]" />
                       </div>
-                      <div className="w-16 h-16 rounded-3xl bg-[#F3F2FF] flex items-center justify-center text-[#5A57FF] mb-8 group-hover:scale-110 transition-transform shadow-sm">
+                      <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-3xl bg-[#F3F2FF] flex items-center justify-center text-[#5A57FF] mb-6 sm:mb-8 group-hover:scale-110 transition-transform shadow-sm">
                         <Camera className="w-8 h-8" />
                       </div>
                       <div className="space-y-3 mb-8">
-                        <h4 className="text-2xl font-bold text-[#1A1A3D]">Scan Survey</h4>
+                        <h4 className="text-xl sm:text-2xl font-bold text-[#1A1A3D]">Scan Survey</h4>
                         <p className="text-sm text-slate-500 leading-relaxed font-medium">Digitize handwritten census forms instantly using AI OCR. Supports Kannada & Hindi.</p>
                       </div>
                       <div className="flex justify-between items-center pt-6 border-t border-slate-50">
@@ -414,13 +416,13 @@ const FieldWorker = () => {
 
                     <div 
                        onClick={() => setActiveTab("Voice")}
-                       className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-100 hover:border-amber-200 hover:shadow-xl hover:shadow-amber-50 transition-all group cursor-pointer relative overflow-hidden"
+                       className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 shadow-sm border border-slate-100 hover:border-amber-200 hover:shadow-xl hover:shadow-amber-50 transition-all group cursor-pointer relative overflow-hidden"
                     >
-                  <div className="w-16 h-16 rounded-3xl bg-amber-50 flex items-center justify-center text-amber-500 mb-8 group-hover:scale-110 transition-transform shadow-sm">
+                  <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-3xl bg-amber-50 flex items-center justify-center text-amber-500 mb-6 sm:mb-8 group-hover:scale-110 transition-transform shadow-sm">
                     <Mic className="w-8 h-8" />
                   </div>
                   <div className="space-y-3 mb-8">
-                    <h4 className="text-2xl font-bold text-[#1A1A3D]">Voice Memo</h4>
+                    <h4 className="text-xl sm:text-2xl font-bold text-[#1A1A3D]">Voice Memo</h4>
                     <p className="text-sm text-slate-500 leading-relaxed font-medium">Record field insights in any tone. Nexus auto-transcribes and categorizes impact data.</p>
                   </div>
                    <div className="flex justify-between items-center pt-6 border-t border-slate-50">
@@ -432,13 +434,13 @@ const FieldWorker = () => {
                 </div>
               </div>
 
-              <div className="bg-white rounded-[2.5rem] p-10 shadow-sm border border-slate-100 min-h-[460px]">
-                <div className="flex items-center justify-between mb-10">
+                <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 lg:p-10 shadow-sm border border-slate-100 min-h-0">
+                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 sm:mb-10">
                    <div>
-                      <h3 className="text-2xl font-bold text-[#1A1A3D]">Operations Log</h3>
+                     <h3 className="text-xl sm:text-2xl font-bold text-[#1A1A3D]">Operations Log</h3>
                       <p className="text-sm text-slate-400 font-medium mt-1">Your recent field submissions and status</p>
                    </div>
-                   <button onClick={() => setActiveTab("Reports")} className="text-[11px] font-black uppercase tracking-widest text-[#5A57FF] px-6 py-2 rounded-xl bg-[#F3F2FF] hover:bg-[#E0E7FF] transition-colors">History</button>
+                   <button onClick={() => setActiveTab("Reports")} className="text-[11px] font-black uppercase tracking-widest text-[#5A57FF] px-5 py-2 rounded-xl bg-[#F3F2FF] hover:bg-[#E0E7FF] transition-colors self-start sm:self-auto">History</button>
                 </div>
                 
                 <div className="overflow-x-auto">
@@ -500,9 +502,9 @@ const FieldWorker = () => {
               </div>
             </div>
 
-            <aside className="w-full lg:w-[340px] space-y-8">
+            <aside className="w-full lg:w-[340px] space-y-6 lg:space-y-8">
                
-               <div className="bg-gradient-to-br from-[#4F46E5] to-[#3730A3] rounded-[2.5rem] p-8 text-white shadow-xl overflow-hidden relative group">
+              <div className="bg-gradient-to-br from-[#4F46E5] to-[#3730A3] rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 text-white shadow-xl overflow-hidden relative group">
                   <div className="relative z-10 space-y-6">
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60">Session Contribution</p>
                     <div>
@@ -527,7 +529,7 @@ const FieldWorker = () => {
 
                <div 
                  onClick={() => setActiveTab("Active")}
-                 className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-100 space-y-6 relative overflow-hidden group cursor-pointer"
+                 className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 shadow-sm border border-slate-100 space-y-6 relative overflow-hidden group cursor-pointer"
                >
                   <div className="flex items-center justify-between">
                      <div className="space-y-1">
@@ -596,7 +598,7 @@ const FieldWorker = () => {
                   </div>
                </div>
 
-               <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-100">
+              <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 shadow-sm border border-slate-100">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Device Health</p>
                   
                   <div className="space-y-6">

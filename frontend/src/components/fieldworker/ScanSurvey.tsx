@@ -630,24 +630,24 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
           <input type="file" id="survey-upload" className="hidden" accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf" onChange={handleFileChange} />
         </div>
 
-        <div className="flex items-center justify-between px-2">
-           <div className="flex gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-1 sm:px-2">
+           <div className="flex w-full sm:w-auto gap-3 sm:gap-4">
               <Button 
                 variant="outline" 
-                className="h-12 px-6 rounded-2xl border-slate-200 font-bold text-slate-600 gap-2 hover:bg-slate-50 transition-all"
+                className="h-12 flex-1 sm:flex-none px-4 sm:px-6 rounded-2xl border-slate-200 font-bold text-slate-600 gap-2 hover:bg-slate-50 transition-all"
                 onClick={() => document.getElementById('survey-upload')?.click()}
               >
                   <Upload className="w-4 h-4" /> Upload File
               </Button>
               <Button 
-                className="h-12 px-6 rounded-2xl bg-[#5A57FF] hover:bg-[#4845E0] font-bold gap-2 shadow-lg shadow-indigo-100 transition-all"
+                className="h-12 flex-1 sm:flex-none px-4 sm:px-6 rounded-2xl bg-[#5A57FF] hover:bg-[#4845E0] font-bold gap-2 shadow-lg shadow-indigo-100 transition-all"
                 onClick={() => document.getElementById('survey-upload')?.click()}
               >
                  <Camera className="w-4 h-4" /> Use Camera
               </Button>
            </div>
            <button 
-             className="text-slate-400 font-bold text-sm hover:text-red-500 transition-colors"
+             className="ml-auto text-slate-400 font-bold text-sm hover:text-red-500 transition-colors"
              onClick={() => { setImage(null); setStep("idle"); setProgress(0); setSelectedFileName(""); }}
            >
              Clear
@@ -957,12 +957,12 @@ export const ScanSurvey = ({ onGoToDashboard }: { onGoToDashboard: () => void })
                     />
                  </div>
 
-                 <div className="grid grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                     <div className="space-y-2">
                        <Label className="text-xs font-bold text-slate-500">Data Source</Label>
-                       <div className="flex items-center gap-2 bg-[#F3F2FF] px-4 h-12 rounded-xl border border-indigo-100">
-                          <Badge className="bg-[#5A57FF] text-white border-none py-1 h-6">Paper Survey</Badge>
-                          <span className="text-[10px] font-bold text-[#5A57FF] uppercase tracking-widest">Auto-detected</span>
+                      <div className="flex flex-wrap items-center gap-2 bg-[#F3F2FF] px-3 sm:px-4 py-2 min-h-12 rounded-xl border border-indigo-100">
+                        <Badge className="bg-[#5A57FF] text-white border-none py-1 h-6 text-[11px] whitespace-nowrap">Paper Survey</Badge>
+                        <span className="text-[10px] font-bold text-[#5A57FF] uppercase tracking-wide sm:tracking-widest whitespace-nowrap">Auto-detected</span>
                        </div>
                     </div>
                     <div className="space-y-2">

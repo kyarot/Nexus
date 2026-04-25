@@ -77,6 +77,7 @@ export const FieldWorkerProfile = () => {
     const [isSavingLanguages, setIsSavingLanguages] = useState(false);
       const [isEditingProfile, setIsEditingProfile] = useState(false);
       const [isSavingProfile, setIsSavingProfile] = useState(false);
+         const [profileNameDraft, setProfileNameDraft] = useState("");
       const [profilePhoneDraft, setProfilePhoneDraft] = useState("");
     const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
     const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -117,6 +118,8 @@ export const FieldWorkerProfile = () => {
             if (!response.ok) {
                return;
             }
+
+            const data = await response.json();
 
             setProfileNameDraft(String(data?.name || ""));
             setProfilePhoneDraft(String(data?.phone || ""));
