@@ -12,10 +12,19 @@ VERTEX_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
 
 def _load_vertex_credentials():
-    candidate_paths = [settings.GCP_SERVICE_ACCOUNT_PATH, settings.FIREBASE_SERVICE_ACCOUNT_PATH]
-    for path in candidate_paths:
-        if path and str(path).strip():
-            return service_account.Credentials.from_service_account_file(str(path), scopes=[VERTEX_SCOPE])
+    # Try GCP first, then fall back to Firebase
+    gcp_creds = settings.get_gcp_credentials()
+    if gcp_creds:
+        if isinstance(gcp_creds, dict):
+            return service_account.Credentials.from_service_account_info(gcp_creds, scopes=[VERTEX_SCOPE])
+        return service_account.Credentials.from_service_account_file(str(gcp_creds), scopes=[VERTEX_SCOPE])
+    
+    fb_creds = settings.get_firebase_credentials()
+    if fb_creds:
+        if isinstance(fb_creds, dict):
+            return service_account.Credentials.from_service_account_info(fb_creds, scopes=[VERTEX_SCOPE])
+        return service_account.Credentials.from_service_account_file(str(fb_creds), scopes=[VERTEX_SCOPE])
+    
     return None
 
 

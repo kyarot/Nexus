@@ -5,12 +5,14 @@ from google.cloud import storage
 from core.config import settings
 
 
-if settings.GCP_SERVICE_ACCOUNT_PATH:
-	storage_client = storage.Client.from_service_account_json(
-		settings.GCP_SERVICE_ACCOUNT_PATH
-	)
+gcp_creds = settings.get_gcp_credentials()
+if gcp_creds:
+    if isinstance(gcp_creds, dict):
+        storage_client = storage.Client.from_service_account_info(gcp_creds)
+    else:
+        storage_client = storage.Client.from_service_account_json(gcp_creds)
 else:
-	storage_client = storage.Client()
+    storage_client = storage.Client()
 
 bucket = None
 if settings.GCS_BUCKET_NAME and settings.GCS_BUCKET_NAME.strip():

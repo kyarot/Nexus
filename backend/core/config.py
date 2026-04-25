@@ -29,6 +29,31 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRES_MINUTES: int = 1440
 
+    def get_firebase_credentials(self) -> dict | str:
+        import json
+        import os
+        # Check if the path is actually a JSON string
+        path = self.FIREBASE_SERVICE_ACCOUNT_PATH
+        if path.strip().startswith("{"):
+            try:
+                return json.loads(path)
+            except json.JSONDecodeError:
+                pass
+        return path
+
+    def get_gcp_credentials(self) -> dict | str | None:
+        import json
+        import os
+        path = self.GCP_SERVICE_ACCOUNT_PATH
+        if not path:
+            return None
+        if path.strip().startswith("{"):
+            try:
+                return json.loads(path)
+            except json.JSONDecodeError:
+                pass
+        return path
+
     COPILOT_PLANNER_ENABLED: bool = True
     COPILOT_CACHE_ENABLED: bool = True
     COPILOT_CACHE_TTL_SECONDS: int = 45

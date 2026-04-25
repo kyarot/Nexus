@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "@/lib/config";
 import React, { useRef, useState, useEffect } from "react";
 import { 
   Bell, 
@@ -131,7 +132,7 @@ const FieldWorker = () => {
     window.open(mapsUrl, "_blank", "noopener,noreferrer");
   };
 
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const apiBaseUrl = API_BASE_URL;
   const token = localStorage.getItem("nexus_access_token");
 
   useFieldworkerLiveTranslation({

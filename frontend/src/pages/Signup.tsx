@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "@/lib/config";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Building2, ClipboardList, Heart, Eye, EyeOff, Hexagon } from "lucide-react";
@@ -58,7 +59,7 @@ export default function Signup() {
   const [loadingNgos, setLoadingNgos] = useState(false);
   const faceVideoRef = useRef<HTMLVideoElement | null>(null);
   const faceCameraStreamRef = useRef<MediaStream | null>(null);
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const apiBaseUrl = API_BASE_URL;
 
   const zones = zoneInput.split(",").map((v) => v.trim()).filter(Boolean);
   const additionalLanguages = additionalLanguagesInput.split(",").map((v) => v.trim()).filter(Boolean);

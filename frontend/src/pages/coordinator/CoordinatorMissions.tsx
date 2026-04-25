@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "@/lib/config";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardTopBar } from "@/components/nexus/DashboardTopBar";
 import { MissionResponderLiveMap } from "@/components/coordinator/MissionResponderLiveMap";
@@ -153,7 +154,7 @@ const CoordinatorMissions = () => {
   const sseRefetchTimerRef = useRef<number | null>(null);
   const token = localStorage.getItem("nexus_access_token");
   const isOnline = useOnlineStatus();
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const apiBaseUrl = API_BASE_URL;
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 

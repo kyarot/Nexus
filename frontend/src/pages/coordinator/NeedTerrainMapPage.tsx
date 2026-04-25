@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "@/lib/config";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Download, X, Users, Zap } from "lucide-react";
@@ -27,7 +28,7 @@ export default function NeedTerrainMapPage() {
   const [opacity, setOpacity] = useState([70]);
 
   const token = localStorage.getItem("nexus_access_token");
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const apiBaseUrl = API_BASE_URL;
   const isOnline = useOnlineStatus();
 
   const terrainSnapshotQuery = useQuery({

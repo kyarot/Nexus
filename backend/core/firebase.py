@@ -7,7 +7,11 @@ from core.config import settings
 
 
 if not firebase_admin._apps:
-    firebase_credential = credentials.Certificate(settings.FIREBASE_SERVICE_ACCOUNT_PATH)
+    creds = settings.get_firebase_credentials()
+    if isinstance(creds, dict):
+        firebase_credential = credentials.Certificate(creds)
+    else:
+        firebase_credential = credentials.Certificate(creds)
     firebase_options: dict[str, str] = {}
     if settings.FIREBASE_DATABASE_URL:
         firebase_options["databaseURL"] = settings.FIREBASE_DATABASE_URL

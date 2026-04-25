@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "@/lib/config";
 import { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -57,7 +58,7 @@ const missionStatusToChip = (status?: CoordinatorMission["status"]) => {
 
 export default function Dashboard() {
   const token = localStorage.getItem("nexus_access_token");
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const apiBaseUrl = API_BASE_URL;
   const isOnline = useOnlineStatus();
 
   const dashboardQuery = useQuery({
