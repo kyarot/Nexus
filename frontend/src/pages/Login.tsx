@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Hexagon, Building2, ClipboardList, Heart, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NeedTerrainMap } from "@/components/coordinator/NeedTerrainMap";
 import { cn } from "@/lib/utils";
+import {
+  FACE_MATCH_THRESHOLD,
+  detectFaceDescriptor,
+  findBestFaceMatch,
+  loadFaceModels,
+  startCamera,
+  stopCamera,
+  type FaceCandidate,
+} from "@/lib/face-auth";
 
 const roles = [
   { id: "coordinator", label: "NGO Coordinator", icon: Building2, desc: "Manage operations" },
@@ -20,8 +29,23 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [faceModelsReady, setFaceModelsReady] = useState(false);
+  const [faceStatusMessage, setFaceStatusMessage] = useState("Loading face login models...");
+  const [faceErrorMessage, setFaceErrorMessage] = useState("");
+  const [faceAttempts, setFaceAttempts] = useState(0);
+  const [faceLocked, setFaceLocked] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const faceScanBusyRef = useRef(false);
   const navigate = useNavigate();
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+
+  const completeSignin = (payload: { accessToken: string; user: unknown; redirectPath?: string }) => {
+    localStorage.setItem("nexus_access_token", payload.accessToken);
+    localStorage.setItem("nexus_user", JSON.stringify(payload.user));
+    navigate(payload.redirectPath || "/dashboard");
+  };
 
   const handleLogin = async () => {
     setErrorMessage("");
@@ -42,9 +66,7 @@ export default function Login() {
         throw new Error(payload?.detail || "Sign in failed");
       }
 
-      localStorage.setItem("nexus_access_token", payload.accessToken);
-      localStorage.setItem("nexus_user", JSON.stringify(payload.user));
-      navigate(payload.redirectPath || "/dashboard");
+      completeSignin(payload);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unexpected sign-in error";
       console.error("[Auth] Signin failed", error);
@@ -53,6 +75,174 @@ export default function Login() {
       setIsSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    let active = true;
+
+    const initializeFaceModels = async () => {
+      try {
+        await loadFaceModels("/models");
+        if (!active) {
+          return;
+        }
+        setFaceModelsReady(true);
+        setFaceStatusMessage("Camera is starting. Align your face in the guide.");
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        console.error("[FaceAuth] Model load failed", error);
+        setFaceErrorMessage("Face login unavailable right now. Please use email and password.");
+        setFaceStatusMessage("Face login models failed to load.");
+      }
+    };
+
+    void initializeFaceModels();
+
+    return () => {
+      active = false;
+      stopCamera(cameraStreamRef.current);
+      cameraStreamRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    setFaceAttempts(0);
+    setFaceLocked(false);
+    setFaceErrorMessage("");
+    if (faceModelsReady) {
+      setFaceStatusMessage("Role selected. Scanning for your face...");
+    }
+  }, [selectedRole, faceModelsReady]);
+
+  useEffect(() => {
+    if (!faceModelsReady || faceLocked) {
+      setCameraReady(false);
+      stopCamera(cameraStreamRef.current);
+      cameraStreamRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    const openCamera = async () => {
+      const video = videoRef.current;
+      if (!video) {
+        return;
+      }
+
+      stopCamera(cameraStreamRef.current);
+      cameraStreamRef.current = null;
+      setCameraReady(false);
+
+      try {
+        const stream = await startCamera(video);
+        if (cancelled) {
+          stopCamera(stream);
+          return;
+        }
+        cameraStreamRef.current = stream;
+        setCameraReady(true);
+        setFaceStatusMessage("Face camera ready. Verifying...");
+      } catch (error) {
+        console.error("[FaceAuth] Camera start failed", error);
+        if (!cancelled) {
+          setFaceErrorMessage("Camera access was denied. You can still sign in with email and password.");
+          setFaceStatusMessage("Camera unavailable.");
+        }
+      }
+    };
+
+    void openCamera();
+
+    return () => {
+      cancelled = true;
+      setCameraReady(false);
+      stopCamera(cameraStreamRef.current);
+      cameraStreamRef.current = null;
+    };
+  }, [faceLocked, faceModelsReady, selectedRole]);
+
+  useEffect(() => {
+    if (!faceModelsReady || !cameraReady || faceLocked) {
+      return;
+    }
+
+    const intervalId = window.setInterval(async () => {
+      if (faceScanBusyRef.current || faceLocked || isSubmitting) {
+        return;
+      }
+
+      const video = videoRef.current;
+      if (!video) {
+        return;
+      }
+
+      faceScanBusyRef.current = true;
+      try {
+        const liveDescriptor = await detectFaceDescriptor(video);
+        if (!liveDescriptor) {
+          setFaceStatusMessage("Face not detected. Keep your face inside the guide.");
+          return;
+        }
+
+        setFaceStatusMessage("Face detected. Checking match...");
+
+        const candidatesResponse = await fetch(`${apiBaseUrl}/auth/face/candidates`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: selectedRole }),
+        });
+
+        const candidatesPayload = await candidatesResponse.json();
+        if (!candidatesResponse.ok) {
+          throw new Error(candidatesPayload?.detail || "Unable to validate face");
+        }
+
+        const candidates = (Array.isArray(candidatesPayload?.candidates) ? candidatesPayload.candidates : []) as FaceCandidate[];
+        const bestMatch = findBestFaceMatch(liveDescriptor, candidates, FACE_MATCH_THRESHOLD);
+
+        if (!bestMatch) {
+          setFaceAttempts((prev) => {
+            const next = prev + 1;
+            if (next >= 3) {
+              setFaceLocked(true);
+              setFaceStatusMessage("No face match after 3 tries. Please use email and password below.");
+            } else {
+              setFaceStatusMessage(`No match yet. Attempt ${next} of 3.`);
+            }
+            return next;
+          });
+          return;
+        }
+
+        setIsSubmitting(true);
+        setFaceStatusMessage("Match found. Signing you in...");
+        const signinResponse = await fetch(`${apiBaseUrl}/auth/face/signin`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: bestMatch.id, role: selectedRole }),
+        });
+        const signinPayload = await signinResponse.json();
+
+        if (!signinResponse.ok) {
+          throw new Error(signinPayload?.detail || "Face sign-in failed");
+        }
+
+        completeSignin(signinPayload);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Face sign-in failed";
+        console.error("[FaceAuth] Face sign-in failed", error);
+        setFaceErrorMessage(message);
+      } finally {
+        setIsSubmitting(false);
+        faceScanBusyRef.current = false;
+      }
+    }, 1800);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [apiBaseUrl, cameraReady, faceLocked, faceModelsReady, isSubmitting, selectedRole]);
 
   return (
     <div className="flex min-h-screen">
@@ -120,8 +310,40 @@ export default function Login() {
             ))}
           </div>
 
+          <div className="mt-6 rounded-card border border-border bg-card p-4">
+            <p className="text-sm font-semibold text-foreground">Face Login</p>
+            <p className="mt-1 text-xs text-muted-foreground">Primary sign-in option for your selected role.</p>
+
+            <div className="relative mt-3 aspect-video overflow-hidden rounded-xl border border-border bg-[#0b1020]">
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                playsInline
+                className="h-full w-full object-cover"
+              />
+
+              <div className={cn("pointer-events-none absolute inset-0 flex items-center justify-center", cameraReady ? "opacity-100" : "opacity-40")}>
+                <div className="h-[190px] w-[140px] rounded-[999px] border-2 border-cyan-200/80 animate-pulse" />
+              </div>
+              <div className="pointer-events-none absolute inset-x-10 top-1/2 h-px -translate-y-1/2 bg-cyan-200/70 animate-pulse" />
+            </div>
+
+            <p className="mt-3 text-xs text-foreground">{faceStatusMessage}</p>
+            {faceAttempts > 0 && !faceLocked ? (
+              <p className="mt-1 text-xs text-muted-foreground">Attempt {faceAttempts} of 3.</p>
+            ) : null}
+            {faceErrorMessage ? <p className="mt-2 text-xs text-destructive">{faceErrorMessage}</p> : null}
+          </div>
+
+          <div className="my-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">or</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
           {/* Form */}
-          <div className="mt-6 space-y-4">
+          <div className="space-y-4">
             <div>
               <Label>Email</Label>
               <Input

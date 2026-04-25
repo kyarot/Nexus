@@ -120,11 +120,17 @@ class CoordinatorReadLayer:
     def get_missions(self, status_filter: str = "all", zone_id: str = "") -> list[dict[str, Any]]:
         docs = db.collection("missions").where(filter=FieldFilter("ngoId", "==", self.ngo_id)).stream()
         missions: list[dict[str, Any]] = []
+        normalized_filter = self._safe_str(status_filter or "all", "all").lower()
+        active_statuses = {"dispatched", "en_route", "on_ground"}
         for doc in docs:
             data = doc.to_dict() or {}
             status = self._safe_str(data.get("status") or "pending", "pending").lower()
-            if status_filter and status_filter != "all" and status != status_filter:
-                continue
+            if normalized_filter and normalized_filter != "all":
+                if normalized_filter in {"active", "ongoing"}:
+                    if status not in active_statuses:
+                        continue
+                elif status != normalized_filter:
+                    continue
             if zone_id and self._safe_str(data.get("zoneId")) != zone_id:
                 continue
             missions.append(
@@ -152,53 +158,104 @@ class CoordinatorReadLayer:
         return missions
 
     def get_volunteers(self, search: str = "") -> list[dict[str, Any]]:
+        return self.get_responders(role="volunteer", search=search)
+
+    def get_responders(self, role: str = "volunteer", search: str = "") -> list[dict[str, Any]]:
+        role_value = self._safe_str(role or "volunteer", "volunteer").lower()
         docs = (
             db.collection("users")
             .where(filter=FieldFilter("ngoId", "==", self.ngo_id))
-            .where(filter=FieldFilter("role", "==", "volunteer"))
+            .where(filter=FieldFilter("role", "==", role_value))
             .stream()
         )
 
         ngo_name = self.get_ngo_name()
         q = self._safe_str(search).lower()
-        volunteers: list[dict[str, Any]] = []
+        responders: list[dict[str, Any]] = []
         for doc in docs:
             data = doc.to_dict() or {}
-            name = self._safe_str(data.get("name") or "Volunteer", "Volunteer")
+            name = self._safe_str(data.get("name") or "Responder", "Responder")
             skills = [str(skill).strip() for skill in (data.get("skills") or []) if str(skill).strip()]
             availability = self._safe_str(data.get("availability") or "available")
             if q and q not in name.lower() and q not in availability.lower() and q not in " ".join(skill.lower() for skill in skills):
                 continue
+            responders.append(self._format_responder(doc.id, data, ngo_name, role_value))
 
-            missions_completed = self._safe_int(data.get("missionsCompleted"), 0)
-            success_rate = self._safe_int(data.get("successRate"), min(99, 70 + len(skills) * 4))
-            burnout = self._safe_str(data.get("burnoutRisk") or "low", "low").lower()
-            distance_km = self._safe_float(data.get("travelRadius") or 3.0, 3.0)
-            match_percent = min(99, 60 + len(skills) * 4 + (10 if availability in {"available", "online"} else 0) + (8 if missions_completed else 0) - (8 if burnout == "high" else 0))
+        responders.sort(key=lambda item: (item["matchPercent"], item["successRate"]), reverse=True)
+        return responders
 
-            volunteers.append(
-                {
-                    "id": doc.id,
-                    "name": name,
-                    "initials": "".join([part[0] for part in name.split()[:2]]).upper() or "NA",
-                    "org": ngo_name,
-                    "matchPercent": match_percent,
-                    "distance": f"{distance_km:.1f} km",
-                    "distanceKm": distance_km,
-                    "skills": skills,
-                    "burnout": burnout if burnout in {"low", "medium", "high"} else "low",
-                    "missions": missions_completed,
-                    "successRate": success_rate,
-                    "color": ["bg-primary", "bg-success", "bg-warning", "bg-primary-glow", "bg-destructive"][sum(ord(ch) for ch in doc.id) % 5],
-                    "availability": availability,
-                    "availableNow": availability in {"available", "online"},
-                    "activeMissionCount": 0,
-                    "hasThisWeekActivity": bool(missions_completed),
-                }
-            )
+    def _format_responder(self, responder_id: str, data: dict[str, Any], ngo_name: str, role_value: str) -> dict[str, Any]:
+        name = self._safe_str(data.get("name") or "Responder", "Responder")
+        skills = [str(skill).strip() for skill in (data.get("skills") or []) if str(skill).strip()]
+        availability = self._safe_str(data.get("availability") or "available")
+        missions_completed = self._safe_int(data.get("missionsCompleted"), 0)
+        success_rate = self._safe_int(data.get("successRate"), min(99, 70 + len(skills) * 4))
+        burnout = self._safe_str(data.get("burnoutRisk") or "low", "low").lower()
+        distance_km = self._safe_float(data.get("travelRadius") or 3.0, 3.0)
+        match_percent = min(
+            99,
+            60
+            + len(skills) * 4
+            + (10 if availability in {"available", "online"} else 0)
+            + (8 if missions_completed else 0)
+            - (8 if burnout == "high" else 0),
+        )
 
-        volunteers.sort(key=lambda item: (item["matchPercent"], item["successRate"]), reverse=True)
-        return volunteers
+        return {
+            "id": responder_id,
+            "name": name,
+            "initials": "".join([part[0] for part in name.split()[:2]]).upper() or "NA",
+            "org": ngo_name,
+            "matchPercent": match_percent,
+            "distance": f"{distance_km:.1f} km",
+            "distanceKm": distance_km,
+            "skills": skills,
+            "burnout": burnout if burnout in {"low", "medium", "high"} else "low",
+            "missions": missions_completed,
+            "successRate": success_rate,
+            "color": ["bg-primary", "bg-success", "bg-warning", "bg-primary-glow", "bg-destructive"][sum(ord(ch) for ch in responder_id) % 5],
+            "availability": availability,
+            "availableNow": availability in {"available", "online"},
+            "activeMissionCount": 0,
+            "hasThisWeekActivity": bool(missions_completed),
+            "role": role_value,
+        }
+
+    def get_volunteer_detail(self, volunteer_id: str = "", name: str = "") -> list[dict[str, Any]]:
+        if volunteer_id:
+            snapshot = db.collection("users").document(volunteer_id).get()
+            if not snapshot.exists:
+                return []
+            data = snapshot.to_dict() or {}
+            if str(data.get("ngoId") or "") != self.ngo_id:
+                return []
+            ngo_name = self.get_ngo_name()
+            role_value = self._safe_str(data.get("role") or "volunteer", "volunteer").lower()
+            return [self._format_responder(volunteer_id, data, ngo_name, role_value)]
+
+        needle = self._safe_str(name).lower()
+        if not needle:
+            return []
+        volunteers = self.get_volunteers(search=needle)
+        return [vol for vol in volunteers if needle in str(vol.get("name") or "").lower()]
+
+    def get_mission_detail(self, mission_id: str = "", title: str = "") -> list[dict[str, Any]]:
+        if mission_id:
+            snapshot = db.collection("missions").document(mission_id).get()
+            if not snapshot.exists:
+                return []
+            data = snapshot.to_dict() or {}
+            if str(data.get("ngoId") or "") != self.ngo_id:
+                return []
+            data["id"] = mission_id
+            return [self._serialize_value(data)]
+
+        needle = self._safe_str(title).lower()
+        if not needle:
+            return []
+        missions = self.get_missions(status_filter="all")
+        matches = [mission for mission in missions if needle in str(mission.get("title") or "").lower()]
+        return matches
 
     def get_alerts(self, status_filter: str = "all", severity_filter: str = "all", zone_id: str = "") -> list[dict[str, Any]]:
         try:
@@ -601,3 +658,41 @@ class CoordinatorWriteLayer:
         )
         payload["id"] = doc_ref.id
         return payload
+
+    def update_mission(self, mission_id: str, status: str = "", priority: str = "", note: str = "") -> dict[str, Any]:
+        mission_ref = db.collection("missions").document(mission_id)
+        mission_snap = mission_ref.get()
+        if not mission_snap.exists:
+            raise ValueError("Mission not found")
+        mission_data = mission_snap.to_dict() or {}
+        if str(mission_data.get("ngoId") or "") != self.ngo_id:
+            raise PermissionError("Mission does not belong to your NGO")
+
+        status_value = str(status or "").strip().lower()
+        priority_value = str(priority or "").strip().lower()
+        if status_value and status_value not in {"pending", "dispatched", "en_route", "on_ground", "completed", "failed", "cancelled"}:
+            raise ValueError("Invalid mission status")
+        if priority_value and priority_value not in {"low", "medium", "high", "critical"}:
+            raise ValueError("Invalid mission priority")
+
+        update: dict[str, Any] = {"updatedAt": self._now()}
+        if status_value:
+            update["status"] = status_value
+            update["statusText"] = note or f"Status updated to {status_value}"
+            if status_value in {"completed", "failed", "cancelled"}:
+                update["completedAt"] = self._now()
+        if priority_value:
+            update["priority"] = priority_value
+
+        mission_ref.update(update)
+        mission_ref.collection("updates").add(
+            {
+                "type": "mission_update",
+                "status": status_value or mission_data.get("status"),
+                "priority": priority_value or mission_data.get("priority"),
+                "timestamp": self._now(),
+                "submittedBy": self.user_id,
+                "note": note,
+            }
+        )
+        return {"updated": True, "missionId": mission_id, "status": status_value, "priority": priority_value}

@@ -1,3 +1,5 @@
+import { fetchWithOutbox, type QueuedResult } from "@/lib/offline-outbox";
+
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
 const getAuthToken = () => localStorage.getItem("nexus_access_token");
@@ -18,7 +20,7 @@ const buildHeaders = (json = false) => {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const wantsJson = Boolean(init.body) && !(init.body instanceof FormData);
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const { response, queued } = await fetchWithOutbox(`${apiBaseUrl}${path}`, {
     ...init,
     headers: {
       ...buildHeaders(wantsJson),
@@ -26,11 +28,17 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     },
   });
 
-  const contentType = response.headers.get("content-type") || "";
-  const payload = contentType.includes("application/json") ? await response.json() : null;
+  if (queued) {
+    return queued as QueuedResult as T;
+  }
 
-  if (!response.ok) {
-    const message = payload?.detail || payload?.message || `Request failed with ${response.status}`;
+  const resolvedResponse = response as Response;
+
+  const contentType = resolvedResponse.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json") ? await resolvedResponse.json() : null;
+
+  if (!resolvedResponse.ok) {
+    const message = payload?.detail || payload?.message || `Request failed with ${resolvedResponse.status}`;
     throw new Error(message);
   }
 

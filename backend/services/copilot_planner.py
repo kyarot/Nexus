@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
+import re
 import time
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
-from core.gemini import GEMINI_FLASH, client
+from core.copilot_vertex import COPILOT_GEMINI_MODEL, get_copilot_vertex_client
+
+logger = logging.getLogger(__name__)
 
 
 class _FirestoreAwareJSONEncoder(json.JSONEncoder):
@@ -32,7 +36,9 @@ ALLOWED_TOOLS = {
     "zones",
     "terrain",
     "missions",
+    "mission_detail",
     "volunteers",
+    "volunteer_detail",
     "alerts",
     "inventory",
     "collaboration",
@@ -42,6 +48,10 @@ ALLOWED_TOOLS = {
     "approve_resource_request",
     "reject_resource_request",
     "add_volunteer",
+    "create_mission",
+    "update_mission",
+    "create_alerts",
+    "create_insights",
 }
 
 HEURISTIC_KEYWORDS: list[tuple[str, list[str]]] = [
@@ -50,7 +60,9 @@ HEURISTIC_KEYWORDS: list[tuple[str, list[str]]] = [
     ("zones", ["zone", "zones", "risk zone", "high risk", "high-risk", "risky"]),
     ("terrain", ["terrain", "map", "heatmap"]),
     ("missions", ["mission", "missions", "dispatch", "assign"]),
+    ("mission_detail", ["mission details", "details about mission", "mission info", "mission overview"]),
     ("volunteers", ["volunteer", "volunteers", "fieldworker", "responder", "coverage"]),
+    ("volunteer_detail", ["volunteer details", "details about volunteer", "volunteer info", "volunteer overview"]),
     ("alerts", ["alert", "alerts", "drift", "escalat", "critical"]),
     ("inventory", ["inventory", "warehouse", "stock", "supplies"]),
     ("resource_requests", ["resource request", "resource requests", "pending requests", "requests pending", "resource approvals"]),
@@ -63,6 +75,10 @@ ACTION_KEYWORDS: list[tuple[str, list[str]]] = [
     ("reject_resource_request", ["reject request", "reject resource", "reject resources", "reject requisition", "reject"]),
     ("dispatch_mission", ["dispatch mission", "assign mission", "send volunteer", "dispatch"]),
     ("add_volunteer", ["add volunteer", "create volunteer", "invite volunteer", "new volunteer"]),
+    ("create_mission", ["create mission", "created mission", "mission created", "new mission", "open mission", "start mission"]),
+    ("update_mission", ["update mission", "edit mission", "change mission", "set mission"]),
+    ("create_alerts", ["create alert", "trigger alert", "generate alert", "evaluate alerts"]),
+    ("create_insights", ["create insight", "generate insight", "synthesize insights", "refresh insights"]),
 ]
 
 CONVERSATION_KEYWORDS = [
@@ -87,7 +103,8 @@ You are an AI planner first:
 - Produce natural, professional, human-like responses.
 
 Scope and boundaries:
-- In scope: dashboard, insights, zones, terrain, missions, volunteers, alerts, inventory, resource requests, collaboration, settings.
+- In scope: dashboard, insights, zones, terrain, missions, mission details, volunteers, volunteer details, alerts, inventory, resource requests, collaboration, settings.
+- Allowed actions: create missions, update mission status/priority, assign volunteers, approve/reject resource requests, add volunteers, generate alerts/insights.
 - Out of scope: politely explain boundary and offer in-scope alternatives.
 - Never fabricate metrics or actions.
 - If context is ambiguous, ask one concise clarification question.
@@ -103,6 +120,7 @@ Special behaviors:
 - Clarifications should be one question only.
 - Suggestions must be contextual and actionable.
 - For actions, request explicit confirmation before executing.
+- Never claim an action is completed unless a confirmation step has executed.
 """.strip()
 
 
@@ -113,7 +131,9 @@ class ToolCall(BaseModel):
         "zones",
         "terrain",
         "missions",
+        "mission_detail",
         "volunteers",
+        "volunteer_detail",
         "alerts",
         "inventory",
         "collaboration",
@@ -123,6 +143,10 @@ class ToolCall(BaseModel):
         "approve_resource_request",
         "reject_resource_request",
         "add_volunteer",
+        "create_mission",
+        "update_mission",
+        "create_alerts",
+        "create_insights",
     ]
     args: dict[str, Any] = Field(default_factory=dict)
     reason: str = ""
@@ -181,6 +205,8 @@ def _detect_intent(query: str) -> Literal["data", "action", "conversation"]:
     normalized = " ".join(str(query or "").lower().split())
     if any(keyword in normalized for keyword in CONVERSATION_KEYWORDS):
         return "conversation"
+    if "mission" in normalized and any(term in normalized for term in ["create", "created", "make", "made", "start", "opened"]):
+        return "action"
     if any(keyword in normalized for _, keywords in ACTION_KEYWORDS for keyword in keywords):
         return "action"
     return "data"
@@ -190,17 +216,26 @@ def generate_text_with_retry(prompt: str, retry_policy: RetryPolicy | None = Non
     policy = retry_policy or RetryPolicy()
     for attempt in range(policy.retries + 1):
         try:
-            response = client.models.generate_content(
-                model=GEMINI_FLASH,
+            response = get_copilot_vertex_client().models.generate_content(
+                model=COPILOT_GEMINI_MODEL,
                 contents=[{"role": "user", "parts": [{"text": prompt}]}],
             )
             return " ".join(str(getattr(response, "text", "") or "").split()).strip()
         except Exception as exc:
+            exc_text = str(exc)
+            if "400" in exc_text or "invalid argument" in exc_text.lower():
+                logger.warning("Gemini bad request: %s", exc_text)
+                return ""
+            if "429" in exc_text or "resource_exhausted" in exc_text.lower():
+                logger.warning("Gemini/Vertex rate limited: %s", exc_text)
+            if "403" in exc_text or "permission" in exc_text.lower() or "unauthorized" in exc_text.lower():
+                logger.warning("Gemini/Vertex permission error: %s", exc_text)
             if attempt >= policy.retries:
+                logger.warning("Gemini/Vertex failed after retries: %s", exc_text)
                 return ""
             # Detect rate-limit or service errors that warrant backing off longer
-            is_rate_limited = "429" in str(exc) or "Too Many Requests" in str(exc)
-            is_service_error = "503" in str(exc) or "unavailable" in str(exc).lower()
+            is_rate_limited = "429" in exc_text or "Too Many Requests" in exc_text
+            is_service_error = "503" in exc_text or "unavailable" in exc_text.lower()
             
             if is_rate_limited or is_service_error:
                 # Back off much longer for rate limits and service errors
@@ -211,7 +246,7 @@ def generate_text_with_retry(prompt: str, retry_policy: RetryPolicy | None = Non
                 jitter = random.uniform(0.1, 0.3)
                 sleep_for = (policy.base_sleep * (2**attempt)) + jitter
             
-            time.sleep(sleep_for)
+                time.sleep(sleep_for)
     return ""
 
 
@@ -233,7 +268,7 @@ Return JSON only with this schema:
   "clarification_question": "",
   "out_of_scope": false,
   "tool_calls": [
-        {{ "tool": "dashboard|insights|zones|terrain|missions|volunteers|alerts|inventory|collaboration|settings|resource_requests|dispatch_mission|approve_resource_request|reject_resource_request|add_volunteer", "args": {{}}, "reason": "why" }}
+                {{ "tool": "dashboard|insights|zones|terrain|missions|mission_detail|volunteers|volunteer_detail|alerts|inventory|collaboration|settings|resource_requests|dispatch_mission|approve_resource_request|reject_resource_request|add_volunteer|create_mission|update_mission|create_alerts|create_insights", "args": {{}}, "reason": "why" }}
   ]
 }}
 
@@ -296,17 +331,16 @@ def _heuristic_plan(query: str) -> CopilotPlan:
             if any(keyword in normalized for keyword in keywords):
                 matched_tools.append(tool_name)
 
-        if matched_tools:
-            return CopilotPlan(
-                plan_summary=f"Action route for {', '.join(matched_tools[:2])}",
-                intent="action",
-                requires_clarification=False,
-                out_of_scope=False,
-                tool_calls=[ToolCall(tool=tool_name, args={}, reason="heuristic action routing") for tool_name in matched_tools[:2]],
-            )
+        if "mission" in normalized and any(term in normalized for term in ["create", "created", "make", "made", "start", "opened"]):
+            if "create_mission" not in matched_tools:
+                matched_tools.append("create_mission")
 
     for tool_name, keywords in HEURISTIC_KEYWORDS:
         if any(keyword in normalized for keyword in keywords):
+            if tool_name == "missions" and any(term in normalized for term in ["detail", "details", "info", "overview"]):
+                continue
+            if tool_name == "volunteers" and any(term in normalized for term in ["detail", "details", "info", "overview"]):
+                continue
             matched_tools.append(tool_name)
 
     if not matched_tools and intent == "conversation":
@@ -336,24 +370,73 @@ def _heuristic_plan(query: str) -> CopilotPlan:
             args["limit"] = 8
         if tool_name == "missions":
             if "active" in normalized or "ongoing" in normalized:
-                args["status"] = "dispatched"
+                args["status"] = "active"
+            elif "pending" in normalized:
+                args["status"] = "pending"
         if tool_name == "volunteers":
             if "available" in normalized:
                 args["search"] = "available"
         if tool_name == "alerts":
             if any(word in normalized for word in ["critical", "urgent", "severe"]):
                 args["severity"] = "critical"
+        if tool_name == "create_mission":
+            raw = str(query or "")
+            title_match = re.search(r"mission\s+['\"]([^'\"]+)['\"]", raw, flags=re.IGNORECASE)
+            if not title_match:
+                title_match = re.search(r"['\"]([^'\"]+)['\"]", raw)
+            if title_match:
+                args["title"] = title_match.group(1).strip()
+
+            zone_match = re.search(r"\bin\s+([a-zA-Z0-9\s-]+?)(?:\s+with|\s+for|\s+to|,|\.|$)", raw, flags=re.IGNORECASE)
+            if zone_match:
+                args["zoneName"] = zone_match.group(1).strip()
+
+            priority_match = re.search(r"\bpriority\s+(low|medium|high|critical)\b", normalized)
+            if not priority_match:
+                priority_match = re.search(r"\b(low|medium|high|critical)\s+priority\b", normalized)
+            if priority_match:
+                args["priority"] = priority_match.group(1)
+
+            audience_match = re.search(r"\b(target\s+audience|audience)\s+['\"]?(volunteer|fieldworker)['\"]?", normalized)
+            if audience_match:
+                args["targetAudience"] = audience_match.group(2)
+
+            need_match = re.search(r"\bneed\s+type\s+([a-zA-Z0-9\s-]+?)(?:\s+for|\s+in|,|\.|$)", normalized)
+            if need_match:
+                args["needType"] = need_match.group(1).strip()
+
+            assignee_match = re.search(r"\bassign(?:ed)?\s+([a-zA-Z][\w\s.-]+?)(?:\s+to|,|\.|$)", raw, flags=re.IGNORECASE)
+            if assignee_match:
+                args["assignedToName"] = assignee_match.group(1).strip()
+
+        if tool_name == "update_mission":
+            raw = str(query or "")
+            status_match = re.search(r"\bstatus\s+(pending|dispatched|en_route|on_ground|completed|failed|cancelled)\b", normalized)
+            if status_match:
+                args["status"] = status_match.group(1)
+            priority_match = re.search(r"\bpriority\s+(low|medium|high|critical)\b", normalized)
+            if priority_match:
+                args["priority"] = priority_match.group(1)
+            title_match = re.search(r"mission\s+['\"]([^'\"]+)['\"]", raw, flags=re.IGNORECASE)
+            if title_match:
+                args["title"] = title_match.group(1).strip()
         tool_calls.append(ToolCall(tool=tool_name, args=args, reason="heuristic in-scope routing"))
 
-    if "show" in normalized or "open" in normalized or "give" in normalized or "display" in normalized:
+    if intent == "action":
+        summary = f"Action route for {', '.join(matched_tools[:3])}"
+    elif "show" in normalized or "open" in normalized or "give" in normalized or "display" in normalized:
         summary = f"Heuristic route for {', '.join(matched_tools[:3])}"
     else:
         summary = f"Heuristic in-scope route for {', '.join(matched_tools[:3])}"
 
-    return CopilotPlan(plan_summary=summary, intent="data", tool_calls=tool_calls, out_of_scope=False)
+    return CopilotPlan(plan_summary=summary, intent=intent, tool_calls=tool_calls, out_of_scope=False)
 
 
 def generate_plan(query: str, memory: list[dict[str, str]]) -> PlannerResult:
+    heuristic = _heuristic_plan(query)
+    if heuristic.intent == "action" and heuristic.tool_calls:
+        return PlannerResult(plan=heuristic, raw_text="", degraded=True)
+
     now_iso = datetime.utcnow().isoformat()
     prompt = build_planner_prompt(query=query, memory=memory, now_iso=now_iso)
     raw = generate_text_with_retry(prompt)
@@ -370,6 +453,8 @@ def generate_plan(query: str, memory: list[dict[str, str]]) -> PlannerResult:
             plan.intent = _detect_intent(query)
 
         heuristic = _heuristic_plan(query)
+        if heuristic.intent == "action" and plan.intent != "action":
+            plan = heuristic
         if heuristic.tool_calls and (plan.out_of_scope or not plan.tool_calls):
             # Prefer a deterministic in-scope route when the model rejects an obviously in-scope request.
             if not plan.requires_clarification:

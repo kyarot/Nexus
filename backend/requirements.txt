@@ -5,6 +5,7 @@ python-dotenv
 firebase-admin
 google-genai
 google-cloud-storage
+google-cloud-speech
 google-cloud-translate
 python-jose[cryptography]
 python-multipart
