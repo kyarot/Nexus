@@ -187,6 +187,8 @@ export interface CoordinatorTerrainZone {
   lng: number;
   riskLevel: CoordinatorZone["riskLevel"];
   currentScore: number;
+  forecastScore: number;
+  forecastConfidence: number;
   trendDirection: "up" | "down" | "stable";
   terrainConfidence: number;
   reportVolume7d: number;
