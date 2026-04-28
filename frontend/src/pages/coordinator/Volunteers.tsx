@@ -250,7 +250,7 @@ export default function Volunteers() {
                 <button onClick={() => setView("list")} className={cn("p-2", view === "list" ? "bg-primary text-white" : "text-muted-foreground")}><List className="h-4 w-4" /></button>
               </div>
               <Button variant="gradient" size="sm" onClick={() => setIsAddVolunteerOpen(true)}>Add Volunteer</Button>
-              <Button variant="gradient" size="sm" className="hidden sm:flex">Add Volunteer</Button>
+             
             </div>
           </div>
 
