@@ -5,6 +5,7 @@ node_modules
 # Local docs
 NEXUS_Backend_Implementation_Plan.docx
 NEXUS_Backend_Implementation.pdf
+frontend/public/NEXUS_Backend_Implementation.pdf
 
 # Environment files
 .env
