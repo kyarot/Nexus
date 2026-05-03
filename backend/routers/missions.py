@@ -721,7 +721,7 @@ async def get_mission_candidates(
         user_data["id"] = doc.id
         if str(user_data.get("availability") or "available").lower() not in {"available", "online"}:
             continue
-        user_distance_km = _distance_to_zone_km(user_data, zone)
+        user_distance_km = location_distance_to_zone_km(user_data, zone)
         zone_radius_km = max(0.1, float(zone.radiusMeters or 1000) / 1000.0)
         if user_distance_km is not None and user_distance_km > zone_radius_km:
             continue
